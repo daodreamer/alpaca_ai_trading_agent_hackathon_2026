@@ -1,0 +1,50 @@
+strategy:
+  entry: rvol(20) > 1.5 and close > highest(20) * 0.99 and atr_pct(14) < 0.02
+  direction: long
+  regime: close > ema(200) and slope(20) > 0
+  max_positions: 3
+  universe:
+    symbols:
+    - AAPL
+    - AMD
+    - AMZN
+    - ASML
+    - AVGO
+    - AZN
+    - COST
+    - CSCO
+    - GOOGL
+    - INTU
+    - LIN
+    - META
+    - MSFT
+    - NFLX
+    - NVDA
+    - PEP
+    - TMUS
+    - TSLA
+    - TXN
+    timeframe: 1D
+  exit:
+    stop_loss:
+      type: atr
+      multiplier: 2.0
+      period: 14
+    take_profit:
+      type: risk_reward
+      ratio: 3.0
+    max_holding_bars: 20
+    signal_exit: close < ema(20)
+  sizing:
+    type: fixed_fractional
+    risk_per_trade: 0.0075
+    max_position_pct: 0.25
+  name: volume_surge_trend_continuation_long_v2
+  version: 1
+  hypothesis: A high-volume breakout above a consolidation range following an uptrend signals institutional
+    participation and the start of a new trend leg. The edge persists because systematic breakout strategies
+    often require a close above the high, while this entry at the same level risks late entries; however,
+    entering on the confirmation of a volume surge and price holding above the breakout level captures
+    the momentum drift while avoiding premature entries. The initial volume surge indicates informed buying,
+    and the subsequent follow-through attracts trend followers, leading to a self-reinforcing move.
+  parent: ab8841f7411dbe76

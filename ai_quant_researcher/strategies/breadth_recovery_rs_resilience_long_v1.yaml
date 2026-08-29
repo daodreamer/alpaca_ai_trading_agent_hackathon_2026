@@ -1,0 +1,49 @@
+strategy:
+  entry: rs_rank(10) > 0.8 and rel_return(5) > 0.01
+  direction: long
+  regime: breadth(5) < 0.15 and breadth(10) > breadth(5)
+  max_positions: 3
+  universe:
+    symbols:
+    - AAPL
+    - AMD
+    - AMZN
+    - ASML
+    - AVGO
+    - AZN
+    - COST
+    - CSCO
+    - GOOGL
+    - INTU
+    - LIN
+    - META
+    - MSFT
+    - NFLX
+    - NVDA
+    - PEP
+    - TMUS
+    - TSLA
+    - TXN
+    timeframe: 1D
+  exit:
+    stop_loss:
+      type: atr
+      multiplier: 2.5
+      period: 14
+    take_profit:
+      type: risk_reward
+      ratio: 3.0
+    max_holding_bars: 10
+    signal_exit: null
+  sizing:
+    type: fixed_fractional
+    risk_per_trade: 0.0075
+    max_position_pct: 0.25
+  name: breadth_recovery_rs_resilience_long_v1
+  version: 1
+  hypothesis: As market breadth recovers from extreme lows, stocks with high relative strength have been
+    accumulated by informed investors during the panic. The recovery triggers forced short covering from
+    systematic strategies that were short these resilient names, amplifying their upward move. This persists
+    because systematic strategies overreact to market-wide stress and fail to differentiate strong from
+    weak stocks.
+  parent: 513e180b59eae9ff

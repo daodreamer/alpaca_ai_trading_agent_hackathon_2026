@@ -1,0 +1,52 @@
+strategy:
+  entry: rs_rank(10) > 0.8 and rel_return(5) > 0.02
+  direction: long
+  regime: breadth(5) < 0.2
+  max_positions: 3
+  universe:
+    symbols:
+    - AAPL
+    - AMD
+    - AMZN
+    - ASML
+    - AVGO
+    - AZN
+    - COST
+    - CSCO
+    - GOOGL
+    - INTU
+    - LIN
+    - META
+    - MSFT
+    - NFLX
+    - NVDA
+    - PEP
+    - TMUS
+    - TSLA
+    - TXN
+    timeframe: 1D
+  exit:
+    stop_loss:
+      type: atr
+      multiplier: 2.5
+      period: 14
+    take_profit:
+      type: risk_reward
+      ratio: 3.0
+    max_holding_bars: 10
+    signal_exit: null
+  sizing:
+    type: fixed_fractional
+    risk_per_trade: 0.0075
+    max_position_pct: 0.25
+  name: breadth_extreme_rel_rank_momentum_long_v2
+  version: 1
+  hypothesis: This strategy exploits the forced covering of short positions initiated by momentum and
+    relative-strength strategies during extreme market stress. When breadth is extremely low, systematic
+    strategies are heavily short weak stocks, but market makers and short-term traders who are short strong
+    relative-strength names face mounting losses as these stocks resist the broad selloff. A positive
+    relative return over a short window signals that these shorts are being squeezed, as their price-insensitive
+    covering provides additional upward pressure. This edge persists because systematic strategies lack
+    the flexibility to distinguish resilient stocks from the broader decline, and the forced covering
+    of trapped shorts creates a self-reinforcing move.
+  parent: d72723acc246890a

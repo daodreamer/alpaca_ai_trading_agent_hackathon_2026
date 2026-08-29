@@ -1,0 +1,120 @@
+[project]
+name = "alphagate"
+version = "0.1.0"
+description = "AlphaGate — an options trading agent that can be overruled"
+requires-python = ">=3.13"
+dependencies = [
+    # Exchange calendars. Pinned exactly, not floated: holiday data changes between
+    # releases, and expiry/DTE arithmetic that shifts underneath a fixture is worthless.
+    # Inherited with alphagate.infra.calendars.
+    "pandas-market-calendars==5.4.0",
+    # Alpaca transport. The Alpaca SDK is deliberately not used: its models carry
+    # float prices, and money is Decimal end to end (specs/01-architecture.md D3).
+    # Confined to alphagate.execution and alphagate.marketdata.
+    "httpx>=0.28",
+    # Dashboard / journal read surface. Confined to alphagate.interface, which
+    # cannot import execution, marketdata or live — tests/test_boundaries.py.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    # The one layer allowed to call a model — alphagate.agent.
+    "anthropic>=0.40",
+    "fastmcp>=3.4.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.120",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alphagate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers --strict-config"
+xfail_strict = true
+filterwarnings = ["error"]
+# ------------------------------------------------------------------ ruff ----
+[tool.ruff]
+src = ["src", "tests"]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy-imports
+    "RUF",       # ruff-specific
+    "ANN",       # annotations
+    "PT",        # pytest style
+    "S",         # bandit
+    "DTZ",       # naive-datetime bans — everything is tz-aware UTC
+    "NPY",
+]
+ignore = ["ANN401"]
+
+# En dash and ellipsis are used deliberately in prose; they are not typos.
+allowed-confusables = ["–", "…", "×", "σ"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: assert is the point. S105/S106: a test credential is a literal by definition.
+"tests/**" = ["S101", "S105", "S106", "TID251"]
+# The layers where SDKs and the web framework are allowed — specs/01-architecture.md.
+"src/alphagate/infra/**" = ["TID251"]
+"src/alphagate/execution/**" = ["TID251"]
+# adr/0002 D2: market data comes in over a direct REST adapter, not over MCP,
+# because the backtest replays recorded payloads and an MCP session does not.
+# Read-only — enforced by tests/test_boundaries.py, not by this exemption.
+"src/alphagate/marketdata/**" = ["TID251"]
+"src/alphagate/agent/**" = ["TID251"]
+"src/alphagate/interface/**" = ["TID251"]
+"src/alphagate/live/**" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# specs/01-architecture.md — the pure layers (core, options, risk) depend on nothing
+# but the standard library. Enforced structurally by tests/test_boundaries.py; this
+# is the fast-feedback copy for the whole backend.
+"alpaca".msg = "Provider SDKs belong behind an adapter; and its models carry float prices."
+"httpx".msg = "HTTP belongs in alphagate.execution / alphagate.marketdata."
+"fastapi".msg = "FastAPI belongs in alphagate.interface."
+"starlette".msg = "Starlette belongs in alphagate.interface."
+"pydantic".msg = "Request models belong in alphagate.interface."
+"anthropic".msg = "Only alphagate.agent may talk to a model (specs/01-architecture.md Rule 1)."
+
+[tool.ruff.lint.isort]
+known-first-party = ["alphagate", "tests"]
+
+# ------------------------------------------------------------------ mypy ----
+[tool.mypy]
+files = ["src/alphagate"]
+python_version = "3.13"
+mypy_path = "src"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+enable_error_code = ["redundant-expr", "possibly-undefined", "truthy-bool", "ignore-without-code"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = true
+
+# Ships no py.typed marker. Confined to alphagate.infra.calendars, which converts
+# every value it returns into a plain datetime at the boundary.
+[[tool.mypy.overrides]]
+module = "pandas_market_calendars.*"
+ignore_missing_imports = true

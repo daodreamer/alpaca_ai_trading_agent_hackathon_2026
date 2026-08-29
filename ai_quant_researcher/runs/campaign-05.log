@@ -1,0 +1,132 @@
+dropped 1 symbol(s) with under 1500 bars: PLTR (1483)
+researching 19 symbols on 1D bars from csv
+[1] breadth_relative_strength_reversal_market_neutral_v1: REVIEW (18/100)
+[2] volume_surge_doji_reversal_short_v2: REJECT (18/100)
+[3] volume_breakout_confirmation_long_v2: REJECT (0/100)
+[4] breadth_strength_continuation_neutral_v1: REJECT (9/100)
+[5] gap_fade_post_earnings_volume_v1: REJECT (13/100)
+[6] vol_target_rebalancing_flow_short_v1: REJECT (27/100)
+[7] relative_strength_convergence_neutral_v1: REJECT (15/100)
+[8] overnight_gap_follow_through_reversal_neutral_v1: REJECT (21/100)
+[9] vol_spike_after_low_vol_slump_short_v1: REJECT (22/100)
+[10] post_breakdown_volume_reversal_long_v1: REJECT (66/100)
+[11] vwap_rejection_reversal_short_v2: REJECT (0/100)
+[12] breakdown_volume_exhaustion_long_v3: REJECT (72/100)
+[13] rvol_contrarian_reversal_short_v1: REJECT (8/100)
+[14] low_vol_breakout_surprise_short_v1: REJECT (16/100)
+[15] rel_strength_reversal_short_v1: REJECT (6/100)
+[16] vol_spike_profit_taking_long_v2: REJECT (23/100)
+[17] breadth_crash_deleveraging_short_v1: REJECT (1/100)
+[18] downside_volume_climax_reversal_long_v1: REJECT (40/100)
+[19] vol_target_deleveraging_short_v2: REJECT (19/100)
+[20] breadth_momentum_rotation_neutral_v1: REVIEW (22/100)
+[21] breadth_volatility_crosssectional_neutral_v1: REJECT (54/100)
+[22] relative_strength_momentum_breakout_neutral_v1: REJECT (43/100)
+[23] overnight_gap_fade_high_vol_long_v1: REJECT (15/100)
+[24] high_vol_slump_reversal_long_v1: REJECT (58/100)
+[25] breadth_vol_pct_reversal_neutral_v1: REJECT (9/100)
+[26] breadth_vol_regime_shift_neutral_v1: REJECT (8/100)
+[27] breadth_flight_to_quality_short_v1: REJECT (16/100)
+[28] breadth_rs_reversal_neutral_v1: REJECT (7/100)
+[29] rvol_breakout_fade_short_v3: REJECT (0/100)
+[30] breadth_weak_highbeta_short_v1: REJECT (2/100)
+[31] breadth_strength_rs_decomposition_neutral_v1: REJECT (32/100)
+[32] reversal_after_extreme_gap_high_volume_short_v2: REJECT (18/100)
+[33] breadth_weak_rs_reversal_long_v1: REVIEW (53/100)
+[34] high_rvol_consecutive_downside_reversal_long_v1: REJECT (26/100)
+[35] breadth_extreme_gap_meanrev_long_v1: REJECT (48/100)
+[36] breadth_extreme_overreaction_short_v1: REJECT (70/100)
+[37] post_earnings_drift_continuation_long_v1: REJECT (52/100)
+[38] breakout_failure_trapped_momentum_reversal_v1: REJECT (5/100)
+[39] gap_fade_high_vol_long_v2: REJECT (24/100)
+[40] overnight_gap_reversal_high_rvol_short_v1: REJECT (12/100)
+
+breakdown_volume_exhaustion_long_v3 [719f370808d1f08b]  score 72/100  REJECT
+  asset_robustness     100.0/100
+  max_drawdown         100.0/100
+  oos_sharpe            12.6/100
+  parameter_stability   88.3/100
+  profit_factor        100.0/100
+  regime_robustness    100.0/100
+  reasons:
+  - only 37% of walk-forward folds were profitable; the edge is not consistent 
+across time
+  - transaction costs remove 62% of the frictionless edge; this strategy exists
+only in a world without spreads
+  - overfitting 0.37 (SUSPECT): Sharpe 0.47 deflates to -0.11 after 208 trials;
+12 parameters fitted against 68 trades (5.7 trades per parameter); 208 
+backtest(s) evaluated to reach this result
+  - lost to buy and hold on the same symbols: Sharpe 0.19 against 1.11 (-0.92) 
+-- this rule added nothing to owning the universe
+breakdown_volume_exhaustion_long_v3 on 
+AAPL+AMD+AMZN+ASML+AVGO+AZN+COST+CSCO+GOOGL+INTU+LIN+META+MSFT+NFLX+NVDA+PEP+TM
+US+TSLA+TXN: 27 folds, OOS Sharpe 0.19 +/- 0.63, 37% folds positive, train-test
+gap +0.03
+  fold 0: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 1: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 2: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 3: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 4: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 5: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 6: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 7: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 8: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 9: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 10: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 11: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 12: train   0.00 | test   0.00 | ret   +0.0% |   0 trades
+  fold 13: train   0.00 | test   0.00 | ret   -0.8% |   1 trades
+  fold 14: train   0.49 | test   0.00 | ret   -1.0% |   3 trades
+  fold 15: train   0.42 | test   1.96 | ret   +5.0% |   9 trades
+  fold 16: train   0.52 | test   2.11 | ret   +4.8% |   5 trades
+  fold 17: train   0.66 | test   0.00 | ret   +0.9% |   4 trades
+  fold 18: train   0.64 | test  -0.90 | ret   -3.7% |   7 trades
+  fold 19: train   0.41 | test   1.32 | ret   +3.6% |   6 trades
+  fold 20: train   0.47 | test   0.00 | ret   +0.6% |   3 trades
+  fold 21: train   0.38 | test   0.00 | ret   +0.7% |   2 trades
+  fold 22: train   0.38 | test   0.61 | ret   +1.1% |   6 trades
+  fold 23: train   0.36 | test   0.00 | ret   +1.6% |   4 trades
+  fold 24: train   0.39 | test   0.00 | ret   -0.8% |   1 trades
+  fold 25: train   0.40 | test   0.00 | ret   +1.8% |   3 trades
+  fold 26: train   0.43 | test   0.00 | ret   +0.7% |   2 trades
+parameter stability 0.88 (baseline Sharpe 0.47)
+asset robustness 1.00
+  AAPL     sharpe   0.31  ret   +4.9%    8 trades
+  AMD      sharpe   0.00  ret   +1.1%    2 trades
+  AMZN     sharpe   0.00  ret   +0.5%    4 trades
+  ASML     sharpe   0.00  ret   +2.6%    2 trades
+  AVGO     sharpe   0.00  ret   +2.0%    3 trades
+  AZN      sharpe   0.00  ret   -1.8%    4 trades
+  COST     sharpe   0.04  ret   +0.5%    8 trades
+  CSCO     sharpe   0.00  ret   +0.9%    4 trades
+  GOOGL    sharpe   0.06  ret   +0.6%    6 trades
+  INTU     sharpe   0.00  ret   -0.2%    2 trades
+  LIN      sharpe   0.53  ret   +6.1%    7 trades
+  META     sharpe   0.00  ret   +0.3%    4 trades
+  MSFT     sharpe   0.00  ret   +1.5%    2 trades
+  NFLX     sharpe   0.00  ret   +0.1%    2 trades
+  NVDA     sharpe   0.00  ret   +1.8%    3 trades
+  PEP      sharpe   0.00  ret   +0.5%    2 trades
+  TMUS     sharpe   0.00  ret   -0.6%    2 trades
+  TSLA     sharpe   0.00  ret   +0.9%    1 trades
+  TXN      sharpe   0.00  ret   +1.0%    2 trades
+regime robustness 1.00
+  RANGE_HIGH_VOL   ret   +5.8%    9 trades
+  RANGE_LOW_VOL    ret  +20.2%   58 trades
+  UNKNOWN          ret   -0.8%    1 trades   (not scored)
+monte carlo (1000 trials): median DD 4.2%, p95 DD 8.0%, worst 13.2%, P(loss) 
+0%, P(ruin) 0.0%
+overfitting 0.37 -> SUSPECT
+sharpe_inflation         1.00  Sharpe 0.47 deflates to -0.11 after 208 trials
+parameter_count          0.81  12 parameters fitted against 68 trades (5.7 
+trades per parameter)
+search_cost              0.77  208 backtest(s) evaluated to reach this result
+sample_size              0.32  68 trades
+asset_concentration      0.19  largest of 19 symbols contributed 24% of gross 
+profit
+time_concentration       0.14  best of 10 periods produced 23% of net profit
+cost_sensitivity         0.06  Sharpe 0.50 frictionless vs 0.47 with costs
+train_oos_gap            0.02  train Sharpe 0.22 vs OOS 0.19 (gap +0.03)
+profit_concentration     0.00  top 3 of 68 trades produced 24% of net profit
+
+cumulative backtests in this database: 16277

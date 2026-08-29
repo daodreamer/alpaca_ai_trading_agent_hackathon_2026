@@ -1,0 +1,49 @@
+strategy:
+  entry: rel_return(20) > 0 and macd_hist(12, 26, 9) > 0
+  direction: long
+  regime: breadth(20) < 0.2
+  max_positions: 3
+  universe:
+    symbols:
+    - AAPL
+    - AMD
+    - AMZN
+    - ASML
+    - AVGO
+    - AZN
+    - COST
+    - CSCO
+    - GOOGL
+    - INTU
+    - LIN
+    - META
+    - MSFT
+    - NFLX
+    - NVDA
+    - PEP
+    - TMUS
+    - TSLA
+    - TXN
+    timeframe: 1D
+  exit:
+    stop_loss:
+      type: atr
+      multiplier: 2.0
+      period: 14
+    take_profit:
+      type: risk_reward
+      ratio: 3.0
+    max_holding_bars: 20
+    signal_exit: null
+  sizing:
+    type: fixed_fractional
+    risk_per_trade: 0.0075
+    max_position_pct: 0.25
+  name: breadth_extreme_reversal_long_v1
+  version: 1
+  hypothesis: Extreme market breadth readings (the fraction of stocks with positive returns) at either
+    end often coincide with crowded positioning. When breadth is extremely low, the market has been broadly
+    sold, and any stock that shows relative strength (rel_return positive) is likely being accumulated
+    by informed investors. A momentum reversal as the market mean-reverts provides a long entry in these
+    names.
+  parent: null

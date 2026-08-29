@@ -1,0 +1,42 @@
+# Editor state. `.history/` is the VS Code local-history extension: old copies
+# of edited files, including any that once held a key.
+.history/
+
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Credentials. `.env.example` documents the shape and is committed; nothing
+# holding a real key ever is.
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------- #
+# The journal is NOT ignored.
+#
+# specs/06 D1: the day files are "trivially replayable, diffable, and shippable
+# with the submission as evidence". They are the artefact the whole project is
+# arranged around — a judge opens a fill and reads the reasoning behind it — so
+# excluding them would ship the machine without the thing it produced.
+#
+# They are safe to commit: specs/06 D4 keeps every API key, account number and
+# account id out of them, and a test asserts it against a fixture that
+# deliberately contains credential-shaped values.
+#
+# What *is* ignored below is derived or volatile: state a rerun regenerates,
+# and a snapshot that is only true for the fifteen minutes it describes.
+# ---------------------------------------------------------------------- #
+journal/status.json
+journal/state.json
+journal/iv/
+
+# Frontend toolchain and build output. `npm run build` regenerates `static/`
+# from source; committing a 300 KB bundle would put it in every diff.
+node_modules/
+dist/
+backend/src/alphagate/interface/static/

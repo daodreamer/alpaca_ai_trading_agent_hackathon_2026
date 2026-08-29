@@ -1,0 +1,48 @@
+strategy:
+  entry: close < bb_lower(20, 2) and rvol(20) > 1.2
+  direction: long
+  regime: close > sma(200)
+  max_positions: 3
+  universe:
+    symbols:
+    - AAPL
+    - AMD
+    - AMZN
+    - ASML
+    - AVGO
+    - AZN
+    - COST
+    - CSCO
+    - GOOGL
+    - INTU
+    - LIN
+    - META
+    - MSFT
+    - NFLX
+    - NVDA
+    - PEP
+    - TMUS
+    - TSLA
+    - TXN
+    timeframe: 1D
+  exit:
+    stop_loss:
+      type: atr
+      multiplier: 2.0
+      period: 14
+    take_profit:
+      type: risk_reward
+      ratio: 2.0
+    max_holding_bars: 10
+    signal_exit: close > vwap()
+  sizing:
+    type: fixed_fractional
+    risk_per_trade: 0.0075
+    max_position_pct: 0.25
+  name: oversold_bollinger_volume_confirmation_v1
+  version: 1
+  hypothesis: Temporary oversold conditions identified by a break below the lower Bollinger band are often
+    followed by a snap-back as systematic selling exhausts and value buyers step in. This is especially
+    potent when volume has recently surged, indicating a climactic sell-off that removes marginal sellers.
+    The edge persists due to behavioral overreaction and the structural need for institutions to rebalance.
+  parent: d008a77c606d8d2e

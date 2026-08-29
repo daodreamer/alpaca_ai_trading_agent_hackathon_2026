@@ -1,0 +1,289 @@
+"""The entrypoint — `live/cli.py`.
+
+Argument parsing and the two helpers that decide *which cycle this is*. The
+commands themselves need a broker and are exercised by running them; what is
+tested here is the part that was wrong when it shipped.
+
+`once` used to take `slots[0]` unconditionally, so two manual runs in one
+morning produced two decisions sharing a `cycle_id` and `Journal.read` collapsed
+them into one. It happened on the first live run, and `duplicate_cycles`
+reported it — which is the report working, and also a thing that should not need
+reporting.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from alphagate.agent import SessionResult, Slot, Stage, session_slots
+from alphagate.journal import Journal
+from alphagate.live import cli
+from alphagate.live.cli import _free_sequence, _slot_now, build_parser, main
+from alphagate.live.wiring import LiveContext, SessionState
+from tests.journal.conftest import at_stage
+
+OPEN = datetime(2026, 8, 26, 13, 30, tzinfo=UTC)
+CLOSE = datetime(2026, 8, 26, 20, 0, tzinfo=UTC)
+SLOTS = session_slots(OPEN, CLOSE)
+
+
+class TestTheParser:
+    @pytest.mark.parametrize("command", ["preflight", "once", "run", "show", "serve"])
+    def test_every_command_parses(self, command: str) -> None:
+        assert build_parser().parse_args([command]).command == command
+
+    def test_once_is_dry_by_default(self) -> None:
+        """A debugging command that places orders is a debugging command that
+        places orders by accident."""
+        assert build_parser().parse_args(["once"]).submit is False
+
+    def test_run_trades_by_default(self) -> None:
+        """`run` is what a trading day is. Asking it to trade is not a
+        surprise."""
+        assert build_parser().parse_args(["run"]).dry_run is False
+
+    def test_no_command_is_an_error_not_a_default_action(self) -> None:
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([])
+
+    def test_the_env_path_is_overridable(self) -> None:
+        args = build_parser().parse_args(["--env", "other.env", "preflight"])
+        assert args.env == "other.env"
+
+
+class TestWhichSlotThisIs:
+    def test_it_picks_the_slot_the_schedule_would_be_running(self) -> None:
+        chosen = _slot_now(SLOTS, datetime(2026, 8, 26, 15, 2, tzinfo=UTC))
+        assert chosen.at >= datetime(2026, 8, 26, 15, 2, tzinfo=UTC)
+        assert chosen.at.minute in {5, 20, 35, 50}
+
+    def test_before_the_open_it_takes_the_first(self) -> None:
+        assert _slot_now(SLOTS, OPEN).sequence == 0
+
+    def test_after_the_close_it_takes_the_last(self) -> None:
+        """Rather than raising. A cycle run after hours is still a cycle worth
+        journalling — it will simply find nothing fresh to trade."""
+        assert _slot_now(SLOTS, CLOSE).sequence == SLOTS[-1].sequence
+
+
+class TestSequencesDoNotCollide:
+    def test_a_free_day_uses_the_slots_own_sequence(self, tmp_path: Path) -> None:
+        context = _context(tmp_path)
+        assert _free_sequence(context, SLOTS[3], "SPY") == 3
+
+    def test_a_used_sequence_is_stepped_over(self, tmp_path: Path) -> None:
+        """Two manual runs must not write one line."""
+        context = _context(tmp_path)
+        context.journal.append(at_stage(Stage.DRY_RUN, sequence=0))
+        assert _free_sequence(context, SLOTS[0], "SPY") == 1
+
+    def test_it_keeps_stepping(self, tmp_path: Path) -> None:
+        context = _context(tmp_path)
+        for sequence in range(3):
+            context.journal.append(at_stage(Stage.DRY_RUN, sequence=sequence))
+        assert _free_sequence(context, SLOTS[0], "SPY") == 3
+
+    def test_another_underlying_does_not_block_this_one(self, tmp_path: Path) -> None:
+        """`cycle_id` carries the name, so SPY-000 and QQQ-000 are different
+        decisions and neither shadows the other."""
+        context = _context(tmp_path)
+        context.journal.append(at_stage(Stage.DRY_RUN, sequence=0))
+        assert _free_sequence(context, SLOTS[0], "QQQ") == 0
+
+
+def test_an_unknown_command_exits_nonzero() -> None:
+    with pytest.raises(SystemExit):
+        main(["nonsense"])
+
+
+def _context(tmp_path: Path) -> LiveContext:
+    from alphagate.agent import IvHistoryStore
+    from alphagate.marketdata import RecordedMarketData
+
+    return LiveContext(
+        data=RecordedMarketData(directory=tmp_path),
+        mcp=None,
+        journal=Journal(directory=tmp_path / "journal"),
+        iv=IvHistoryStore(directory=tmp_path / "iv"),
+        state=SessionState(path=tmp_path / "state.json"),
+    )
+
+
+class TestTheSupervisor:
+    """A dropped connection at 14:00 must not cost the afternoon.
+
+    The agent is a foreground process on a laptop for a week, and four trading
+    days is the whole P&L sample. But resuming is not unconditionally right —
+    two stops mean a human has to look before any more orders go out, and a
+    supervisor that restarted through them would be actively harmful.
+    """
+
+    def test_a_dead_session_is_resumed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        attempts: list[int] = []
+
+        def flaky(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError("transport went away")
+            return SessionResult()
+
+        monkeypatch.setattr(cli, "_one_session", flaky)
+        code = cli.supervised_run(
+            args=build_parser().parse_args(["run"]),
+            open_at=OPEN,
+            close_at=CLOSE,
+            now=lambda: OPEN,
+            sleep=lambda _s: None,
+        )
+        assert code == 0
+        assert len(attempts) == 2, "it tried again"
+
+    def test_it_gives_up_rather_than_spinning_forever(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A process respawning against a broken credential burns the day
+        writing the same traceback."""
+        attempts: list[int] = []
+
+        def always_dies(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            raise RuntimeError("still broken")
+
+        monkeypatch.setattr(cli, "_one_session", always_dies)
+        code = cli.supervised_run(
+            args=build_parser().parse_args(["run"]),
+            open_at=OPEN,
+            close_at=CLOSE,
+            now=lambda: OPEN,
+            sleep=lambda _s: None,
+        )
+        assert code == 1
+        assert len(attempts) == cli.MAX_RESTARTS + 1
+
+    def test_a_breach_is_not_resumed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """specs/04 D5. A partial fill is a naked leg and a latched kill switch;
+        resuming would put the agent back to work on a book nobody has seen."""
+        attempts: list[int] = []
+
+        def breached(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            return SessionResult(
+                stopped_early="partial fill breach — opens blocked, reconcile by hand"
+            )
+
+        monkeypatch.setattr(cli, "_one_session", breached)
+        code = cli.supervised_run(
+            args=build_parser().parse_args(["run"]),
+            open_at=OPEN,
+            close_at=CLOSE,
+            now=lambda: OPEN,
+            sleep=lambda _s: None,
+        )
+        assert code == 1
+        assert len(attempts) == 1, "it stopped, it did not retry"
+
+    def test_a_latched_killswitch_is_not_resumed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+
+        def latched(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            return SessionResult(stopped_early="kill switch latched on the incoming snapshot")
+
+        monkeypatch.setattr(cli, "_one_session", latched)
+        assert (
+            cli.supervised_run(
+                args=build_parser().parse_args(["run"]),
+                open_at=OPEN,
+                close_at=CLOSE,
+                now=lambda: OPEN,
+                sleep=lambda _s: None,
+            )
+            == 1
+        )
+        assert len(attempts) == 1
+
+    def test_a_clean_session_is_not_restarted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        attempts: list[int] = []
+
+        def clean(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            return SessionResult()
+
+        monkeypatch.setattr(cli, "_one_session", clean)
+        assert (
+            cli.supervised_run(
+                args=build_parser().parse_args(["run"]),
+                open_at=OPEN,
+                close_at=CLOSE,
+                now=lambda: OPEN,
+                sleep=lambda _s: None,
+            )
+            == 0
+        )
+        assert len(attempts) == 1
+
+    def test_a_finished_day_is_not_restarted_either(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """After the close there are no pending slots, so there is nothing to
+        resume — the loop must notice rather than respawn against an empty
+        schedule."""
+        attempts: list[int] = []
+
+        def never(args: object, slots: object) -> SessionResult:
+            attempts.append(1)
+            return SessionResult()
+
+        monkeypatch.setattr(cli, "_one_session", never)
+        code = cli.supervised_run(
+            args=build_parser().parse_args(["run"]),
+            open_at=OPEN,
+            close_at=CLOSE,
+            now=lambda: CLOSE + timedelta(hours=1),
+            sleep=lambda _s: None,
+        )
+        assert code == 0
+        assert attempts == []
+
+    def test_only_pending_slots_are_resumed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Resumption is slot-based, which is what makes it safe: a restart
+        costs the slot it happened in and never replays one that already has a
+        journal line (specs/06 D2)."""
+        seen: list[int] = []
+
+        def record_slots(args: object, slots: Sequence[Slot]) -> SessionResult:
+            seen.append(len(slots))
+            return SessionResult()
+
+        monkeypatch.setattr(cli, "_one_session", record_slots)
+        midday = datetime(2026, 8, 26, 17, 0, tzinfo=UTC)
+        cli.supervised_run(
+            args=build_parser().parse_args(["run"]),
+            open_at=OPEN,
+            close_at=CLOSE,
+            now=lambda: midday,
+            sleep=lambda _s: None,
+        )
+        remaining = len([s for s in session_slots(OPEN, CLOSE) if s.at > midday])
+        assert seen == [remaining]
+        assert remaining < len(session_slots(OPEN, CLOSE))
+
+    @pytest.mark.parametrize(
+        ("reason", "terminal"),
+        [
+            ("partial fill breach — opens blocked, reconcile by hand", True),
+            ("kill switch latched on the incoming snapshot", True),
+            ("gather failed at 14:30 ConnectionError: reset", False),
+            ("", False),
+        ],
+    )
+    def test_which_stops_a_restart_must_not_paper_over(
+        self, reason: str, terminal: bool
+    ) -> None:
+        assert cli._is_terminal_stop(reason) is terminal

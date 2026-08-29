@@ -1,0 +1,6983 @@
+{
+ "name": "sp500_pit",
+ "source": {
+  "current_url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+  "changes_url": "https://en.wikipedia.org/wiki/Historical_components_of_the_S%26P_500",
+  "fetched_at": "2026-08-28T14:54:05Z",
+  "method": "backward walk from today's constituent list through the historical-changes table",
+  "notes": [
+   "`from` == 2016-01-01 means the ticker was already a member at the window start; the true join date is not derivable from this table.",
+   "counts.still_member_at_window_end excludes tickers whose chain is broken (end_unknown); the *_including_broken_chains variant includes them and matches a naive point-in-time count of the intervals.",
+   "`to` == null means still a member as of the fetch date. A `to` later than 2024-08-31 means the ticker was still a member at the window end but left afterwards; it is reported verbatim rather than clamped.",
+   "Only intervals overlapping the window are listed. Disjoint intervals are never merged.",
+   "Tickers are matched as plain strings across time. `ticker_raw` preserves the exact Wikipedia cell text (minus footnote markers/whitespace); `ticker_normalized` is the same string upper-cased with any '.' left as-is. No broker-convention dot/dash translation is applied."
+  ]
+ },
+ "window": {
+  "start": "2016-01-01",
+  "end": "2024-08-31"
+ },
+ "counts": {
+  "current_constituents": 503,
+  "change_rows_parsed": 407,
+  "change_rows_total": 407,
+  "tickers_ever_member_in_window": 684,
+  "still_member_at_window_end": 504,
+  "left_during_window": 186,
+  "joined_during_window": 185,
+  "multi_interval_tickers": 7,
+  "still_member_at_window_end_including_broken_chains": 505,
+  "members_after_corrections": 682
+ },
+ "corrections": [
+  {
+   "ticker": "EG",
+   "change": "interval start",
+   "from": "2016-01-01",
+   "to": "2017-06-19",
+   "evidence": "current-constituents table gives EG Date added = 2017-06-19"
+  },
+  {
+   "ticker": "RE",
+   "change": "removed from universe",
+   "from": "member",
+   "to": "not a member in this window",
+   "evidence": "same membership as EG under the pre-2023 ticker; EG carries the full price history, and keeping both would put one company in the book twice"
+  },
+  {
+   "ticker": "ECHO",
+   "change": "removed from universe",
+   "from": "member",
+   "to": "not a member in this window",
+   "evidence": "current-constituents table gives ECHO Date added = 2026-03-23, after the window end 2024-08-31; the backward walk had no add row to stop at"
+  },
+  {
+   "ticker": "SW",
+   "change": "interval start",
+   "from": "2016-01-01",
+   "to": "2024-07-08",
+   "evidence": "current-constituents table gives SW Date added = 2024-07-08"
+  }
+ ],
+ "not_corrected": [
+  {
+   "ticker": "WRK",
+   "problem": "WestRock was an index member for most of the window and is absent from the table entirely: Wikipedia's change log has no row for either WRK or its 2024-07-08 successor SW.",
+   "why_not_corrected": "Adding it would mean inventing interval boundaries from no source. A missing name is never ranked, held or benchmarked, which costs a little breadth; a name filled in from recollection would be traded on dates nobody can check. Missing is the conservative error, so the gap is recorded instead of filled."
+  },
+  {
+   "ticker": "D, SRE, TROW",
+   "problem": "Each has no row at all in the change log but a post-2016 Date added in the current-constituents table, so `from` = 2016-01-01 is unverified.",
+   "why_not_corrected": "All three have no removal row either, which the change log only explains if they were members throughout. The conflicting Date added is most likely a rename rather than a join. Left as reconstructed, flagged here."
+  }
+ ],
+ "unresolved": [
+  {
+   "row": 13,
+   "effective_date": "2026-03-23",
+   "problem": "ticker SATS recorded as ADDED but the backward walk says it was not a member just after that date: there is no later removal row for it and it is not in today's constituent list, so the chain is broken (most likely an unrecorded ticker rename). Interval emitted as 2026-03-23..null with end_unknown=true; the null end is NOT a claim that it is still a member."
+  },
+  {
+   "row": [
+    154,
+    154
+   ],
+   "effective_date": "2019-03-19",
+   "problem": "ticker FOXA is both added and removed on the same effective date; add applied first, then removal"
+  },
+  {
+   "row": [
+    155,
+    155
+   ],
+   "effective_date": "2019-03-19",
+   "problem": "ticker FOX is both added and removed on the same effective date; add applied first, then removal"
+  },
+  {
+   "row": 199,
+   "effective_date": "2017-06-19",
+   "problem": "ticker RE recorded as ADDED but the backward walk says it was not a member just after that date: there is no later removal row for it and it is not in today's constituent list, so the chain is broken (most likely an unrecorded ticker rename). Interval emitted as 2017-06-19..null with end_unknown=true; the null end is NOT a claim that it is still a member."
+  },
+  {
+   "row": null,
+   "effective_date": "2016-11-30",
+   "problem": "ticker D has no add row and no removal row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2016-11-30. Either the changes table is missing rows for it (and for whatever ticker it replaced), or Wikipedia's Date added reflects a rename rather than an index join. Membership before 2016-11-30 is UNVERIFIED."
+  },
+  {
+   "row": null,
+   "effective_date": "2026-03-23",
+   "problem": "ticker ECHO has no add row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2026-03-23 -- the same date on which SATS appears as an orphan ADD with no removal. These are almost certainly the same membership under an unrecorded ticker rename (SATS -> ECHO). Left UNMERGED: ECHO's `from` is too early and SATS's null `to` is wrong; between 2026-03-23 and now they are double-counted."
+  },
+  {
+   "row": null,
+   "effective_date": "2017-06-19",
+   "problem": "ticker EG has no add row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2017-06-19 -- the same date on which RE appears as an orphan ADD with no removal. These are almost certainly the same membership under an unrecorded ticker rename (RE -> EG). Left UNMERGED: EG's `from` is too early and RE's null `to` is wrong; between 2017-06-19 and now they are double-counted."
+  },
+  {
+   "row": null,
+   "effective_date": "2017-03-17",
+   "problem": "ticker SRE has no add row and no removal row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2017-03-17. Either the changes table is missing rows for it (and for whatever ticker it replaced), or Wikipedia's Date added reflects a rename rather than an index join. Membership before 2017-03-17 is UNVERIFIED."
+  },
+  {
+   "row": null,
+   "effective_date": "2024-07-08",
+   "problem": "ticker SW has no add row and no removal row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2024-07-08. Either the changes table is missing rows for it (and for whatever ticker it replaced), or Wikipedia's Date added reflects a rename rather than an index join. Membership before 2024-07-08 is UNVERIFIED."
+  },
+  {
+   "row": null,
+   "effective_date": "2019-07-29",
+   "problem": "ticker TROW has no add row and no removal row anywhere in the changes table, so the backward walk gives it `from` = 2016-01-01, but the current-constituents table gives its Date added as 2019-07-29. Either the changes table is missing rows for it (and for whatever ticker it replaced), or Wikipedia's Date added reflects a rename rather than an index join. Membership before 2019-07-29 is UNVERIFIED."
+  }
+ ],
+ "built_at": "2026-08-28T17:11:23.996595+00:00",
+ "members": [
+  {
+   "ticker": "A",
+   "name": "Agilent Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AA",
+   "name": "Alcoa",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-11-01"
+    }
+   ]
+  },
+  {
+   "ticker": "AAL",
+   "name": "American Airlines Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-09-23"
+    }
+   ]
+  },
+  {
+   "ticker": "AAP",
+   "name": "Advance Auto Parts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-08-25"
+    }
+   ]
+  },
+  {
+   "ticker": "AAPL",
+   "name": "Apple Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ABBV",
+   "name": "AbbVie",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ABMD",
+   "name": "Abiomed",
+   "intervals": [
+    {
+     "from": "2018-05-31",
+     "to": "2022-12-22"
+    }
+   ]
+  },
+  {
+   "ticker": "ABNB",
+   "name": "Airbnb",
+   "intervals": [
+    {
+     "from": "2023-09-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ABT",
+   "name": "Abbott Laboratories",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ACE",
+   "name": "Chubb",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-01-19"
+    }
+   ]
+  },
+  {
+   "ticker": "ACGL",
+   "name": "Arch Capital Group",
+   "intervals": [
+    {
+     "from": "2022-11-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ACN",
+   "name": "Accenture",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADBE",
+   "name": "Adobe Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADI",
+   "name": "Analog Devices",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADM",
+   "name": "Archer Daniels Midland",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADP",
+   "name": "Automatic Data Processing",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADS",
+   "name": "Alliance Data Systems",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "ADSK",
+   "name": "Autodesk",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ADT",
+   "name": "ADT",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-05-03"
+    }
+   ]
+  },
+  {
+   "ticker": "AEE",
+   "name": "Ameren",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AEP",
+   "name": "American Electric Power",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AES",
+   "name": "AES Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AET",
+   "name": "Aetna",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-12-03"
+    }
+   ]
+  },
+  {
+   "ticker": "AFL",
+   "name": "Aflac",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AGN",
+   "name": "Allergan",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-05-12"
+    }
+   ]
+  },
+  {
+   "ticker": "AIG",
+   "name": "American International Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AIV",
+   "name": "Aimco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-12-21"
+    }
+   ]
+  },
+  {
+   "ticker": "AIZ",
+   "name": "Assurant",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AJG",
+   "name": "Arthur J. Gallagher & Co.",
+   "intervals": [
+    {
+     "from": "2016-05-31",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AKAM",
+   "name": "Akamai Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ALB",
+   "name": "Albemarle Corporation",
+   "intervals": [
+    {
+     "from": "2016-07-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ALGN",
+   "name": "Align Technology",
+   "intervals": [
+    {
+     "from": "2017-06-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ALK",
+   "name": "Alaska Air Group",
+   "intervals": [
+    {
+     "from": "2016-05-13",
+     "to": "2023-12-18"
+    }
+   ]
+  },
+  {
+   "ticker": "ALL",
+   "name": "Allstate",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ALLE",
+   "name": "Allegion",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ALXN",
+   "name": "Alexion Pharmaceuticals",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-07-21"
+    }
+   ]
+  },
+  {
+   "ticker": "AMAT",
+   "name": "Applied Materials",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMCR",
+   "name": "Amcor",
+   "intervals": [
+    {
+     "from": "2019-06-11",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMD",
+   "name": "Advanced Micro Devices",
+   "intervals": [
+    {
+     "from": "2017-03-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AME",
+   "name": "Ametek",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMG",
+   "name": "Affiliated Managers Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-12-23"
+    }
+   ]
+  },
+  {
+   "ticker": "AMGN",
+   "name": "Amgen",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMP",
+   "name": "Ameriprise Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMT",
+   "name": "American Tower",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AMZN",
+   "name": "Amazon",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AN",
+   "name": "AutoNation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-08-08"
+    }
+   ]
+  },
+  {
+   "ticker": "ANDV",
+   "name": "Andeavor",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-10-01"
+    }
+   ]
+  },
+  {
+   "ticker": "ANET",
+   "name": "Arista Networks",
+   "intervals": [
+    {
+     "from": "2018-08-28",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ANSS",
+   "name": "Ansys",
+   "intervals": [
+    {
+     "from": "2017-06-19",
+     "to": "2025-07-18"
+    }
+   ]
+  },
+  {
+   "ticker": "AON",
+   "name": "Aon plc",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AOS",
+   "name": "A. O. Smith",
+   "intervals": [
+    {
+     "from": "2017-07-26",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "APA",
+   "name": "APA Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "APC",
+   "name": "Anadarko Petroleum",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-08-09"
+    }
+   ]
+  },
+  {
+   "ticker": "APD",
+   "name": "Air Products",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "APH",
+   "name": "Amphenol",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "APTV",
+   "name": "Aptiv",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ARE",
+   "name": "Alexandria Real Estate Equities",
+   "intervals": [
+    {
+     "from": "2017-03-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ARG",
+   "name": "Airgas",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-05-23"
+    }
+   ]
+  },
+  {
+   "ticker": "ARNC",
+   "name": "Arconic",
+   "intervals": [
+    {
+     "from": "2016-11-01",
+     "to": "2020-04-01"
+    }
+   ]
+  },
+  {
+   "ticker": "ATO",
+   "name": "Atmos Energy",
+   "intervals": [
+    {
+     "from": "2019-02-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ATVI",
+   "name": "Activision Blizzard",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-10-18"
+    }
+   ]
+  },
+  {
+   "ticker": "AVB",
+   "name": "AvalonBay Communities",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2026-08-18"
+    }
+   ]
+  },
+  {
+   "ticker": "AVGO",
+   "name": "Broadcom",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AVY",
+   "name": "Avery Dennison",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AWK",
+   "name": "American Water Works",
+   "intervals": [
+    {
+     "from": "2016-03-04",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AXON",
+   "name": "Axon Enterprise",
+   "intervals": [
+    {
+     "from": "2023-05-04",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AXP",
+   "name": "American Express",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "AYI",
+   "name": "Acuity Brands",
+   "intervals": [
+    {
+     "from": "2016-05-03",
+     "to": "2018-06-18"
+    }
+   ]
+  },
+  {
+   "ticker": "AZO",
+   "name": "AutoZone",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BA",
+   "name": "Boeing",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BAC",
+   "name": "Bank of America",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BALL",
+   "name": "Ball Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BAX",
+   "name": "Baxter International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BBBY",
+   "name": "Bed Bath & Beyond",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-26"
+    }
+   ]
+  },
+  {
+   "ticker": "BBWI",
+   "name": "Bath & Body Works, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-10-01"
+    }
+   ]
+  },
+  {
+   "ticker": "BBY",
+   "name": "Best Buy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BCR",
+   "name": "CR Bard",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-01-03"
+    }
+   ]
+  },
+  {
+   "ticker": "BDX",
+   "name": "Becton Dickinson",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BEN",
+   "name": "Franklin Resources",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BF.B",
+   "name": "Brown\u2013Forman",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BG",
+   "name": "Bunge Global",
+   "intervals": [
+    {
+     "from": "2023-03-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BHF",
+   "name": "Brighthouse Financial",
+   "intervals": [
+    {
+     "from": "2017-08-08",
+     "to": "2019-04-02"
+    }
+   ]
+  },
+  {
+   "ticker": "BHI",
+   "name": "Baker Hughes",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-07"
+    }
+   ]
+  },
+  {
+   "ticker": "BIIB",
+   "name": "Biogen",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BIO",
+   "name": "Bio-Rad Laboratories",
+   "intervals": [
+    {
+     "from": "2020-06-22",
+     "to": "2024-09-23"
+    }
+   ]
+  },
+  {
+   "ticker": "BKNG",
+   "name": "Booking Holdings",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BKR",
+   "name": "Baker Hughes",
+   "intervals": [
+    {
+     "from": "2017-07-07",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BLDR",
+   "name": "Builders FirstSource",
+   "intervals": [
+    {
+     "from": "2023-12-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BLK",
+   "name": "BlackRock",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BMS",
+   "name": "Bemis",
+   "intervals": [
+    {
+     "from": "2019-06-07",
+     "to": "2019-06-11"
+    }
+   ]
+  },
+  {
+   "ticker": "BMY",
+   "name": "Bristol Myers Squibb",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BNY",
+   "name": "BNY Mellon",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BR",
+   "name": "Broadridge Financial Solutions",
+   "intervals": [
+    {
+     "from": "2018-06-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BRCM",
+   "name": "Broadcom Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-02-01"
+    }
+   ]
+  },
+  {
+   "ticker": "BRK.B",
+   "name": "Berkshire Hathaway",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BRO",
+   "name": "Brown & Brown",
+   "intervals": [
+    {
+     "from": "2021-09-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BSX",
+   "name": "Boston Scientific",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BWA",
+   "name": "BorgWarner",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-03-24"
+    }
+   ]
+  },
+  {
+   "ticker": "BX",
+   "name": "Blackstone Inc.",
+   "intervals": [
+    {
+     "from": "2023-09-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "BXLT",
+   "name": "Baxalta",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-06-03"
+    }
+   ]
+  },
+  {
+   "ticker": "BXP",
+   "name": "BXP, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "C",
+   "name": "Citigroup",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CA",
+   "name": "CA Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-11-06"
+    }
+   ]
+  },
+  {
+   "ticker": "CAG",
+   "name": "Conagra Brands",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2026-06-30"
+    }
+   ]
+  },
+  {
+   "ticker": "CAH",
+   "name": "Cardinal Health",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CAM",
+   "name": "Cameron International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-04-04"
+    }
+   ]
+  },
+  {
+   "ticker": "CARR",
+   "name": "Carrier Global",
+   "intervals": [
+    {
+     "from": "2020-04-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CAT",
+   "name": "Caterpillar Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CB",
+   "name": "Chubb Limited",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CBOE",
+   "name": "Cboe Global Markets",
+   "intervals": [
+    {
+     "from": "2017-03-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CBRE",
+   "name": "CBRE Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CCE",
+   "name": "Coca-Cola Enterprises",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-05-31"
+    }
+   ]
+  },
+  {
+   "ticker": "CCI",
+   "name": "Crown Castle",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CCL",
+   "name": "Carnival Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CDAY",
+   "name": "Ceridian",
+   "intervals": [
+    {
+     "from": "2021-09-20",
+     "to": "2024-02-01"
+    }
+   ]
+  },
+  {
+   "ticker": "CDNS",
+   "name": "Cadence Design Systems",
+   "intervals": [
+    {
+     "from": "2017-09-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CDW",
+   "name": "CDW Corporation",
+   "intervals": [
+    {
+     "from": "2019-09-23",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CE",
+   "name": "Celanese",
+   "intervals": [
+    {
+     "from": "2018-12-24",
+     "to": "2025-03-24"
+    }
+   ]
+  },
+  {
+   "ticker": "CEG",
+   "name": "Constellation Energy",
+   "intervals": [
+    {
+     "from": "2022-02-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CELG",
+   "name": "Celgene",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-11-21"
+    }
+   ]
+  },
+  {
+   "ticker": "CERN",
+   "name": "Cerner",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-06-08"
+    }
+   ]
+  },
+  {
+   "ticker": "CF",
+   "name": "CF Industries",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CFG",
+   "name": "Citizens Financial Group",
+   "intervals": [
+    {
+     "from": "2016-02-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CHD",
+   "name": "Church & Dwight",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CHK",
+   "name": "Chesapeake Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-03-19"
+    }
+   ]
+  },
+  {
+   "ticker": "CHRW",
+   "name": "C.H. Robinson",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CHTR",
+   "name": "Charter Communications",
+   "intervals": [
+    {
+     "from": "2016-09-08",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CI",
+   "name": "Cigna",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CINF",
+   "name": "Cincinnati Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CL",
+   "name": "Colgate-Palmolive",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CLX",
+   "name": "Clorox",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CMA",
+   "name": "Comerica",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-06-24"
+    }
+   ]
+  },
+  {
+   "ticker": "CMCSA",
+   "name": "Comcast",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CME",
+   "name": "CME Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CMG",
+   "name": "Chipotle Mexican Grill",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CMI",
+   "name": "Cummins",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CMS",
+   "name": "CMS Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CNC",
+   "name": "Centene Corporation",
+   "intervals": [
+    {
+     "from": "2016-03-30",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CNP",
+   "name": "CenterPoint Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CNX",
+   "name": "Consol Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-03-04"
+    }
+   ]
+  },
+  {
+   "ticker": "COF",
+   "name": "Capital One",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "COL",
+   "name": "Rockwell Collins",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-12-03"
+    }
+   ]
+  },
+  {
+   "ticker": "COO",
+   "name": "Cooper Companies (The)",
+   "intervals": [
+    {
+     "from": "2016-09-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "COP",
+   "name": "ConocoPhillips",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "COR",
+   "name": "Cencora",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "COST",
+   "name": "Costco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "COTY",
+   "name": "Coty",
+   "intervals": [
+    {
+     "from": "2016-09-30",
+     "to": "2020-09-21"
+    }
+   ]
+  },
+  {
+   "ticker": "CPAY",
+   "name": "Corpay",
+   "intervals": [
+    {
+     "from": "2024-03-25",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CPB",
+   "name": "Campbell's",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2026-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "CPGX",
+   "name": "Columbia Pipeline Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-07-05"
+    }
+   ]
+  },
+  {
+   "ticker": "CPRI",
+   "name": "Capri Holdings",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-05-12"
+    }
+   ]
+  },
+  {
+   "ticker": "CPRT",
+   "name": "Copart",
+   "intervals": [
+    {
+     "from": "2018-07-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CPT",
+   "name": "Camden Property Trust",
+   "intervals": [
+    {
+     "from": "2022-04-04",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CRL",
+   "name": "Charles River Laboratories",
+   "intervals": [
+    {
+     "from": "2021-05-14",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CRM",
+   "name": "Salesforce",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CRWD",
+   "name": "CrowdStrike",
+   "intervals": [
+    {
+     "from": "2024-06-24",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CSCO",
+   "name": "Cisco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CSGP",
+   "name": "CoStar Group",
+   "intervals": [
+    {
+     "from": "2022-09-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CSRA",
+   "name": "CSRA",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-04-04"
+    }
+   ]
+  },
+  {
+   "ticker": "CSX",
+   "name": "CSX Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CTAS",
+   "name": "Cintas",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CTLT",
+   "name": "Catalent",
+   "intervals": [
+    {
+     "from": "2020-09-21",
+     "to": "2024-12-23"
+    }
+   ]
+  },
+  {
+   "ticker": "CTRA",
+   "name": "Coterra Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2026-05-07"
+    }
+   ]
+  },
+  {
+   "ticker": "CTSH",
+   "name": "Cognizant",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CTVA",
+   "name": "Corteva",
+   "intervals": [
+    {
+     "from": "2019-06-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CTXS",
+   "name": "Citrix Systems",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-10-03"
+    }
+   ]
+  },
+  {
+   "ticker": "CVC",
+   "name": "Cablevision Systems",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "CVS",
+   "name": "CVS Health",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CVX",
+   "name": "Chevron Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "CXO",
+   "name": "Concho Resources",
+   "intervals": [
+    {
+     "from": "2016-02-22",
+     "to": "2021-01-21"
+    }
+   ]
+  },
+  {
+   "ticker": "CZR",
+   "name": "Caesars Entertainment",
+   "intervals": [
+    {
+     "from": "2021-03-22",
+     "to": "2025-09-22"
+    }
+   ]
+  },
+  {
+   "ticker": "D",
+   "name": "Dominion Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DAL",
+   "name": "Delta Air Lines",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DAY",
+   "name": "Dayforce",
+   "intervals": [
+    {
+     "from": "2024-02-01",
+     "to": "2026-02-09"
+    }
+   ]
+  },
+  {
+   "ticker": "DD",
+   "name": "DuPont",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-09-01"
+    },
+    {
+     "from": "2019-06-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DE",
+   "name": "Deere & Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DECK",
+   "name": "Deckers Brands",
+   "intervals": [
+    {
+     "from": "2024-03-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DFS",
+   "name": "Discover Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-05-19"
+    }
+   ]
+  },
+  {
+   "ticker": "DG",
+   "name": "Dollar General",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DGX",
+   "name": "Quest Diagnostics",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DHI",
+   "name": "D. R. Horton",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DHR",
+   "name": "Danaher Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DIS",
+   "name": "Walt Disney Company (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DISCA",
+   "name": "Discovery, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-04-11"
+    }
+   ]
+  },
+  {
+   "ticker": "DISCK",
+   "name": "Discovery, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-04-11"
+    }
+   ]
+  },
+  {
+   "ticker": "DISH",
+   "name": "Dish Network",
+   "intervals": [
+    {
+     "from": "2017-03-13",
+     "to": "2023-06-20"
+    }
+   ]
+  },
+  {
+   "ticker": "DLR",
+   "name": "Digital Realty",
+   "intervals": [
+    {
+     "from": "2016-05-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DLTR",
+   "name": "Dollar Tree",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DNB",
+   "name": "Dun & Bradstreet",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-04-05"
+    }
+   ]
+  },
+  {
+   "ticker": "DO",
+   "name": "Diamond Offshore Drilling",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-09-30"
+    }
+   ]
+  },
+  {
+   "ticker": "DOC",
+   "name": "Healthpeak Properties",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DOV",
+   "name": "Dover Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DOW",
+   "name": "Dow Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-09-01"
+    },
+    {
+     "from": "2019-04-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DPS",
+   "name": "Dr Pepper Snapple Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-07-02"
+    }
+   ]
+  },
+  {
+   "ticker": "DPZ",
+   "name": "Domino's",
+   "intervals": [
+    {
+     "from": "2020-05-12",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DRE",
+   "name": "Duke Realty",
+   "intervals": [
+    {
+     "from": "2017-07-26",
+     "to": "2022-10-03"
+    }
+   ]
+  },
+  {
+   "ticker": "DRI",
+   "name": "Darden Restaurants",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DTE",
+   "name": "DTE Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DUK",
+   "name": "Duke Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DVA",
+   "name": "DaVita",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DVN",
+   "name": "Devon Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "DWDP",
+   "name": "DuPont",
+   "intervals": [
+    {
+     "from": "2017-09-01",
+     "to": "2019-06-03"
+    }
+   ]
+  },
+  {
+   "ticker": "DXC",
+   "name": "DXC Technology",
+   "intervals": [
+    {
+     "from": "2017-04-04",
+     "to": "2023-10-03"
+    }
+   ]
+  },
+  {
+   "ticker": "DXCM",
+   "name": "Dexcom",
+   "intervals": [
+    {
+     "from": "2020-05-12",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EA",
+   "name": "Electronic Arts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2026-08-05"
+    }
+   ]
+  },
+  {
+   "ticker": "EBAY",
+   "name": "eBay Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ECL",
+   "name": "Ecolab",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ED",
+   "name": "Consolidated Edison",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EFX",
+   "name": "Equifax",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EG",
+   "name": "Everest Group",
+   "intervals": [
+    {
+     "from": "2017-06-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EIX",
+   "name": "Edison International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EL",
+   "name": "Est\u00e9e Lauder Companies (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ELV",
+   "name": "Elevance Health",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EMC",
+   "name": "EMC Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-09-08"
+    }
+   ]
+  },
+  {
+   "ticker": "EMN",
+   "name": "Eastman Chemical Co.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-11-04"
+    }
+   ]
+  },
+  {
+   "ticker": "EMR",
+   "name": "Emerson Electric",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ENDP",
+   "name": "Endo International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-02"
+    }
+   ]
+  },
+  {
+   "ticker": "ENPH",
+   "name": "Enphase Energy",
+   "intervals": [
+    {
+     "from": "2021-01-07",
+     "to": "2025-09-22"
+    }
+   ]
+  },
+  {
+   "ticker": "EOG",
+   "name": "EOG Resources",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EPAM",
+   "name": "EPAM Systems",
+   "intervals": [
+    {
+     "from": "2021-12-14",
+     "to": "2026-06-02"
+    }
+   ]
+  },
+  {
+   "ticker": "EQIX",
+   "name": "Equinix",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EQT",
+   "name": "EQT Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-11-13"
+    },
+    {
+     "from": "2022-10-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ES",
+   "name": "Eversource Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ESRX",
+   "name": "Express Scripts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-12-24"
+    }
+   ]
+  },
+  {
+   "ticker": "ESS",
+   "name": "Essex Property Trust",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ESV",
+   "name": "Ensco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-03-30"
+    }
+   ]
+  },
+  {
+   "ticker": "ETFC",
+   "name": "E-Trade",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-10-07"
+    }
+   ]
+  },
+  {
+   "ticker": "ETN",
+   "name": "Eaton Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ETR",
+   "name": "Entergy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ETSY",
+   "name": "Etsy",
+   "intervals": [
+    {
+     "from": "2020-09-21",
+     "to": "2024-09-23"
+    }
+   ]
+  },
+  {
+   "ticker": "EVHC",
+   "name": "Envision Healthcare",
+   "intervals": [
+    {
+     "from": "2016-12-02",
+     "to": "2018-10-11"
+    }
+   ]
+  },
+  {
+   "ticker": "EVRG",
+   "name": "Evergy",
+   "intervals": [
+    {
+     "from": "2018-06-05",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EW",
+   "name": "Edwards Lifesciences",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EXC",
+   "name": "Exelon",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EXPD",
+   "name": "Expeditors International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EXPE",
+   "name": "Expedia Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "EXR",
+   "name": "Extra Space Storage",
+   "intervals": [
+    {
+     "from": "2016-01-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "F",
+   "name": "Ford Motor Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FANG",
+   "name": "Diamondback Energy",
+   "intervals": [
+    {
+     "from": "2018-12-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FAST",
+   "name": "Fastenal",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FBHS",
+   "name": "Fortune Brands Home & Security",
+   "intervals": [
+    {
+     "from": "2016-06-22",
+     "to": "2022-12-19"
+    }
+   ]
+  },
+  {
+   "ticker": "FCX",
+   "name": "Freeport-McMoRan",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FDS",
+   "name": "FactSet",
+   "intervals": [
+    {
+     "from": "2021-12-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FDX",
+   "name": "FedEx",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FE",
+   "name": "FirstEnergy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FFIV",
+   "name": "F5, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FICO",
+   "name": "Fair Isaac",
+   "intervals": [
+    {
+     "from": "2023-03-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FIS",
+   "name": "Fidelity National Information Services",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FISV",
+   "name": "Fiserv",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FITB",
+   "name": "Fifth Third Bancorp",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FL",
+   "name": "Foot Locker",
+   "intervals": [
+    {
+     "from": "2016-04-04",
+     "to": "2019-08-09"
+    }
+   ]
+  },
+  {
+   "ticker": "FLIR",
+   "name": "FLIR Systems",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-05-14"
+    }
+   ]
+  },
+  {
+   "ticker": "FLR",
+   "name": "Fluor Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-06-03"
+    }
+   ]
+  },
+  {
+   "ticker": "FLS",
+   "name": "Flowserve",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-03-22"
+    }
+   ]
+  },
+  {
+   "ticker": "FLT",
+   "name": "FLEETCOR Technologies",
+   "intervals": [
+    {
+     "from": "2018-06-20",
+     "to": "2024-03-25"
+    }
+   ]
+  },
+  {
+   "ticker": "FMC",
+   "name": "FMC Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-03-24"
+    }
+   ]
+  },
+  {
+   "ticker": "FOSL",
+   "name": "Fossil Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-01-05"
+    }
+   ]
+  },
+  {
+   "ticker": "FOX",
+   "name": "Fox Corporation (Class B)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-03-19"
+    },
+    {
+     "from": "2019-03-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FOXA",
+   "name": "Fox Corporation (Class A)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-03-19"
+    },
+    {
+     "from": "2019-03-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FRC",
+   "name": "First Republic Bank",
+   "intervals": [
+    {
+     "from": "2019-01-02",
+     "to": "2023-05-04"
+    }
+   ]
+  },
+  {
+   "ticker": "FRT",
+   "name": "Federal Realty Investment Trust",
+   "intervals": [
+    {
+     "from": "2016-02-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FSLR",
+   "name": "First Solar",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-20"
+    },
+    {
+     "from": "2022-12-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FTI",
+   "name": "TechnipFMC",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-02-12"
+    }
+   ]
+  },
+  {
+   "ticker": "FTNT",
+   "name": "Fortinet",
+   "intervals": [
+    {
+     "from": "2018-10-11",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "FTR",
+   "name": "Frontier Communications",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-20"
+    }
+   ]
+  },
+  {
+   "ticker": "FTV",
+   "name": "Fortive",
+   "intervals": [
+    {
+     "from": "2016-07-05",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GAS",
+   "name": "AGL Resources",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-07-01"
+    }
+   ]
+  },
+  {
+   "ticker": "GD",
+   "name": "General Dynamics",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GDDY",
+   "name": "GoDaddy",
+   "intervals": [
+    {
+     "from": "2024-06-24",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GE",
+   "name": "GE Aerospace",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GEHC",
+   "name": "GE HealthCare",
+   "intervals": [
+    {
+     "from": "2023-01-04",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GEN",
+   "name": "Gen Digital",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GEV",
+   "name": "GE Vernova",
+   "intervals": [
+    {
+     "from": "2024-04-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GGP",
+   "name": "GGP Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-08-28"
+    }
+   ]
+  },
+  {
+   "ticker": "GILD",
+   "name": "Gilead Sciences",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GIS",
+   "name": "General Mills",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GL",
+   "name": "Globe Life",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GLW",
+   "name": "Corning Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GM",
+   "name": "General Motors",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GMCR",
+   "name": "Keurig Green Mountain",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-03-07"
+    }
+   ]
+  },
+  {
+   "ticker": "GME",
+   "name": "GameStop",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-04-25"
+    }
+   ]
+  },
+  {
+   "ticker": "GNRC",
+   "name": "Generac",
+   "intervals": [
+    {
+     "from": "2021-03-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GOOG",
+   "name": "Alphabet Inc. (Class C)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GOOGL",
+   "name": "Alphabet Inc. (Class A)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GPC",
+   "name": "Genuine Parts Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GPN",
+   "name": "Global Payments",
+   "intervals": [
+    {
+     "from": "2016-04-25",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GPS",
+   "name": "Gap",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-02-03"
+    }
+   ]
+  },
+  {
+   "ticker": "GRMN",
+   "name": "Garmin",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GS",
+   "name": "Goldman Sachs",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "GT",
+   "name": "The Goodyear Tire & Rubber Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-02-27"
+    }
+   ]
+  },
+  {
+   "ticker": "GWW",
+   "name": "W. W. Grainger",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HAL",
+   "name": "Halliburton",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HAR",
+   "name": "Harman International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-16"
+    }
+   ]
+  },
+  {
+   "ticker": "HAS",
+   "name": "Hasbro",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HBAN",
+   "name": "Huntington Bancshares",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HBI",
+   "name": "Hanesbrands",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-12-20"
+    }
+   ]
+  },
+  {
+   "ticker": "HCA",
+   "name": "HCA Healthcare",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HD",
+   "name": "Home Depot (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HES",
+   "name": "Hess Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-07-23"
+    }
+   ]
+  },
+  {
+   "ticker": "HFC",
+   "name": "HollyFrontier",
+   "intervals": [
+    {
+     "from": "2018-06-18",
+     "to": "2021-06-04"
+    }
+   ]
+  },
+  {
+   "ticker": "HIG",
+   "name": "Hartford (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HII",
+   "name": "Huntington Ingalls Industries",
+   "intervals": [
+    {
+     "from": "2018-01-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HLT",
+   "name": "Hilton Worldwide",
+   "intervals": [
+    {
+     "from": "2017-06-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HOG",
+   "name": "Harley-Davidson",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "HOLX",
+   "name": "Hologic",
+   "intervals": [
+    {
+     "from": "2016-03-30",
+     "to": "2026-04-09"
+    }
+   ]
+  },
+  {
+   "ticker": "HON",
+   "name": "Honeywell Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HOT",
+   "name": "Starwood Hotels and Resorts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-09-22"
+    }
+   ]
+  },
+  {
+   "ticker": "HP",
+   "name": "Helmerich & Payne",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-05-22"
+    }
+   ]
+  },
+  {
+   "ticker": "HPE",
+   "name": "Hewlett Packard Enterprise",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HPQ",
+   "name": "HP Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HRB",
+   "name": "H&R Block",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-09-21"
+    }
+   ]
+  },
+  {
+   "ticker": "HRL",
+   "name": "Hormel Foods",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HSIC",
+   "name": "Henry Schein",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HST",
+   "name": "Host Hotels & Resorts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HSY",
+   "name": "Hershey Company (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HUBB",
+   "name": "Hubbell Incorporated",
+   "intervals": [
+    {
+     "from": "2023-10-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HUM",
+   "name": "Humana",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "HWM",
+   "name": "Howmet Aerospace",
+   "intervals": [
+    {
+     "from": "2020-04-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IBM",
+   "name": "IBM",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ICE",
+   "name": "Intercontinental Exchange",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IDXX",
+   "name": "Idexx Laboratories",
+   "intervals": [
+    {
+     "from": "2017-01-05",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IEX",
+   "name": "IDEX Corporation",
+   "intervals": [
+    {
+     "from": "2019-08-09",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IFF",
+   "name": "International Flavors & Fragrances",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ILMN",
+   "name": "Illumina, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-06-24"
+    }
+   ]
+  },
+  {
+   "ticker": "INCY",
+   "name": "Incyte",
+   "intervals": [
+    {
+     "from": "2017-02-28",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "INFO",
+   "name": "IHS Markit",
+   "intervals": [
+    {
+     "from": "2017-06-02",
+     "to": "2022-03-02"
+    }
+   ]
+  },
+  {
+   "ticker": "INTC",
+   "name": "Intel",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "INTU",
+   "name": "Intuit",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "INVH",
+   "name": "Invitation Homes",
+   "intervals": [
+    {
+     "from": "2022-09-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IP",
+   "name": "International Paper",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IPG",
+   "name": "Interpublic Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-11-28"
+    }
+   ]
+  },
+  {
+   "ticker": "IPGP",
+   "name": "IPG Photonics",
+   "intervals": [
+    {
+     "from": "2018-03-07",
+     "to": "2022-06-21"
+    }
+   ]
+  },
+  {
+   "ticker": "IQV",
+   "name": "IQVIA",
+   "intervals": [
+    {
+     "from": "2017-11-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IR",
+   "name": "Ingersoll Rand",
+   "intervals": [
+    {
+     "from": "2020-03-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IRM",
+   "name": "Iron Mountain",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ISRG",
+   "name": "Intuitive Surgical",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IT",
+   "name": "Gartner",
+   "intervals": [
+    {
+     "from": "2017-04-05",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ITW",
+   "name": "Illinois Tool Works",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "IVZ",
+   "name": "Invesco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "J",
+   "name": "Jacobs Solutions",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JBHT",
+   "name": "J.B. Hunt",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JBL",
+   "name": "Jabil",
+   "intervals": [
+    {
+     "from": "2023-12-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JCI",
+   "name": "Johnson Controls",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JEF",
+   "name": "Jefferies Financial Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-09-26"
+    }
+   ]
+  },
+  {
+   "ticker": "JKHY",
+   "name": "Jack Henry & Associates",
+   "intervals": [
+    {
+     "from": "2018-11-13",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JNJ",
+   "name": "Johnson & Johnson",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JNPR",
+   "name": "Juniper Networks",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-07-09"
+    }
+   ]
+  },
+  {
+   "ticker": "JPM",
+   "name": "JPMorgan Chase",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "JWN",
+   "name": "Nordstrom",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "K",
+   "name": "Kellanova",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-12-11"
+    }
+   ]
+  },
+  {
+   "ticker": "KDP",
+   "name": "Keurig Dr Pepper",
+   "intervals": [
+    {
+     "from": "2022-06-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KEY",
+   "name": "KeyCorp",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KEYS",
+   "name": "Keysight Technologies",
+   "intervals": [
+    {
+     "from": "2018-11-06",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KHC",
+   "name": "Kraft Heinz",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KIM",
+   "name": "Kimco Realty",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KKR",
+   "name": "KKR & Co.",
+   "intervals": [
+    {
+     "from": "2024-06-24",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KLAC",
+   "name": "KLA Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KMB",
+   "name": "Kimberly-Clark",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KMI",
+   "name": "Kinder Morgan",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KMX",
+   "name": "CarMax",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-10-31"
+    }
+   ]
+  },
+  {
+   "ticker": "KO",
+   "name": "Coca-Cola Company (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KR",
+   "name": "Kroger",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "KSS",
+   "name": "Kohl's",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-09-21"
+    }
+   ]
+  },
+  {
+   "ticker": "KSU",
+   "name": "Kansas City Southern",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-12-14"
+    }
+   ]
+  },
+  {
+   "ticker": "KVUE",
+   "name": "Kenvue",
+   "intervals": [
+    {
+     "from": "2023-08-25",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "L",
+   "name": "Loews Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LDOS",
+   "name": "Leidos",
+   "intervals": [
+    {
+     "from": "2019-08-09",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LEG",
+   "name": "Leggett & Platt",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-12-20"
+    }
+   ]
+  },
+  {
+   "ticker": "LEN",
+   "name": "Lennar",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LH",
+   "name": "Labcorp",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LHX",
+   "name": "L3Harris",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LIN",
+   "name": "Linde plc",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LKQ",
+   "name": "LKQ Corporation",
+   "intervals": [
+    {
+     "from": "2016-05-23",
+     "to": "2025-12-22"
+    }
+   ]
+  },
+  {
+   "ticker": "LLL",
+   "name": "L3 Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-07-01"
+    }
+   ]
+  },
+  {
+   "ticker": "LLTC",
+   "name": "Linear Technology",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-13"
+    }
+   ]
+  },
+  {
+   "ticker": "LLY",
+   "name": "Lilly (Eli)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LM",
+   "name": "Legg Mason",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-12-02"
+    }
+   ]
+  },
+  {
+   "ticker": "LMT",
+   "name": "Lockheed Martin",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LNC",
+   "name": "Lincoln National Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-09-18"
+    }
+   ]
+  },
+  {
+   "ticker": "LNT",
+   "name": "Alliant Energy",
+   "intervals": [
+    {
+     "from": "2016-07-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LOW",
+   "name": "Lowe's",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LRCX",
+   "name": "Lam Research",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LULU",
+   "name": "Lululemon Athletica",
+   "intervals": [
+    {
+     "from": "2023-10-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LUMN",
+   "name": "Lumen Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-03-20"
+    }
+   ]
+  },
+  {
+   "ticker": "LUV",
+   "name": "Southwest Airlines",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LVLT",
+   "name": "Level 3 Communications",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-10-13"
+    }
+   ]
+  },
+  {
+   "ticker": "LVS",
+   "name": "Las Vegas Sands",
+   "intervals": [
+    {
+     "from": "2019-10-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LW",
+   "name": "Lamb Weston",
+   "intervals": [
+    {
+     "from": "2018-12-03",
+     "to": "2026-03-23"
+    }
+   ]
+  },
+  {
+   "ticker": "LYB",
+   "name": "LyondellBasell",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "LYV",
+   "name": "Live Nation Entertainment",
+   "intervals": [
+    {
+     "from": "2019-12-23",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "M",
+   "name": "Macy's",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-04-06"
+    }
+   ]
+  },
+  {
+   "ticker": "MA",
+   "name": "Mastercard",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MAA",
+   "name": "Mid-America Apartment Communities",
+   "intervals": [
+    {
+     "from": "2016-12-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MAC",
+   "name": "Macerich",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-12-23"
+    }
+   ]
+  },
+  {
+   "ticker": "MAR",
+   "name": "Marriott International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MAS",
+   "name": "Masco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MAT",
+   "name": "Mattel",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-06-07"
+    }
+   ]
+  },
+  {
+   "ticker": "MBC",
+   "name": "MasterBrand",
+   "intervals": [
+    {
+     "from": "2022-12-15",
+     "to": "2022-12-19"
+    }
+   ]
+  },
+  {
+   "ticker": "MCD",
+   "name": "McDonald's",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MCHP",
+   "name": "Microchip Technology",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MCK",
+   "name": "McKesson Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MCO",
+   "name": "Moody's Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MDLZ",
+   "name": "Mondelez International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MDT",
+   "name": "Medtronic",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MET",
+   "name": "MetLife",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "META",
+   "name": "Meta Platforms",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MGM",
+   "name": "MGM Resorts",
+   "intervals": [
+    {
+     "from": "2017-07-26",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MHK",
+   "name": "Mohawk Industries",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-12-22"
+    }
+   ]
+  },
+  {
+   "ticker": "MJN",
+   "name": "Mead Johnson",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-06-19"
+    }
+   ]
+  },
+  {
+   "ticker": "MKC",
+   "name": "McCormick & Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MKTX",
+   "name": "MarketAxess",
+   "intervals": [
+    {
+     "from": "2019-07-01",
+     "to": "2025-09-22"
+    }
+   ]
+  },
+  {
+   "ticker": "MLM",
+   "name": "Martin Marietta Materials",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MMM",
+   "name": "3M",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MNK",
+   "name": "Mallinckrodt",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-26"
+    }
+   ]
+  },
+  {
+   "ticker": "MNST",
+   "name": "Monster Beverage",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MO",
+   "name": "Altria",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MOH",
+   "name": "Molina Healthcare",
+   "intervals": [
+    {
+     "from": "2022-03-02",
+     "to": "2026-03-23"
+    }
+   ]
+  },
+  {
+   "ticker": "MON",
+   "name": "Monsanto",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-06-07"
+    }
+   ]
+  },
+  {
+   "ticker": "MOS",
+   "name": "Mosaic Company (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MPC",
+   "name": "Marathon Petroleum",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MPWR",
+   "name": "Monolithic Power Systems",
+   "intervals": [
+    {
+     "from": "2021-02-12",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MRK",
+   "name": "Merck & Co.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MRNA",
+   "name": "Moderna",
+   "intervals": [
+    {
+     "from": "2021-07-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MRO",
+   "name": "Marathon Oil",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-11-26"
+    }
+   ]
+  },
+  {
+   "ticker": "MRSH",
+   "name": "Marsh McLennan",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MS",
+   "name": "Morgan Stanley",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MSCI",
+   "name": "MSCI",
+   "intervals": [
+    {
+     "from": "2018-04-04",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MSFT",
+   "name": "Microsoft",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MSI",
+   "name": "Motorola Solutions",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MTB",
+   "name": "M&T Bank",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MTCH",
+   "name": "Match Group",
+   "intervals": [
+    {
+     "from": "2021-09-20",
+     "to": "2026-03-23"
+    }
+   ]
+  },
+  {
+   "ticker": "MTD",
+   "name": "Mettler Toledo",
+   "intervals": [
+    {
+     "from": "2016-09-06",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MU",
+   "name": "Micron Technology",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "MUR",
+   "name": "Murphy Oil",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-26"
+    }
+   ]
+  },
+  {
+   "ticker": "MXIM",
+   "name": "Maxim Integrated",
+   "intervals": [
+    {
+     "from": "2018-12-03",
+     "to": "2021-08-30"
+    }
+   ]
+  },
+  {
+   "ticker": "NAVI",
+   "name": "Navient",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-06-05"
+    }
+   ]
+  },
+  {
+   "ticker": "NBL",
+   "name": "Noble Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-10-12"
+    }
+   ]
+  },
+  {
+   "ticker": "NCLH",
+   "name": "Norwegian Cruise Line Holdings",
+   "intervals": [
+    {
+     "from": "2017-10-13",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NDAQ",
+   "name": "Nasdaq, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NDSN",
+   "name": "Nordson Corporation",
+   "intervals": [
+    {
+     "from": "2022-02-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NEE",
+   "name": "NextEra Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NEM",
+   "name": "Newmont",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NFLX",
+   "name": "Netflix",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NFX",
+   "name": "Newfield Exploration",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-02-15"
+    }
+   ]
+  },
+  {
+   "ticker": "NI",
+   "name": "NiSource",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NKE",
+   "name": "Nike, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NKTR",
+   "name": "Nektar Therapeutics",
+   "intervals": [
+    {
+     "from": "2018-03-19",
+     "to": "2019-10-03"
+    }
+   ]
+  },
+  {
+   "ticker": "NLSN",
+   "name": "Nielsen Holdings",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-10-12"
+    }
+   ]
+  },
+  {
+   "ticker": "NOC",
+   "name": "Northrop Grumman",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NOV",
+   "name": "Nov",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-09-20"
+    }
+   ]
+  },
+  {
+   "ticker": "NOW",
+   "name": "ServiceNow",
+   "intervals": [
+    {
+     "from": "2019-11-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NRG",
+   "name": "NRG Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NSC",
+   "name": "Norfolk Southern",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NTAP",
+   "name": "NetApp",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NTRS",
+   "name": "Northern Trust",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NUE",
+   "name": "Nucor",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NVDA",
+   "name": "Nvidia",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NVR",
+   "name": "NVR, Inc.",
+   "intervals": [
+    {
+     "from": "2019-09-26",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NWL",
+   "name": "Newell Brands",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-09-18"
+    }
+   ]
+  },
+  {
+   "ticker": "NWS",
+   "name": "News Corp (Class B)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NWSA",
+   "name": "News Corp (Class A)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "NXPI",
+   "name": "NXP Semiconductors",
+   "intervals": [
+    {
+     "from": "2021-03-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "O",
+   "name": "Realty Income",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ODFL",
+   "name": "Old Dominion",
+   "intervals": [
+    {
+     "from": "2019-12-09",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "OGN",
+   "name": "Organon & Co.",
+   "intervals": [
+    {
+     "from": "2021-06-03",
+     "to": "2023-10-18"
+    }
+   ]
+  },
+  {
+   "ticker": "OI",
+   "name": "Owens-Illinois",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-12-02"
+    }
+   ]
+  },
+  {
+   "ticker": "OKE",
+   "name": "Oneok",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "OMC",
+   "name": "Omnicom Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ON",
+   "name": "ON Semiconductor",
+   "intervals": [
+    {
+     "from": "2022-06-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ORCL",
+   "name": "Oracle Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ORLY",
+   "name": "O'Reilly Automotive",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "OTIS",
+   "name": "Otis Worldwide",
+   "intervals": [
+    {
+     "from": "2020-04-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "OXY",
+   "name": "Occidental Petroleum",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PANW",
+   "name": "Palo Alto Networks",
+   "intervals": [
+    {
+     "from": "2023-06-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PAYC",
+   "name": "Paycom",
+   "intervals": [
+    {
+     "from": "2020-01-28",
+     "to": "2026-03-23"
+    }
+   ]
+  },
+  {
+   "ticker": "PAYX",
+   "name": "Paychex",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PBCT",
+   "name": "People's United Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-04-04"
+    }
+   ]
+  },
+  {
+   "ticker": "PBI",
+   "name": "Pitney Bowes",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-01"
+    }
+   ]
+  },
+  {
+   "ticker": "PCAR",
+   "name": "Paccar",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PCG",
+   "name": "PG&E Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-01-18"
+    },
+    {
+     "from": "2022-10-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PCL",
+   "name": "Plum Creek Timber",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-02-22"
+    }
+   ]
+  },
+  {
+   "ticker": "PCP",
+   "name": "Precision Castparts Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-02-01"
+    }
+   ]
+  },
+  {
+   "ticker": "PDCO",
+   "name": "Patterson Companies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-03-19"
+    }
+   ]
+  },
+  {
+   "ticker": "PEG",
+   "name": "Public Service Enterprise Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PENN",
+   "name": "Penn Entertainment",
+   "intervals": [
+    {
+     "from": "2021-03-22",
+     "to": "2022-09-19"
+    }
+   ]
+  },
+  {
+   "ticker": "PEP",
+   "name": "PepsiCo",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PFE",
+   "name": "Pfizer",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PFG",
+   "name": "Principal Financial Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PG",
+   "name": "Procter & Gamble",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PGR",
+   "name": "Progressive Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PH",
+   "name": "Parker Hannifin",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PHM",
+   "name": "PulteGroup",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PKG",
+   "name": "Packaging Corporation of America",
+   "intervals": [
+    {
+     "from": "2017-07-26",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PLD",
+   "name": "Prologis",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PM",
+   "name": "Philip Morris International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PNC",
+   "name": "PNC Financial Services",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PNR",
+   "name": "Pentair",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PNW",
+   "name": "Pinnacle West Capital",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PODD",
+   "name": "Insulet Corporation",
+   "intervals": [
+    {
+     "from": "2023-03-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "POM",
+   "name": "Pepco Holdings",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-03-30"
+    }
+   ]
+  },
+  {
+   "ticker": "POOL",
+   "name": "Pool Corporation",
+   "intervals": [
+    {
+     "from": "2020-10-07",
+     "to": "2026-06-22"
+    }
+   ]
+  },
+  {
+   "ticker": "PPG",
+   "name": "PPG Industries",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PPL",
+   "name": "PPL Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PRGO",
+   "name": "Perrigo",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-09-20"
+    }
+   ]
+  },
+  {
+   "ticker": "PRU",
+   "name": "Prudential Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PSA",
+   "name": "Public Storage",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PSKY",
+   "name": "Paramount Skydance Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PSX",
+   "name": "Phillips 66",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PTC",
+   "name": "PTC Inc.",
+   "intervals": [
+    {
+     "from": "2021-04-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PVH",
+   "name": "PVH",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-09-19"
+    }
+   ]
+  },
+  {
+   "ticker": "PWR",
+   "name": "Quanta Services",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "PXD",
+   "name": "Pioneer Natural Resources",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-05-08"
+    }
+   ]
+  },
+  {
+   "ticker": "PYPL",
+   "name": "PayPal",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "Q",
+   "name": "Qnity Electronics",
+   "intervals": [
+    {
+     "from": "2017-08-29",
+     "to": "2017-11-15"
+    }
+   ]
+  },
+  {
+   "ticker": "QCOM",
+   "name": "Qualcomm",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "QRVO",
+   "name": "Qorvo",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-12-23"
+    }
+   ]
+  },
+  {
+   "ticker": "R",
+   "name": "Ryder System",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-06-19"
+    }
+   ]
+  },
+  {
+   "ticker": "RAI",
+   "name": "Reynolds American",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-26"
+    }
+   ]
+  },
+  {
+   "ticker": "RCL",
+   "name": "Royal Caribbean Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "REG",
+   "name": "Regency Centers",
+   "intervals": [
+    {
+     "from": "2017-03-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "REGN",
+   "name": "Regeneron Pharmaceuticals",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RF",
+   "name": "Regions Financial Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RHI",
+   "name": "Robert Half",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-06-24"
+    }
+   ]
+  },
+  {
+   "ticker": "RHT",
+   "name": "Red Hat",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-07-15"
+    }
+   ]
+  },
+  {
+   "ticker": "RIG",
+   "name": "Transocean",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-07-26"
+    }
+   ]
+  },
+  {
+   "ticker": "RJF",
+   "name": "Raymond James Financial",
+   "intervals": [
+    {
+     "from": "2017-03-20",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RL",
+   "name": "Ralph Lauren Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RMD",
+   "name": "ResMed",
+   "intervals": [
+    {
+     "from": "2017-07-26",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ROK",
+   "name": "Rockwell Automation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ROL",
+   "name": "Rollins, Inc.",
+   "intervals": [
+    {
+     "from": "2018-10-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ROP",
+   "name": "Roper Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ROST",
+   "name": "Ross Stores",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RRC",
+   "name": "Range Resources",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-06-18"
+    }
+   ]
+  },
+  {
+   "ticker": "RSG",
+   "name": "Republic Services",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RTN",
+   "name": "Raytheon Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-04-06"
+    }
+   ]
+  },
+  {
+   "ticker": "RTX",
+   "name": "RTX Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "RVTY",
+   "name": "Revvity",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SBAC",
+   "name": "SBA Communications",
+   "intervals": [
+    {
+     "from": "2017-09-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SBNY",
+   "name": "Signature Bank",
+   "intervals": [
+    {
+     "from": "2021-12-20",
+     "to": "2023-03-15"
+    }
+   ]
+  },
+  {
+   "ticker": "SBUX",
+   "name": "Starbucks",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SCG",
+   "name": "SCANA",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-01-02"
+    }
+   ]
+  },
+  {
+   "ticker": "SCHW",
+   "name": "Charles Schwab Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SE",
+   "name": "Spectra Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-02-28"
+    }
+   ]
+  },
+  {
+   "ticker": "SEDG",
+   "name": "SolarEdge",
+   "intervals": [
+    {
+     "from": "2021-12-20",
+     "to": "2023-12-18"
+    }
+   ]
+  },
+  {
+   "ticker": "SEE",
+   "name": "Sealed Air",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-12-18"
+    }
+   ]
+  },
+  {
+   "ticker": "SHW",
+   "name": "Sherwin-Williams",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SIG",
+   "name": "Signet Jewelers",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-03-19"
+    }
+   ]
+  },
+  {
+   "ticker": "SIVB",
+   "name": "SVB Financial Group",
+   "intervals": [
+    {
+     "from": "2018-03-19",
+     "to": "2023-03-15"
+    }
+   ]
+  },
+  {
+   "ticker": "SJM",
+   "name": "J.M. Smucker Company (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SLB",
+   "name": "Schlumberger",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SLG",
+   "name": "SL Green Realty",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-03-22"
+    }
+   ]
+  },
+  {
+   "ticker": "SMCI",
+   "name": "Supermicro",
+   "intervals": [
+    {
+     "from": "2024-03-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SNA",
+   "name": "Snap-on",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SNDK",
+   "name": "Sandisk",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-05-13"
+    }
+   ]
+  },
+  {
+   "ticker": "SNI",
+   "name": "Scripps Networks Interactive",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-03-07"
+    }
+   ]
+  },
+  {
+   "ticker": "SNPS",
+   "name": "Synopsys",
+   "intervals": [
+    {
+     "from": "2017-03-16",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SO",
+   "name": "Southern Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SOLV",
+   "name": "Solventum",
+   "intervals": [
+    {
+     "from": "2024-04-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SPG",
+   "name": "Simon Property Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SPGI",
+   "name": "S&P Global",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SPLS",
+   "name": "Staples",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-09-18"
+    }
+   ]
+  },
+  {
+   "ticker": "SRCL",
+   "name": "Stericycle",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-12-03"
+    }
+   ]
+  },
+  {
+   "ticker": "SRE",
+   "name": "Sempra",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "STE",
+   "name": "Steris",
+   "intervals": [
+    {
+     "from": "2019-12-23",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "STI",
+   "name": "SunTrust Banks",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-12-09"
+    }
+   ]
+  },
+  {
+   "ticker": "STJ",
+   "name": "St Jude Medical",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-01-05"
+    }
+   ]
+  },
+  {
+   "ticker": "STLD",
+   "name": "Steel Dynamics",
+   "intervals": [
+    {
+     "from": "2022-12-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "STT",
+   "name": "State Street Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "STX",
+   "name": "Seagate Technology",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "STZ",
+   "name": "Constellation Brands",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SW",
+   "name": "Smurfit Westrock",
+   "intervals": [
+    {
+     "from": "2024-07-08",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SWK",
+   "name": "Stanley Black & Decker",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SWKS",
+   "name": "Skyworks Solutions",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SWN",
+   "name": "Southwestern Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-04-04"
+    }
+   ]
+  },
+  {
+   "ticker": "SYF",
+   "name": "Synchrony Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SYK",
+   "name": "Stryker Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "SYY",
+   "name": "Sysco",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "T",
+   "name": "AT&T",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TAP",
+   "name": "Molson Coors Beverage Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TDC",
+   "name": "Teradata",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-06-19"
+    }
+   ]
+  },
+  {
+   "ticker": "TDG",
+   "name": "TransDigm Group",
+   "intervals": [
+    {
+     "from": "2016-06-03",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TDY",
+   "name": "Teledyne Technologies",
+   "intervals": [
+    {
+     "from": "2020-06-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TE",
+   "name": "TECO Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-07-01"
+    }
+   ]
+  },
+  {
+   "ticker": "TECH",
+   "name": "Bio-Techne",
+   "intervals": [
+    {
+     "from": "2021-08-30",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TEL",
+   "name": "TE Connectivity",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TER",
+   "name": "Teradyne",
+   "intervals": [
+    {
+     "from": "2020-09-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TFC",
+   "name": "Truist Financial",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TFX",
+   "name": "Teleflex",
+   "intervals": [
+    {
+     "from": "2019-01-18",
+     "to": "2025-03-24"
+    }
+   ]
+  },
+  {
+   "ticker": "TGNA",
+   "name": "Tegna",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-06-02"
+    }
+   ]
+  },
+  {
+   "ticker": "TGT",
+   "name": "Target Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "THC",
+   "name": "Tenet Healthcare",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-04-18"
+    }
+   ]
+  },
+  {
+   "ticker": "TIF",
+   "name": "Tiffany & Co",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-01-07"
+    }
+   ]
+  },
+  {
+   "ticker": "TJX",
+   "name": "TJX Companies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TMO",
+   "name": "Thermo Fisher Scientific",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TMUS",
+   "name": "T-Mobile US",
+   "intervals": [
+    {
+     "from": "2019-07-15",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TPR",
+   "name": "Tapestry, Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TRGP",
+   "name": "Targa Resources",
+   "intervals": [
+    {
+     "from": "2022-10-12",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TRIP",
+   "name": "TripAdvisor",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-12-23"
+    }
+   ]
+  },
+  {
+   "ticker": "TRMB",
+   "name": "Trimble Inc.",
+   "intervals": [
+    {
+     "from": "2021-01-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TROW",
+   "name": "T. Rowe Price",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TRV",
+   "name": "Travelers Companies (The)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TSCO",
+   "name": "Tractor Supply",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TSLA",
+   "name": "Tesla, Inc.",
+   "intervals": [
+    {
+     "from": "2020-12-21",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TSN",
+   "name": "Tyson Foods",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TSS",
+   "name": "TSYS",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-09-23"
+    }
+   ]
+  },
+  {
+   "ticker": "TT",
+   "name": "Trane Technologies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TTWO",
+   "name": "Take-Two Interactive",
+   "intervals": [
+    {
+     "from": "2018-03-19",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TWC",
+   "name": "Time Warner Cable",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-05-18"
+    }
+   ]
+  },
+  {
+   "ticker": "TWTR",
+   "name": "Twitter",
+   "intervals": [
+    {
+     "from": "2018-06-07",
+     "to": "2022-11-01"
+    }
+   ]
+  },
+  {
+   "ticker": "TWX",
+   "name": "Time Warner",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-06-20"
+    }
+   ]
+  },
+  {
+   "ticker": "TXN",
+   "name": "Texas Instruments",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TXT",
+   "name": "Textron",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "TYC",
+   "name": "Tyco International",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2016-09-06"
+    }
+   ]
+  },
+  {
+   "ticker": "TYL",
+   "name": "Tyler Technologies",
+   "intervals": [
+    {
+     "from": "2020-06-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UA",
+   "name": "Under Armour (Class C)",
+   "intervals": [
+    {
+     "from": "2016-04-08",
+     "to": "2022-06-21"
+    }
+   ]
+  },
+  {
+   "ticker": "UAA",
+   "name": "Under Armour (Class A)",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-06-21"
+    }
+   ]
+  },
+  {
+   "ticker": "UAL",
+   "name": "United Airlines Holdings",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UBER",
+   "name": "Uber",
+   "intervals": [
+    {
+     "from": "2023-12-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UDR",
+   "name": "UDR, Inc.",
+   "intervals": [
+    {
+     "from": "2016-03-07",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UHS",
+   "name": "Universal Health Services",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ULTA",
+   "name": "Ulta Beauty",
+   "intervals": [
+    {
+     "from": "2016-04-18",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UNH",
+   "name": "UnitedHealth Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UNM",
+   "name": "Unum",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-09-20"
+    }
+   ]
+  },
+  {
+   "ticker": "UNP",
+   "name": "Union Pacific Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "UPS",
+   "name": "United Parcel Service",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "URBN",
+   "name": "Urban Outfitters",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-03-20"
+    }
+   ]
+  },
+  {
+   "ticker": "URI",
+   "name": "United Rentals",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "USB",
+   "name": "U.S. Bancorp",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "V",
+   "name": "Visa Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VAR",
+   "name": "Varian Medical Systems",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-04-20"
+    }
+   ]
+  },
+  {
+   "ticker": "VFC",
+   "name": "VF Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-04-03"
+    }
+   ]
+  },
+  {
+   "ticker": "VIAB",
+   "name": "Viacom",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2019-12-05"
+    }
+   ]
+  },
+  {
+   "ticker": "VICI",
+   "name": "Vici Properties",
+   "intervals": [
+    {
+     "from": "2022-06-08",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VLO",
+   "name": "Valero Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VLTO",
+   "name": "Veralto",
+   "intervals": [
+    {
+     "from": "2023-10-02",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VMC",
+   "name": "Vulcan Materials Company",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VMRK",
+   "name": "Vivmark Residential",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VNO",
+   "name": "Vornado Realty Trust",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2023-01-05"
+    }
+   ]
+  },
+  {
+   "ticker": "VNT",
+   "name": "Vontier",
+   "intervals": [
+    {
+     "from": "2020-10-09",
+     "to": "2021-03-22"
+    }
+   ]
+  },
+  {
+   "ticker": "VRSK",
+   "name": "Verisk Analytics",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VRSN",
+   "name": "Verisign",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VRTX",
+   "name": "Vertex Pharmaceuticals",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VST",
+   "name": "Vistra Corp.",
+   "intervals": [
+    {
+     "from": "2024-05-08",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VTR",
+   "name": "Ventas",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VTRS",
+   "name": "Viatris",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "VZ",
+   "name": "Verizon",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WAB",
+   "name": "Wabtec",
+   "intervals": [
+    {
+     "from": "2019-02-27",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WAT",
+   "name": "Waters Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WBA",
+   "name": "Walgreens Boots Alliance",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2025-08-28"
+    }
+   ]
+  },
+  {
+   "ticker": "WBD",
+   "name": "Warner Bros. Discovery",
+   "intervals": [
+    {
+     "from": "2022-04-11",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WCG",
+   "name": "WellCare",
+   "intervals": [
+    {
+     "from": "2018-09-14",
+     "to": "2020-01-28"
+    }
+   ]
+  },
+  {
+   "ticker": "WDC",
+   "name": "Western Digital",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WEC",
+   "name": "WEC Energy Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WELL",
+   "name": "Welltower",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WFC",
+   "name": "Wells Fargo",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WFM",
+   "name": "Whole Foods Market",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-08-29"
+    }
+   ]
+  },
+  {
+   "ticker": "WHR",
+   "name": "Whirlpool Corporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-03-18"
+    }
+   ]
+  },
+  {
+   "ticker": "WLTW",
+   "name": "Willis Towers Watson",
+   "intervals": [
+    {
+     "from": "2016-01-05",
+     "to": "2022-01-10"
+    }
+   ]
+  },
+  {
+   "ticker": "WM",
+   "name": "Waste Management",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WMB",
+   "name": "Williams Companies",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WMT",
+   "name": "Walmart",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WRB",
+   "name": "W. R. Berkley Corporation",
+   "intervals": [
+    {
+     "from": "2019-12-05",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WST",
+   "name": "West Pharmaceutical Services",
+   "intervals": [
+    {
+     "from": "2020-05-22",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WTW",
+   "name": "Willis Towers Watson",
+   "intervals": [
+    {
+     "from": "2022-01-10",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WU",
+   "name": "Western Union",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-12-20"
+    }
+   ]
+  },
+  {
+   "ticker": "WY",
+   "name": "Weyerhaeuser",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "WYN",
+   "name": "Wyndham Worldwide",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-05-31"
+    }
+   ]
+  },
+  {
+   "ticker": "WYNN",
+   "name": "Wynn Resorts",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "XEC",
+   "name": "Cimarex Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2020-03-02"
+    }
+   ]
+  },
+  {
+   "ticker": "XEL",
+   "name": "Xcel Energy",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "XL",
+   "name": "XL Group",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2018-09-14"
+    }
+   ]
+  },
+  {
+   "ticker": "XLNX",
+   "name": "Xilinx",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2022-02-15"
+    }
+   ]
+  },
+  {
+   "ticker": "XOM",
+   "name": "ExxonMobil",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "XRAY",
+   "name": "Dentsply Sirona",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-04-03"
+    }
+   ]
+  },
+  {
+   "ticker": "XRX",
+   "name": "Xerox",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2021-03-22"
+    }
+   ]
+  },
+  {
+   "ticker": "XYL",
+   "name": "Xylem Inc.",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "YHOO",
+   "name": "Yahoo!",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2017-06-19"
+    }
+   ]
+  },
+  {
+   "ticker": "YUM",
+   "name": "Yum! Brands",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ZBH",
+   "name": "Zimmer Biomet",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ZBRA",
+   "name": "Zebra Technologies",
+   "intervals": [
+    {
+     "from": "2019-12-23",
+     "to": null
+    }
+   ]
+  },
+  {
+   "ticker": "ZION",
+   "name": "Zions Bancorporation",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": "2024-03-18"
+    }
+   ]
+  },
+  {
+   "ticker": "ZTS",
+   "name": "Zoetis",
+   "intervals": [
+    {
+     "from": "2016-01-01",
+     "to": null
+    }
+   ]
+  }
+ ]
+}

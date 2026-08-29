@@ -1,0 +1,201 @@
+phase: sealed  run 08167edd30d0  embargo 2024-09-01
+682 tickers, 2016-01-01 -> 2026-08-27, feed sip -> data-sp500-sealed/1D
+AA 1D: 2486 bars 2016-10-06 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+AAL 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+AAP 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+ABMD 1D: 1756 bars 2016-01-04 -> 2022-12-21
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+ADT 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 433 zero-volume bar(s)
+AIV 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+AMD 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APA 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APC 1D: 1042 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 2380 calendar days
+  ! 39% coverage: 1042 bars where 2682 sessions were expected
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APTV 1D: 2204 bars 2017-11-17 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 1 year(s) later than requested -- short history, not a broken series
+ARNC 1D: 1709 bars 2016-11-01 -> 2023-08-17
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+BBBY 1D: 2086 bars 2016-01-04 -> 2026-08-14
+  ! 1 gap(s), largest 850 calendar days
+  ! 78% coverage: 2086 bars where 2673 sessions were expected
+  ! 9 overnight move(s) over 40% -- these bars may not be split-adjusted
+BIIB 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 2 zero-volume bar(s)
+CA 1D: 2601 bars 2016-01-04 -> 2026-05-07
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 1323 zero-volume bar(s)
+CAM 1D: 287 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 3475 calendar days
+  ! 11% coverage: 287 bars where 2682 sessions were expected
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CHK 1D: 2201 bars 2016-01-04 -> 2024-10-01
+  ! 7 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 156 zero-volume bar(s)
+CNC 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CNX 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CPRI 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+CSRA 1D: 578 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 3053 calendar days
+  ! 22% coverage: 578 bars where 2682 sessions were expected
+CTRA 1D: 1880 bars 2018-11-09 -> 2026-05-06
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 2 year(s) later than requested -- short history, not a broken series
+  - 167 zero-volume bar(s)
+CZR 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DNB 1D: 2425 bars 2016-01-04 -> 2025-08-25
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 351 zero-volume bar(s)
+DO 1D: 2181 bars 2016-01-04 -> 2024-09-03
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 486 zero-volume bar(s)
+DXC 1D: 2364 bars 2017-04-03 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 1 year(s) later than requested -- short history, not a broken series
+DXCM 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 1 zero-volume bar(s)
+ENDP 1D: 1674 bars 2016-01-04 -> 2022-08-25
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+ENPH 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EPAM 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EQT 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EVHC 1D: 699 bars 2016-01-04 -> 2018-10-10
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FANG 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FISV 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FL 1D: 2433 bars 2016-01-04 -> 2025-09-05
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FLR 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FMC 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FOSL 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 5 overnight move(s) over 40% -- these bars may not be split-adjusted
+FRC 1D: 1843 bars 2016-01-04 -> 2023-04-28
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+FTR 1D: 1084 bars 2016-01-04 -> 2020-04-23
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+GL 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+GME 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 15 overnight move(s) over 40% -- these bars may not be split-adjusted
+INFO 1D: 2546 bars 2016-07-13 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+  - 662 zero-volume bar(s)
+KSS 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+LLL 1D: 1704 bars 2016-01-04 -> 2022-10-07
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 577 zero-volume bar(s)
+LUMN 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+MNK 1D: 1926 bars 2016-01-04 -> 2023-08-28
+  ! 9 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 516 zero-volume bar(s)
+MON 1D: 1758 bars 2016-01-04 -> 2022-12-23
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 791 zero-volume bar(s)
+MRNA 1D: 1940 bars 2018-12-07 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 2 year(s) later than requested -- short history, not a broken series
+MRO 1D: 2238 bars 2016-01-04 -> 2024-11-21
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+MUR 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+NCLH 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+NFX 1D: 822 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 2700 calendar days
+  ! 31% coverage: 822 bars where 2682 sessions were expected
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+NKTR 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 7 overnight move(s) over 40% -- these bars may not be split-adjusted
+NWL 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+OXY 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+PBI 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+PCG 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+PCL 1D: 303 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 3450 calendar days
+  ! 11% coverage: 303 bars where 2682 sessions were expected
+  - 65 zero-volume bar(s)
+PENN 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+POM 1D: 279 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 3486 calendar days
+  ! 10% coverage: 279 bars where 2682 sessions were expected
+  ! 5 overnight move(s) over 40% -- these bars may not be split-adjusted
+RHT 1D: 883 bars 2016-01-04 -> 2019-07-08
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+RIG 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+RRC 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+RTX 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SE 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 165 zero-volume bar(s)
+SIG 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SIVB 1D: 1808 bars 2016-01-04 -> 2023-03-09
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SMCI 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 349 zero-volume bar(s)
+SPLS 1D: 581 bars 2016-01-04 -> 2026-08-27
+  ! 1 gap(s), largest 3048 calendar days
+  ! 22% coverage: 581 bars where 2682 sessions were expected
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+STI 1D: 1085 bars 2022-05-02 -> 2026-08-27
+  ! 11 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 6 year(s) later than requested -- short history, not a broken series
+  - 206 zero-volume bar(s)
+SW 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+TE 1D: 1666 bars 2020-01-10 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 4 year(s) later than requested -- short history, not a broken series
+  - 17 zero-volume bar(s)
+TGNA 1D: 2568 bars 2016-01-04 -> 2026-03-20
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 1 zero-volume bar(s)
+TRGP 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+UA 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+XL 1D: 1729 bars 2016-01-04 -> 2022-11-11
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 574 zero-volume bar(s)
+XRX 1D: 2678 bars 2016-01-04 -> 2026-08-27
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+
+77 fetched, 605 already cached, 0 failed, 77 failed the quality check
+seal digest 14970a744b049382, 77 loads

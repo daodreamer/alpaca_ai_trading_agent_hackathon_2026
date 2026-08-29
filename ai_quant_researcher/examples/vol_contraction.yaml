@@ -1,0 +1,30 @@
+# Volatility contraction into a breakout.
+#
+# Fewer parameters than the pullback example on purpose: the overfitting
+# detector charges for every numeric literal, and a two-condition rule that
+# survives is stronger evidence than a five-condition rule with the same Sharpe.
+strategy:
+  name: vol_contraction_breakout_v1
+  hypothesis: >
+    Volatility clusters, so a compression in realised volatility resolves into
+    an expansion. Entering on the breakout of the compressed range captures the
+    expansion; the direction of the break carries information about which side
+    was constrained.
+
+  universe:
+    symbols: [SPY, QQQ, IWM, DIA]
+    timeframe: 1D
+
+  regime: vol_pct(20, 252) < 0.3
+  entry: close > highest(20) * 0.999 and rvol(20) > 1.5
+
+  exit:
+    stop_loss:   {type: atr, multiplier: 2.5, period: 14}
+    take_profit: {type: risk_reward, ratio: 2.5}
+    max_holding_bars: 15
+
+  sizing:
+    risk_per_trade: 0.005
+    max_position_pct: 0.25
+
+  max_positions: 3

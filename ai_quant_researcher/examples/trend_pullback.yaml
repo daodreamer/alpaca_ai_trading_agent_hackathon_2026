@@ -1,0 +1,32 @@
+# A pullback-in-uptrend strategy, written by hand as a worked example of the DSL.
+#
+# The hypothesis is the important field. A rule without a stated mechanism is a
+# pattern that happened to fit; the mechanism is what makes it falsifiable, and
+# what the Critic has something to argue with.
+strategy:
+  name: trend_pullback_v1
+  hypothesis: >
+    In an established uptrend a shallow pullback is profit-taking rather than a
+    change of trend. Buyers who missed the initial move supply demand near the
+    mean, so a dip toward EMA20 that has not broken momentum resolves upward.
+
+  universe:
+    symbols: [SPY, QQQ, IWM, DIA]
+    timeframe: 1D
+
+  # Gates every entry. Separating "is this the right market" from "is this the
+  # right moment" keeps the two questions independently testable.
+  regime: close > ema(200) and adx(14) > 20
+
+  entry: close <= ema(20) * 1.01 and rsi(14) > 40 and rvol(20) > 1.2
+
+  exit:
+    stop_loss:   {type: atr, multiplier: 2.0, period: 14}
+    take_profit: {type: risk_reward, ratio: 2.0}
+    max_holding_bars: 20
+
+  sizing:
+    risk_per_trade: 0.005
+    max_position_pct: 0.25
+
+  max_positions: 3

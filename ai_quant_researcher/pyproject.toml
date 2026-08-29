@@ -1,0 +1,70 @@
+[project]
+name = "aqr"
+version = "0.1.0"
+description = "AI Quant Researcher — LLM-driven strategy research, backtesting and validation (MVP v0.1)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "types-PyYAML",
+]
+data = ["yfinance>=0.2.40", "pandas>=2.2"]
+# Bars from the broker that prices the trades. httpx rather than alpaca-py:
+# the SDK is a large dependency for two endpoints, and this adapter needs an
+# injectable client far more than it needs models.
+alpaca = ["httpx>=0.28"]
+# Interactive Brokers. Also needs TWS or IB Gateway running and logged in --
+# no package can supply that.
+ibkr = ["ib_async>=1.0"]
+llm = ["anthropic>=0.40", "openai>=1.60"]
+
+[project.scripts]
+aqr = "aqr.cli:app"
+# A separate binary, not a subcommand: the sealed process must not be able to
+# reach `research`, and two entry points is how that is enforced rather than
+# remembered.
+aqr-sealed = "aqr.cli_sealed:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aqr"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Typer's entire API is function calls in argument defaults.
+"src/aqr/cli.py" = ["B008"]
+"src/aqr/cli_sealed.py" = ["B008"]
+
+[tool.mypy]
+# No python_version pin: numpy's bundled stubs use 3.12+ syntax, so mypy must
+# target the interpreter actually running it. The package itself runs on 3.11.
+files = ["src/aqr"]
+strict = true
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["yfinance.*", "yaml.*", "typer.*", "rich.*", "anthropic.*", "httpx.*", "ib_async.*", "openai.*"]
+ignore_missing_imports = true

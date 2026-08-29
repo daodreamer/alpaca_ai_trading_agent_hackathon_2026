@@ -1,0 +1,114 @@
+dropped 1 symbol(s) with under 1500 bars: PLTR (1483)
+researching 19 symbols on 1D bars from csv
+[1] long_volume_surge_range_contraction_breakout_v1: PAPER (61/100)
+[2] short_term_mean_reversion_after_volume_climax: REJECT (15/100)
+[3] volume_climax_zero_followthrough_v2: REJECT (12/100)
+[4] short_breakout_fade_on_low_volume_pullback_v2: REJECT (0/100)
+[5] range_contraction_high_low_break_fail_short_v2: REJECT (1/100)
+[6] volume_surge_trend_continuation_long_v2: PAPER (61/100)
+[7] short_overextended_low_volume_liquidity_trap_v1: REJECT (2/100)
+[8] post_gap_short_on_momentum_exhaustion_v2: REJECT (2/100)
+[9] low_vol_high_volume_long_continuation_v1: REJECT (39/100)
+[10] post_gap_short_on_fade_to_vwap_v1: REJECT (1/100)
+[11] short_term_high_rvol_reversal_v1: REJECT (14/100)
+[12] post_gap_short_on_fade_to_vwap_v3: REJECT (21/100)
+[13] high_vol_low_return_short_v2: REJECT (0/100)
+[14] dist_to_high_fade_short_v1: REJECT (59/100)
+[15] vol_contraction_price_squeeze_long_v1: PAPER (67/100)
+[16] double_volume_surge_exhaustion_short_v1: REJECT (2/100)
+[17] squeeze_breakout_failure_long_v1: REJECT (0/100)
+[18] gap_reversal_trap_short_v1: REJECT (14/100)
+[19] overnight_gap_fade_short_v1: REJECT (2/100)
+[20] trapped_breakout_short_failure_long_v2: REJECT (0/100)
+[21] post_breakout_stop_run_short_v1: REJECT (4/100)
+[22] vwap_rejection_momentum_exhaustion_short_v1: REJECT (3/100)
+[23] low_vol_gap_up_exhaustion_short_v1: REJECT (20/100)
+[24] rsi_divergence_reversal_long_v2: REJECT (61/100)
+[25] post_breakout_reversal_short_v2: REJECT (0/100)
+[26] high_volume_climax_reversal_short_v2: REJECT (0/100)
+[27] low_vol_reversal_breakout_long_v1: REJECT (0/100)
+[28] rvol_drying_up_breakdown_short_v2: REJECT (0/100)
+[29] low_vol_breakdown_reversal_long_v2: REJECT (0/100)
+[30] vol_expansion_breakout_pullback_long_v1: PAPER (56/100)
+[31] high_volume_breakdown_retest_short_v2: REJECT (0/100)
+[32] high_volume_climax_long_v1: PAPER (60/100)
+[33] tight_range_underperformance_reversal_long_v1: PAPER (56/100)
+[34] post_reversal_distribution_short_v1: REJECT (3/100)
+[35] low_vol_high_gap_reversal_short_v1: REJECT (53/100)
+[36] vol_squeeze_overreaction_long_v1: ERROR -- identical strategy already 
+evaluated; skipping the backtest
+[37] overnight_gap_fade_weak_close_short_v2: REJECT (3/100)
+[38] vwap_deviation_reversion_long_v2: REJECT (29/100)
+[39] breakout_volume_exhaustion_short_v1: REJECT (64/100)
+[40] slope_stall_trend_exhaustion_short_v2: REJECT (3/100)
+
+vol_contraction_price_squeeze_long_v1   score 67/100  PAPER
+  asset_robustness      68.4/100
+  max_drawdown         100.0/100
+  oos_sharpe            39.8/100
+  parameter_stability   95.4/100
+  profit_factor         46.9/100
+  regime_robustness    100.0/100
+  reasons:
+  - overfitting 0.41 (SUSPECT): 6322 backtest(s) evaluated to reach this 
+result; Sharpe 0.47 deflates to -0.56 after 6322 trials; top 22 of 433 trades 
+produced 138% of net profit
+vol_contraction_price_squeeze_long_v1 on 
+AAPL+AMD+AMZN+ASML+AVGO+AZN+COST+CSCO+GOOGL+INTU+LIN+META+MSFT+NFLX+NVDA+PEP+TM
+US+TSLA+TXN: 13 folds, OOS Sharpe 0.60 +/- 0.84, 69% folds positive, train-test
+gap -0.44
+  fold 0: train  -0.14 | test  -0.80 | ret   -5.4% |  47 trades
+  fold 1: train  -0.09 | test  -0.39 | ret   -2.5% |  33 trades
+  fold 2: train  -0.15 | test   0.85 | ret   +3.7% |  20 trades
+  fold 3: train  -0.08 | test   1.69 | ret  +11.9% |  43 trades
+  fold 4: train   0.03 | test   1.47 | ret   +7.9% |  23 trades
+  fold 5: train   0.16 | test  -0.73 | ret   -4.4% |  28 trades
+  fold 6: train   0.11 | test   1.11 | ret   +5.0% |  18 trades
+  fold 7: train   0.24 | test   1.05 | ret   +6.9% |  31 trades
+  fold 8: train   0.35 | test   0.27 | ret   +1.0% |  14 trades
+  fold 9: train   0.34 | test   1.30 | ret   +8.2% |  28 trades
+  fold 10: train   0.41 | test   0.82 | ret   +6.0% |  35 trades
+  fold 11: train   0.44 | test   1.14 | ret   +7.2% |  32 trades
+  fold 12: train   0.51 | test   0.00 | ret   -1.7% |   3 trades
+parameter stability 0.95 (baseline Sharpe 0.47) -- fragile: regime#2
+asset robustness 0.68
+  AAPL     sharpe   0.64  ret  +19.8%   43 trades
+  AMD      sharpe   0.38  ret  +10.3%   20 trades
+  AMZN     sharpe   0.21  ret   +4.8%   36 trades
+  ASML     sharpe   0.53  ret  +14.1%   31 trades
+  AVGO     sharpe   0.07  ret   +1.2%   23 trades
+  AZN      sharpe  -0.06  ret   -1.4%   34 trades
+  COST     sharpe   0.49  ret  +12.1%   42 trades
+  CSCO     sharpe  -0.24  ret   -4.9%   36 trades
+  GOOGL    sharpe   0.12  ret   +2.9%   37 trades
+  INTU     sharpe   0.14  ret   +2.9%   34 trades
+  LIN      sharpe  -0.66  ret  -10.4%   34 trades
+  META     sharpe   0.21  ret   +4.7%   31 trades
+  MSFT     sharpe   0.42  ret  +12.3%   44 trades
+  NFLX     sharpe   0.14  ret   +3.7%   34 trades
+  NVDA     sharpe   0.18  ret   +4.3%   23 trades
+  PEP      sharpe  -0.01  ret   -0.2%   37 trades
+  TMUS     sharpe  -0.29  ret   -4.8%   28 trades
+  TSLA     sharpe   0.24  ret   +5.4%   33 trades
+  TXN      sharpe  -0.21  ret   -5.1%   37 trades
+regime robustness 1.00
+  RANGE_HIGH_VOL   ret   -0.9%    1 trades   (not scored)
+  RANGE_LOW_VOL    ret  +20.6%  248 trades
+  TREND_BULL       ret  +33.7%  174 trades
+  UNKNOWN          ret   -1.2%   10 trades   (not scored)
+monte carlo (1000 trials): median DD 13.0%, p95 DD 23.1%, worst 36.7%, P(loss) 
+3%, P(ruin) 0.0%
+overfitting 0.41 -> SUSPECT
+search_cost              1.00  6322 backtest(s) evaluated to reach this result
+sharpe_inflation         1.00  Sharpe 0.47 deflates to -0.56 after 6322 trials
+profit_concentration     1.00  top 22 of 433 trades produced 138% of net profit
+time_concentration       0.34  best of 10 periods produced 40% of net profit
+asset_concentration      0.23  largest of 19 symbols contributed 27% of gross 
+profit
+cost_sensitivity         0.15  Sharpe 0.55 frictionless vs 0.47 with costs
+parameter_count          0.00  14 parameters fitted against 433 trades (30.9 
+trades per parameter)
+train_oos_gap            0.00  train Sharpe 0.16 vs OOS 0.60 (gap -0.44)
+sample_size              0.00  433 trades
+
+cumulative backtests in this database: 7804

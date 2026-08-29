@@ -1,0 +1,120 @@
+dropped 1 symbol(s) with under 1500 bars: PLTR (1483)
+researching 19 symbols on 1D bars from csv
+[1] short_distribution_after_upward_price_extension_v1: REJECT (3/100)
+[2] short_high_intensity_reversal_after_upside_exhaustion_v1: REJECT (17/100)
+[3] short_volume_divergence_on_upward_gap_fade_v1: REJECT (10/100)
+[4] short_high_volume_climax_after_low_vol_regime: REJECT (15/100)
+[5] short_gap_fade_rejection_v2: REJECT (4/100)
+[6] short_high_vol_close_in_top_third_of_range_after_up_gap: REJECT (18/100)
+[7] short_ema_cross_fade_after_volume_climax: REJECT (5/100)
+[8] short_up_gap_fade_on_low_volume_after_down_move: REJECT (0/100)
+[9] short_high_volume_fade_of_trend_continuation_v1: REJECT (13/100)
+[10] low_volume_gap_fade_short_v2: REJECT (0/100)
+[11] short_gap_fade_high_volume_v2: REJECT (0/100)
+[12] short_high_volume_breakout_with_bearish_close: REJECT (0/100)
+[13] short_low_vol_breakdown_vwap_reject_v2: REVIEW (22/100)
+[14] short_double_volume_climax_within_downtrend: REJECT (6/100)
+[15] short_breakdown_after_volume_spike_recovery_v1: REJECT (20/100)
+[16] short_vol_expansion_reversal_from_low_vol_pivot_v2: REJECT (0/100)
+[17] short_rvol_dry_up_after_high_vol_dump: REJECT (18/100)
+[18] short_low_rvol_reversal_after_failed_recovery_v2: REJECT (0/100)
+[19] short_volume_rotation_exhaustion_v2: REJECT (0/100)
+[20] short_trend_exhaustion_adx_break_v1: REJECT (0/100)
+[21] short_trend_fade_after_wide_range_low_volume_pullback_v2: REJECT (0/100)
+[22] short_stoch_k_overbought_trend_exhaustion_v2: REJECT (6/100)
+[23] short_breakaway_gap_fill: REJECT (0/100)
+[24] short_high_open_low_close_trap: REJECT (2/100)
+[25] short_breakdown_gap_fade_v2: REJECT (5/100)
+[26] proposal_failed_26: ERROR -- deepseek produced an unusable proposal: entry
+does not parse: expected number at position 69 in 'close < open and close < 
+(low + 0.1 * (high - low)) and volume > sma(volume, 20) * 1.2 and close < 
+sma(20) and adx(14) > 25', got 'volume'
+[27] short_macd_reversal_vwap_reject_v1: REJECT (11/100)
+[28] short_high_rvol_break_and_fail_v1: REJECT (21/100)
+[29] short_post_gap_fade_high_volume_reversal_v1: REJECT (23/100)
+[30] short_overextended_recovery_trap_v1: REJECT (25/100)
+[31] short_panic_volume_climax_exhaustion_v1: REJECT (0/100)
+[32] short_high_rvol_slope_reversal_v1: REJECT (0/100)
+[33] short_term_overextension_reversion_v1: REJECT (21/100)
+[34] short_high_rvol_gap_fade_v3: REJECT (14/100)
+[35] low_volume_breakout_continuation_v1: REJECT (0/100)
+[36] short_high_volume_failed_breakout_v1: REJECT (22/100)
+[37] short_vwap_rejection_after_volume_spike_v1: REJECT (0/100)
+[38] short_volume_climax_regime_break_v1: REJECT (18/100)
+[39] short_volume_surge_bearish_engulfing_continuation_v1: REJECT (10/100)
+[40] short_volume_break_and_trap_v2: REJECT (1/100)
+
+short_overextended_recovery_trap_v1   score 25/100  REJECT
+  asset_robustness      50.0/100
+  max_drawdown         100.0/100
+  oos_sharpe             0.0/100
+  parameter_stability    0.0/100
+  profit_factor          0.0/100
+  regime_robustness     50.0/100
+  reasons:
+  - out-of-sample Sharpe -0.12 is not positive
+  - only 31% of walk-forward folds were profitable; the edge is not consistent 
+across time
+  - overfitting 0.43 (SUSPECT): 4368 backtest(s) evaluated to reach this 
+result; Sharpe -0.02 deflates to -1.03 after 4368 trials; 14 parameters fitted 
+against 40 trades (2.9 trades per parameter)
+short_overextended_recovery_trap_v1 on 
+AAPL+AMD+AMZN+ASML+AVGO+AZN+COST+CSCO+GOOGL+INTU+LIN+META+MSFT+NFLX+NVDA+PEP+TM
+US+TSLA+TXN: 13 folds, OOS Sharpe -0.12 +/- 0.64, 31% folds positive, 
+train-test gap +0.08
+  fold 0: train  -0.27 | test   0.00 | ret   +0.0% |   0 trades
+  fold 1: train  -0.23 | test   0.00 | ret   -0.8% |   1 trades
+  fold 2: train  -0.21 | test   0.61 | ret   +1.4% |   6 trades
+  fold 3: train   0.01 | test   0.00 | ret   -1.7% |   4 trades
+  fold 4: train  -0.08 | test   0.00 | ret   +0.0% |   0 trades
+  fold 5: train  -0.08 | test   0.00 | ret   +0.1% |   4 trades
+  fold 6: train  -0.06 | test   0.00 | ret   +1.6% |   3 trades
+  fold 7: train   0.06 | test   0.00 | ret   -0.1% |   1 trades
+  fold 8: train   0.05 | test   0.00 | ret   -0.3% |   3 trades
+  fold 9: train   0.03 | test   0.00 | ret   +1.2% |   4 trades
+  fold 10: train   0.08 | test   0.00 | ret   -0.2% |   1 trades
+  fold 11: train   0.07 | test   0.00 | ret   +0.0% |   0 trades
+  fold 12: train   0.06 | test  -2.18 | ret   -2.1% |   6 trades
+parameter stability 0.00 (baseline Sharpe -0.02)
+asset robustness 0.50
+  AAPL     sharpe   0.00  ret   -0.5%    1 trades
+  AMD      sharpe   0.14  ret   +1.5%    7 trades
+  AMZN     sharpe   0.00  ret   -1.0%    2 trades
+  ASML     sharpe   0.00  ret   +1.1%    3 trades
+  AVGO     sharpe   0.00  ret   +0.0%    0 trades
+  AZN      sharpe   0.00  ret   +0.1%    2 trades
+  COST     sharpe   0.00  ret   -0.2%    2 trades
+  CSCO     sharpe   0.00  ret   +2.1%    4 trades
+  GOOGL    sharpe   0.00  ret   +1.2%    2 trades
+  INTU     sharpe   0.00  ret   +0.0%    0 trades
+  LIN      sharpe   0.00  ret   +0.0%    0 trades
+  META     sharpe   0.00  ret   -0.3%    1 trades
+  MSFT     sharpe   0.00  ret   +0.0%    1 trades
+  NFLX     sharpe  -0.17  ret   -1.0%    6 trades
+  NVDA     sharpe   0.00  ret   -1.9%    3 trades
+  PEP      sharpe   0.00  ret   -0.1%    2 trades
+  TMUS     sharpe   0.00  ret   -0.7%    3 trades
+  TSLA     sharpe   0.00  ret   +0.0%    0 trades
+  TXN      sharpe   0.00  ret   -0.8%    1 trades
+regime robustness 0.50
+  RANGE_HIGH_VOL   ret   -0.3%   14 trades
+  RANGE_LOW_VOL    ret   +1.3%   22 trades
+  TREND_BEAR       ret   -0.7%    2 trades
+  TREND_BULL       ret   -0.1%    1 trades
+  UNKNOWN          ret   -0.7%    1 trades
+monte carlo (1000 trials): median DD 4.7%, p95 DD 9.2%, worst 12.8%, P(loss) 
+56%, P(ruin) 0.0%
+overfitting 0.43 -> SUSPECT
+search_cost              1.00  4368 backtest(s) evaluated to reach this result
+sharpe_inflation         1.00  Sharpe -0.02 deflates to -1.03 after 4368 trials
+parameter_count          0.90  14 parameters fitted against 40 trades (2.9 
+trades per parameter)
+sample_size              0.60  40 trades
+asset_concentration      0.30  largest of 15 symbols contributed 35% of gross 
+profit
+train_oos_gap            0.04  train Sharpe -0.04 vs OOS -0.12 (gap +0.08)
+profit_concentration     0.00  no profit to concentrate
+time_concentration       0.00  no profit to concentrate
+cost_sensitivity         0.00  Sharpe -0.01 frictionless vs -0.02 with costs
+
+cumulative backtests in this database: 5076
