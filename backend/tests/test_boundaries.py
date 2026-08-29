@@ -467,7 +467,9 @@ def test_the_status_snapshot_is_the_only_bridge() -> None:
 # Guard 9 — the two projects in this repository stay apart. specs/09 D0.
 # ---------------------------------------------------------------------- #
 
-RESEARCHER = Path(__file__).resolve().parents[2] / "ai_quant_researcher" / "src" / "aqr"
+REPO = Path(__file__).resolve().parents[2]
+RESEARCHER = REPO / "ai_quant_researcher" / "src" / "aqr"
+SCRIPTS = REPO / "scripts"
 
 
 def test_alphagate_never_imports_the_researcher() -> None:
@@ -490,6 +492,28 @@ def test_alphagate_never_imports_the_researcher() -> None:
     assert not offenders, (
         "alphagate must not import the researcher; the seam is the target book "
         "file (specs/09 D0):\n" + "\n".join(offenders)
+    )
+
+
+def test_the_pipeline_driver_imports_neither_project() -> None:
+    """`scripts/pipeline.py` runs both CLIs and belongs to neither.
+
+    It is the one file in the repository whose whole job is to know that both
+    projects exist, which makes it the obvious place for the seam to leak — a
+    single `from aqr...` to reuse a constant, and the two projects share a
+    process. Running them as subprocesses is the only coupling specs/09 D0
+    permits, and this is what holds that line.
+    """
+    if not SCRIPTS.is_dir():  # pragma: no cover - the directory exists
+        pytest.skip("no scripts/ directory")
+    offenders: list[str] = []
+    for path in _python_files(SCRIPTS):
+        for name in _top_level_imports(path):
+            if name in {"aqr", "alphagate"}:
+                offenders.append(f"{path.relative_to(SCRIPTS)} imports {name}")
+    assert not offenders, (
+        "the pipeline driver must run both CLIs, not import them:\n"
+        + "\n".join(offenders)
     )
 
 

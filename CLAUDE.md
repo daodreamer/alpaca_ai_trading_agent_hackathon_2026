@@ -32,6 +32,14 @@ trading，永不接真实资金。其余架构纪律全部继承。
 AlphaGate 的 invariant 搬过去或反过来。改动 `ai_quant_researcher/` 时用它自己的
 命令（见该目录的 README），不要用第 6 节的命令。
 
+**两者之间唯一的接口是一个文件**——`aqr target-book` 写出的 target book JSON
+（见 [specs/09-equity-execution.md](specs/09-equity-execution.md) D0）。
+`backend/` 读它、校验它、执行它；两边都不 import 对方，
+`backend/tests/test_boundaries.py` 的 guard 9 双向强制这一点，
+`scripts/pipeline.py` 也只用 subprocess 调两边的 CLI。
+
+想加"共享一个常量"或"直接调对方一个函数"的时候：那正是这条线存在的原因。
+
 ## 3. Non-negotiable rules
 
 1. `core` / `options` / `risk` 三层是 pure：只依赖标准库和彼此。由
@@ -78,6 +86,22 @@ RED → GREEN → REFACTOR。`options/` 和 `risk/` 是正确性面，必须先�
 | 看当前状态 | `uv run --directory backend python -m alphagate status` |
 | 看某天的日志 | `uv run --directory backend python -m alphagate show [-v] [--day YYYY-MM-DD]` |
 | dashboard | `uv run --directory backend python -m alphagate serve` |
+
+股票侧（执行 `ai_quant_researcher` 验证过的那一个策略，见 specs/09）：
+
+| 目的 | 命令 |
+| --- | --- |
+| 整条链：拉数据 → 重建 target book → 交易 | `python scripts/pipeline.py` |
+| 只演练，不下单 | `python scripts/pipeline.py --dry-run` |
+| 开盘前体检（book + 账户） | `uv run --directory backend python -m alphagate equity-preflight` |
+| 一次再平衡，只过 Gate 不下单 | `uv run --directory backend python -m alphagate equity-plan` |
+| 一次再平衡，真下单 | `uv run --directory backend python -m alphagate equity-rebalance` |
+| 跑一整天（心跳 + 一次再平衡） | `uv run --directory backend python -m alphagate equity-run [--dry-run]` |
+| 看当前持仓与偏离 | `uv run --directory backend python -m alphagate equity-status` |
+
+`ALPHAGATE_STRATEGY_FINGERPRINT` 必须在 `.env.local` 里钉死。这是"只执行研究端
+验证过的那个策略"这句话唯一可校验的地方——fingerprint 不匹配的 book 会被
+`load_target_book` 按名字拒掉，**没有默认值是故意的**。
 
 前端（dashboard 的 Live 页，Vite + React + shadcn/ui）：
 
