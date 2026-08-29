@@ -34,6 +34,14 @@ __pycache__/
 journal/status.json
 journal/state.json
 journal/iv/
+journal/equity-status.json
+journal/equity-state.json
+
+# The executed target books are NOT ignored. `journal/books/` holds a verbatim
+# copy of every artefact the equity agent actually placed (specs/09 D9), and the
+# digest of that copy is in the journal line beside it. `aqr` regenerates its
+# own output directory daily, so the copy is the only thing that can still say
+# what was executed a week later.
 
 # Frontend toolchain and build output. `npm run build` regenerates `static/`
 # from source; committing a 300 KB bundle would put it in every diff.

@@ -22,9 +22,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-__all__ = ["STALE_AFTER", "read_status"]
+__all__ = [
+    "EQUITY_STALE_AFTER",
+    "STALE_AFTER",
+    "read_equity_status",
+    "read_status",
+]
 
 STATUS_FILENAME = "status.json"
+EQUITY_STATUS_FILENAME = "equity-status.json"
 
 STALE_AFTER = 1200.0
 """Seconds before a snapshot is treated as "not running".
@@ -37,6 +43,31 @@ crashed agent would look alive through lunch.
 """
 
 
+EQUITY_STALE_AFTER = 120.0
+"""Seconds before the *equity* snapshot is treated as "not running".
+
+Much tighter than the options figure, because the cadences differ by an order of
+magnitude: the equity agent heartbeats every thirty seconds whether or not it is
+deciding anything (specs/09 D8), so two minutes of silence is four missed beats
+rather than one slow slot.
+
+The two numbers are separate for exactly that reason. Sharing one would either
+make the equity page claim a dead agent was alive for twenty minutes, or make
+the options page cry wolf on every slow chain request.
+"""
+
+
+def read_equity_status(directory: Path) -> dict[str, Any] | None:
+    """The equity snapshot, or `None`. Same contract as `read_status`.
+
+    A second file rather than a second key in the first, because the two agents
+    are two processes: one file each means neither can overwrite the other's
+    view of the account, and a page can say "options running, equity stopped"
+    rather than having to guess which process last wrote a merged document.
+    """
+    return _load(directory / EQUITY_STATUS_FILENAME)
+
+
 def read_status(directory: Path) -> dict[str, Any] | None:
     """The snapshot, or `None` if there is not a readable one.
 
@@ -45,7 +76,10 @@ def read_status(directory: Path) -> dict[str, Any] | None:
     a 500 — and the writer writes atomically, so a torn read means something
     stranger than a race and the page should say so plainly.
     """
-    path = directory / STATUS_FILENAME
+    return _load(directory / STATUS_FILENAME)
+
+
+def _load(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:

@@ -38,7 +38,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from alphagate.interface.read import CheckView, CycleView, DayView, available_days, day_view
-from alphagate.interface.status import STALE_AFTER, _age_of, read_status
+from alphagate.interface.status import (
+    EQUITY_STALE_AFTER,
+    STALE_AFTER,
+    _age_of,
+    read_equity_status,
+    read_status,
+)
 from alphagate.journal import Journal
 
 __all__ = ["build_app", "serve"]
@@ -118,6 +124,48 @@ def build_app(journal_dir: Path) -> FastAPI:
                 "stale_after": STALE_AFTER,
                 "snapshot": snapshot,
             }
+        )
+
+    @app.get("/api/equity/status")
+    def api_equity_status() -> JSONResponse:
+        """The equity book right now — specs/09 D10.
+
+        A separate route from `/api/status` because they are separate agents
+        writing separate files. The page can then say "options running, equity
+        stopped" instead of having to infer which process last wrote a merged
+        document.
+
+        `age_seconds` is computed here rather than trusted from the file, and
+        judged against the equity agent's own thirty-second heartbeat rather
+        than the options runner's fifteen-minute cycle.
+        """
+        snapshot = read_equity_status(journal_dir)
+        if snapshot is None:
+            return JSONResponse({"running": False, "snapshot": None})
+        age = _age_of(snapshot.get("as_of"))
+        return JSONResponse(
+            {
+                "running": age is not None and age < EQUITY_STALE_AFTER,
+                "age_seconds": age,
+                "stale_after": EQUITY_STALE_AFTER,
+                "snapshot": snapshot,
+            }
+        )
+
+    @app.get("/api/equity/day/{day}")
+    def api_equity_day(day: str) -> JSONResponse:
+        """Only the equity cycles from one journalled day.
+
+        The full day is at `/api/day/{day}` and carries both agents' records.
+        This is the filtered view, so the Equity tab does not have to know what
+        an options cycle looks like in order to skip one.
+        """
+        return JSONResponse(
+            [
+                record
+                for record in journal.read(_parse(day))
+                if record.get("kind") == "equity"
+            ]
         )
 
     @app.get("/api/days")
