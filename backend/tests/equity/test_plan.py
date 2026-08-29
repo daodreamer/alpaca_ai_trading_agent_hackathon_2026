@@ -68,8 +68,7 @@ def skip_for(plan_result: RebalancePlan, symbol: Ticker) -> Skipped:
 def test_a_book_already_held_produces_no_orders(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Four days in five, this is the whole answer.
@@ -85,12 +84,11 @@ def test_a_book_already_held_produces_no_orders(
 def test_drift_inside_the_band_is_left_alone(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
-    """$200 of drift on a $250 band. Trading it would be churn."""
-    drifted = [replace(holdings[0], shares=Decimal(98)), *holdings[1:]]
+    """$1,000 of drift on a $10,000 position, against a 20% band. Churn."""
+    drifted = [replace(holdings[0], shares=Decimal(90)), *holdings[1:]]
     result = plan(book, drifted, marks, policy)
     assert result.is_empty
     assert skip_for(result, AAA).reason is SkipReason.INSIDE_BAND
@@ -99,47 +97,72 @@ def test_drift_inside_the_band_is_left_alone(
 def test_drift_exactly_at_the_band_is_traded(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Test plan item 5. The boundary is inclusive on the trading side.
 
-    $100,000 × 0.25% is $250, which is 2.5 shares of a $100 stock. Holding
-    97.5 leaves the $10,000 target exactly $250 away.
+    AAA's target is $10,000, so its band is 20% of that — $2,000, or 20 shares
+    of a $100 stock. Holding 80 leaves the target exactly $2,000 away.
     """
-    drifted = [replace(holdings[0], shares=Decimal("97.5")), *holdings[1:]]
+    drifted = [replace(holdings[0], shares=Decimal(80)), *holdings[1:]]
     result = plan(book, drifted, marks, policy)
     intent = only(result)
     assert intent.symbol == AAA
     assert intent.side is EquitySide.BUY
-    assert intent.shares == Decimal("2.5")
+    assert intent.shares == Decimal(20)
 
 
-def test_the_band_used_is_recorded_on_the_plan(
+def test_each_skip_carries_the_band_it_was_measured_against(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
-    """Every `inside_band` line below it is explained by this one number."""
-    assert plan(book, holdings, marks, policy).band == Decimal(250)
+    """The band is per position, so one global number on the plan would be wrong
+    about most of its own lines."""
+    result = plan(book, holdings, marks, policy)
+    assert result.band_pct == Decimal("0.20")
+    assert skip_for(result, AAA).threshold == Decimal(2_000)  # 20% of $10,000
+    assert skip_for(result, CCC).threshold == Decimal(800)  # 20% of $4,000
 
 
-def test_the_absolute_floor_binds_on_a_small_account(
+def test_a_sleeve_sized_position_can_be_established(
     book: TargetBook,
-    holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
-    """0.25% of $2,000 is $5, and a $5 order is all spread.
+    """The regression that motivated the proportional band — specs/09 D3.
 
-    Both thresholds are live and the larger wins, so the fractional band binds a
-    large account and the dollar floor binds a small one.
+    Under a band of 0.25% of equity, a $192 sleeve position sat permanently
+    inside a $253 threshold and could never be bought. The real book holds a
+    hundred such names, so the executable book was a tenth of the strategy and
+    nothing reported an error.
     """
-    assert policy.band(Decimal(2_000)) == policy.min_order_notional
+    from dataclasses import replace as _replace
+
+    sleeve_weight = Decimal("0.00192")
+    small = _replace(book, weights={**book.weights, CCC: sleeve_weight})
+    result = plan(small, [], marks, policy)
+    assert any(i.symbol == CCC for i in result.intents), (
+        "a $192 position must be establishable; it is the shape of 100 of the 104"
+    )
+
+
+def test_the_absolute_floor_binds_on_a_tiny_position(policy: EquityPolicy) -> None:
+    """20% of a $20 position is $4, and a $4 order is all spread."""
+    assert policy.threshold(Decimal(20), Decimal(0)) == policy.min_order_notional
+
+
+def test_the_band_is_measured_against_the_larger_side(policy: EquityPolicy) -> None:
+    """One rule for establishing, drifting and exiting.
+
+    Exiting is the case that needs the `max`: the target is zero, so a band
+    proportional to the *target* alone would be the floor, and a $40,000 position
+    would be closed by a $25 order every time its price moved.
+    """
+    assert policy.threshold(Decimal(0), Decimal(40_000)) == Decimal(8_000)
+    assert policy.threshold(Decimal(40_000), Decimal(0)) == Decimal(8_000)
 
 
 # --------------------------------------------------------------------- #
@@ -149,8 +172,7 @@ def test_the_absolute_floor_binds_on_a_small_account(
 
 def test_weights_become_shares_at_the_marked_price(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """A 0.10 weight on $100k is $10,000; at $100 a share that is 100 shares."""
@@ -163,8 +185,7 @@ def test_weights_become_shares_at_the_marked_price(
 
 def test_rounding_is_toward_zero_so_a_buy_never_overshoots(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """`ROUND_DOWN` on a `Decimal` is toward zero, which is safe on both sides:
@@ -179,8 +200,7 @@ def test_rounding_is_toward_zero_so_a_buy_never_overshoots(
 
 def test_a_whole_share_asset_is_floored(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     priced = {**marks, CCC: replace(marks[CCC], fractionable=False, price=Decimal(30))}
@@ -193,8 +213,7 @@ def test_a_whole_share_asset_is_floored(
 def test_a_whole_share_target_below_one_share_is_a_recorded_hole(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Test plan item 6. A $192 sleeve position in a $500 non-fractionable name
@@ -219,8 +238,7 @@ def test_a_whole_share_target_below_one_share_is_a_recorded_hole(
 def test_a_symbol_that_left_the_book_is_sold_to_zero(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """The exit path, and it is the same arithmetic as everything else.
@@ -241,8 +259,7 @@ def test_a_symbol_that_left_the_book_is_sold_to_zero(
 def test_a_symbol_neither_held_nor_wanted_is_not_an_order(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     result = plan(book, holdings, marks, policy)
@@ -256,8 +273,7 @@ def test_a_symbol_neither_held_nor_wanted_is_not_an_order(
 
 def test_a_sell_is_clamped_to_what_is_held(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """The planner is the first of three layers that refuse a short."""
@@ -294,8 +310,7 @@ def test_an_intent_that_would_open_a_short_is_unconstructible() -> None:
 
 def test_sells_precede_buys(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Sells release the buying power the buys then spend.
@@ -318,8 +333,7 @@ def test_sells_precede_buys(
 
 def test_within_a_side_the_largest_notional_goes_first(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     result = plan(book, [], marks, policy)
@@ -330,8 +344,7 @@ def test_within_a_side_the_largest_notional_goes_first(
 
 def test_the_plan_is_deterministic(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Test plan item 3. Same inputs, same sequence — every time.
@@ -360,8 +373,7 @@ def test_the_plan_is_deterministic(
 def test_an_unpriced_symbol_is_held_not_traded(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """We do not know what it is worth, so we do not trade it."""
@@ -372,8 +384,7 @@ def test_an_unpriced_symbol_is_held_not_traded(
 
 def test_a_stale_mark_is_not_traded_on(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     stale = {**marks, AAA: replace(marks[AAA], age_seconds=policy.max_quote_age + 1)}
@@ -383,8 +394,7 @@ def test_a_stale_mark_is_not_traded_on(
 
 def test_a_mark_exactly_at_the_age_limit_is_still_fresh(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Inclusive on the safe side, same convention as the options Gate."""
@@ -395,8 +405,7 @@ def test_a_mark_exactly_at_the_age_limit_is_still_fresh(
 
 def test_an_untradeable_symbol_is_skipped(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     halted = {**marks, AAA: replace(marks[AAA], tradeable=False)}
@@ -407,8 +416,7 @@ def test_an_untradeable_symbol_is_skipped(
 def test_a_naive_timestamp_is_refused(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Nothing in this layer reads a clock, so a naive `as_of` is a caller that
@@ -420,8 +428,7 @@ def test_a_naive_timestamp_is_refused(
 def test_a_float_equity_is_refused(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     with pytest.raises(InvariantViolation, match="must be Decimal"):
@@ -430,8 +437,7 @@ def test_a_float_equity_is_refused(
 
 def test_turnover_is_the_sum_of_both_sides(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     held = [Holding(AAA, Decimal(500), Decimal(90), Decimal(50_000))]

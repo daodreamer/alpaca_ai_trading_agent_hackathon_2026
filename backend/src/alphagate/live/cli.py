@@ -1,14 +1,24 @@
 """`python -m alphagate <command>` — the entrypoint.
 
-Four commands, and the order they are listed in is the order a trading day uses
-them.
+Two agents share this entry point, and the commands are grouped by which.
 
 ```
-alphagate preflight   # are the four hard gates actually satisfied?
-alphagate once        # one cycle, right now, dry by default
-alphagate run         # a whole session, on the schedule
-alphagate serve       # the dashboard over the journal
+alphagate preflight          # are the four hard gates actually satisfied?
+alphagate once               # one options cycle, right now, dry by default
+alphagate run                # a whole options session, on the schedule
+alphagate serve              # the dashboard over the journal
+
+alphagate equity-preflight   # is there a target book, and may it be executed?
+alphagate equity-plan        # one rebalance pass, gated, nothing sent
+alphagate equity-rebalance   # one rebalance pass, orders placed
+alphagate equity-run         # an equity session: heartbeat and one pass
+alphagate equity-status      # the book, and how far it has drifted
 ```
+
+The `equity-*` half executes the strategy `ai_quant_researcher` validated, read
+from a target-book file (specs/09). It is built in `live/equity_cli.py`, because
+the two agents share a process and nothing else: one is a fifteen-minute loop
+over an option chain, the other a daily rebalance against a file.
 
 **`preflight` exists because three of specs/00's four hard gates are silent
 failures.** A live key, an account that is not the dedicated one, an options
@@ -51,6 +61,7 @@ from alphagate.agent.iv_store import IvHistoryStore
 from alphagate.execution import ExecutionError, load_env_file, require_paper_account
 from alphagate.interface.status import STALE_AFTER, _age_of, read_status
 from alphagate.journal import Journal, trust_report
+from alphagate.live.equity_cli import add_equity_commands
 from alphagate.live.wiring import LiveContext, SessionState, build_market_data, gather_for
 from alphagate.live.wiring import mcp_session as open_mcp
 
@@ -85,6 +96,15 @@ DEFAULT_ENV = str(ROOT / ".env.local")
 DEFAULT_JOURNAL = str(ROOT / "journal")
 DEFAULT_STATE = str(ROOT / "journal" / "state.json")
 DEFAULT_IV = str(ROOT / "journal" / "iv")
+DEFAULT_EQUITY_STATE = str(ROOT / "journal" / "equity-state.json")
+DEFAULT_TARGET_BOOKS = str(ROOT / "ai_quant_researcher" / "runs" / "target_books")
+"""Where `aqr target-book` writes, and the only line in AlphaGate that knows the
+sibling project has a directory.
+
+A path, not an import. specs/09 D0 makes the artefact the whole interface
+between the two projects, and `tests/test_boundaries.py` guard 9 fails the build
+if either ever imports the other. Overridable with `--books` or
+`ALPHAGATE_TARGET_BOOKS`, so the two can live anywhere relative to each other."""
 
 _MODEL_KEY_NOTE = "a cycle with no model declines rather than trades (--no-model)"
 
@@ -656,6 +676,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(func=cmd_serve)
+
+    add_equity_commands(
+        sub,
+        default_books=DEFAULT_TARGET_BOOKS,
+        default_state=DEFAULT_EQUITY_STATE,
+    )
 
     return parser
 

@@ -81,7 +81,8 @@ class SkipReason(Enum):
     """
 
     INSIDE_BAND = "inside_band"
-    """The drift was not worth an order. The common case, four days in five."""
+    """The drift was not worth an order — smaller than a fifth of the position.
+    The common case, four days in five."""
     NO_MARK = "no_mark"
     """No usable price. Held, loudly — see the module docstring's third point in
     reverse: we do not know what it is worth, so we do not trade it."""
@@ -193,12 +194,19 @@ class OrderIntent:
 
 @dataclass(frozen=True, slots=True)
 class Skipped:
-    """A symbol the plan considered and did not trade, and why."""
+    """A symbol the plan considered and did not trade, and why.
+
+    `threshold` is the band *this* symbol had to clear, which is a different
+    number for every position because the band is proportional (specs/09 D3).
+    Carrying it means an `inside_band` line explains itself rather than sending
+    the reader back to the policy to multiply.
+    """
 
     symbol: Ticker
     reason: SkipReason
     detail: str
     drift_notional: Decimal = Decimal(0)
+    threshold: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,9 +226,13 @@ class RebalancePlan:
     equity: Decimal
     intents: tuple[OrderIntent, ...]
     skipped: tuple[Skipped, ...]
-    band: Decimal
-    """The threshold this pass used, in currency. Recorded because it is the
-    number that explains every `INSIDE_BAND` line below it."""
+    band_pct: Decimal
+    """The proportional band this pass used. Recorded because it is the number
+    that explains every `INSIDE_BAND` line below it — the currency threshold is
+    per symbol and lives on each `Skipped`."""
+    min_order_notional: Decimal
+    """The floor the band is clamped to. The binding constraint on the sleeve,
+    where a fifth of a $194 position is $39."""
 
     @property
     def is_empty(self) -> bool:
@@ -290,7 +302,6 @@ def plan_rebalance(
         raise InvariantViolation(f"equity must be finite and positive, got {equity}")
 
     held = _held_by_symbol(holdings)
-    band = policy.band(equity)
 
     # The union, sorted. A symbol held but absent from the book has a target of
     # zero and is sold out — the exit path, arrived at by the same arithmetic as
@@ -309,7 +320,6 @@ def plan_rebalance(
             held_shares=held_shares,
             mark=marks.get(symbol),
             equity=equity,
-            band=band,
             policy=policy,
         )
         if isinstance(outcome, OrderIntent):
@@ -325,7 +335,8 @@ def plan_rebalance(
         equity=equity,
         intents=tuple(_sequenced(intents)),
         skipped=tuple(skipped),
-        band=band,
+        band_pct=policy.drift_band_pct,
+        min_order_notional=policy.min_order_notional,
     )
 
 
@@ -336,7 +347,6 @@ def _decide(
     held_shares: Decimal,
     mark: Mark | None,
     equity: Decimal,
-    band: Decimal,
     policy: EquityPolicy,
 ) -> OrderIntent | Skipped:
     """One symbol. Returns the order to place, or the reason there is none."""
@@ -362,6 +372,7 @@ def _decide(
     target_notional = target_weight * equity
     held_notional = held_shares * mark.price
     drift = target_notional - held_notional
+    band = policy.threshold(target_notional, held_notional)
 
     if target_weight == 0 and held_shares == 0:
         return Skipped(symbol, SkipReason.ALREADY_FLAT, "not held and not wanted")
@@ -370,8 +381,9 @@ def _decide(
         return Skipped(
             symbol,
             SkipReason.INSIDE_BAND,
-            f"drift {_money(drift)} is inside the {_money(band)} band",
+            f"drift {_money(drift)} is inside this position's {_money(band)} band",
             drift_notional=drift,
+            threshold=band,
         )
 
     shares = _shares_for(drift, mark, policy)
@@ -386,6 +398,7 @@ def _decide(
                 else f"{_money(abs(drift))} rounds to nothing at {mark.price}"
             ),
             drift_notional=drift,
+            threshold=band,
         )
 
     side = EquitySide.BUY if drift > 0 else EquitySide.SELL
@@ -400,6 +413,7 @@ def _decide(
                 SkipReason.ALREADY_FLAT,
                 "nothing held to sell",
                 drift_notional=drift,
+                threshold=band,
             )
 
     return OrderIntent(

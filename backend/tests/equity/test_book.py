@@ -47,8 +47,7 @@ def test_a_valid_book_loads_with_its_provenance_intact(book_payload: dict[str, A
 
 
 def test_weights_become_decimal_without_going_through_a_float(
-    book_payload: dict[str,
-    Any],
+    book_payload: dict[str, Any],
 ) -> None:
     """The next thing that happens to a weight is multiplication by equity.
 
@@ -76,7 +75,7 @@ def test_gross_is_the_sum_of_the_weights(book_payload: dict[str, Any]) -> None:
     assert load(book_payload).gross == Decimal("0.20")
 
 
-def test_age_is_measured_against_an_argument_not_a_clock(book_payload: dict[str, Any], ) -> None:
+def test_age_is_measured_against_an_argument_not_a_clock(book_payload: dict[str, Any]) -> None:
     assert load(book_payload).age_days(date(2026, 8, 31)) == 4
 
 

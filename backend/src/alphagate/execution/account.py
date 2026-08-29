@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
@@ -41,17 +41,22 @@ from alphagate.options import OptionContract, Right
 
 __all__ = [
     "ACCOUNT_TOOL",
+    "CLOCK_TOOL",
     "POSITIONS_TOOL",
     "AccountRead",
     "LegPosition",
+    "MarketClock",
     "read_account",
+    "read_clock",
     "read_positions",
     "to_account",
+    "to_clock",
     "to_leg_positions",
 ]
 
 ACCOUNT_TOOL: Final = "get_account_info"
 POSITIONS_TOOL: Final = "get_all_positions"
+CLOCK_TOOL: Final = "get_clock"
 
 _OPTION_CLASS: Final = "us_option"
 
@@ -128,6 +133,64 @@ class LegPosition:
     @property
     def underlying(self) -> Ticker:
         return self.contract.underlying
+
+
+@dataclass(frozen=True, slots=True)
+class MarketClock:
+    """The exchange's own clock, which is the only one that knows about holidays.
+
+    A fixed 13:30-20:00 UTC session is wrong three times a year — a half day
+    closes at 17:00 UTC — and wrong every weekend, which is when most of the
+    debugging happens. `wiring.market_session` is the fallback for when this is
+    unreachable, and it says so.
+
+    Nothing in the domain reads this. It reaches the Gate, if at all, as the
+    `as_of` argument the caller passes; a clock read inside a pure layer is the
+    thing specs/01 Rule 4 exists to prevent.
+    """
+
+    is_open: bool
+    next_open: datetime
+    next_close: datetime
+    observed_at: datetime
+
+    @property
+    def opens_today(self) -> bool:
+        """Whether there is still a session on the observer's own date."""
+        return self.is_open or self.next_open.date() == self.observed_at.date()
+
+
+def read_clock(mcp: McpSession, *, observed_at: datetime) -> MarketClock:
+    """Ask the exchange whether it is open. One call, no retry."""
+    return to_clock(mcp.call(CLOCK_TOOL, {}), observed_at=observed_at)
+
+
+def to_clock(result: ToolResult, *, observed_at: datetime) -> MarketClock:
+    """Parse `get_clock`. Pure.
+
+    Alpaca answers with offset-aware Eastern timestamps
+    (`2026-08-31T09:30:00-04:00`), which are converted to UTC here rather than
+    carried around in a second timezone. specs/01 Rule 5: all times are tz-aware
+    UTC, and the boundary is where that becomes true.
+    """
+    data = result.data
+    return MarketClock(
+        is_open=bool(data.get("is_open")),
+        next_open=_moment(data, "next_open", default=observed_at),
+        next_close=_moment(data, "next_close", default=observed_at),
+        observed_at=observed_at,
+    )
+
+
+def _moment(data: Mapping[str, Any], key: str, *, default: datetime) -> datetime:
+    raw = data.get(key)
+    if not isinstance(raw, str) or not raw:
+        return default
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return default
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def read_account(mcp: McpSession, *, observed_at: datetime) -> AccountRead:

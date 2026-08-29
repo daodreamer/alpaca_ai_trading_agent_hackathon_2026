@@ -111,8 +111,7 @@ def test_a_clean_intent_is_approved_with_the_whole_tape(
 def test_every_check_runs_even_after_one_fails(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """No short-circuit. A refusal with one reason and a refusal with five are
@@ -269,8 +268,7 @@ def test_position_cap_vetoes_a_concentrated_result(
 
 def test_gross_exposure_cap_vetoes_leverage(
     book: TargetBook,
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """A fully invested book cannot buy more without borrowing.
@@ -292,8 +290,7 @@ def test_gross_exposure_cap_vetoes_leverage(
 def test_buying_power_vetoes_an_unpayable_buy(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     poor = portfolio_for(holdings, marks, buying_power=Decimal(100))
@@ -303,8 +300,7 @@ def test_buying_power_vetoes_an_unpayable_buy(
 def test_a_sell_never_needs_buying_power(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     poor = portfolio_for(holdings, marks, buying_power=Decimal(0))
@@ -318,8 +314,7 @@ def test_a_sell_never_needs_buying_power(
 def test_daily_turnover_cap_vetoes_a_rebuilt_book(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     spent = portfolio_for(holdings, marks, turnover_today=Decimal(119_500))
@@ -329,8 +324,7 @@ def test_daily_turnover_cap_vetoes_a_rebuilt_book(
 def test_daily_order_cap_is_a_circuit_breaker(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     busy = portfolio_for(holdings, marks, orders_today=policy.max_daily_orders)
@@ -340,8 +334,7 @@ def test_daily_order_cap_is_a_circuit_breaker(
 def test_drawdown_killswitch_vetoes_past_the_limit(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     deep = portfolio_for(holdings, marks, drawdown_pct=policy.max_drawdown_pct + Decimal("0.01"))
@@ -351,8 +344,7 @@ def test_drawdown_killswitch_vetoes_past_the_limit(
 def test_the_latch_vetoes_even_when_the_drawdown_has_recovered(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """A pure function cannot remember yesterday, so the latch is carried in.
@@ -370,8 +362,7 @@ def test_the_latch_vetoes_even_when_the_drawdown_has_recovered(
 def test_a_drawdown_exactly_at_the_limit_passes(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     edge = portfolio_for(holdings, marks, drawdown_pct=policy.max_drawdown_pct)
@@ -390,8 +381,7 @@ def test_a_drawdown_exactly_at_the_limit_passes(
 def test_a_sell_is_waived_past_a_budget_veto(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """Once the kill switch has tripped, the only orders that should still be
@@ -405,8 +395,7 @@ def test_a_sell_is_waived_past_a_budget_veto(
 def test_a_waived_reason_is_recorded_rather_than_dropped(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     """"This sell was allowed past the turnover cap" is a fact somebody reading
@@ -452,8 +441,7 @@ def test_the_unwaivable_set_is_exactly_the_documented_five() -> None:
 def test_a_buy_is_never_waived(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     latched = portfolio_for(holdings, marks, killswitch_tripped=True)
@@ -505,8 +493,7 @@ def test_a_gated_order_cannot_be_copied_into_a_second_order(
 def test_a_veto_carries_no_order(
     book: TargetBook,
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
     policy: EquityPolicy,
 ) -> None:
     poor = portfolio_for(holdings, marks, buying_power=Decimal(0))
@@ -521,8 +508,7 @@ def test_a_veto_carries_no_order(
 
 def test_gross_exposure_is_measured_at_the_gates_own_marks(
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
 ) -> None:
     """Not at the broker's `market_value`, which may be minutes old.
 
@@ -535,8 +521,7 @@ def test_gross_exposure_is_measured_at_the_gates_own_marks(
 
 
 def test_an_unmarked_position_falls_back_to_market_value_not_zero(
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
 ) -> None:
     """A position valued at nothing would pass a concentration check it should fail."""
     held = [Holding(BBB, Decimal(100), Decimal(45), Decimal(4_500))]
@@ -546,8 +531,7 @@ def test_an_unmarked_position_falls_back_to_market_value_not_zero(
 
 def test_a_float_equity_snapshot_is_refused(
     holdings: list[Holding],
-    marks: dict[Ticker,
-    Mark],
+    marks: dict[Ticker, Mark],
 ) -> None:
     with pytest.raises(InvariantViolation, match="must be Decimal"):
         portfolio_for(holdings, marks, equity=100_000.0)

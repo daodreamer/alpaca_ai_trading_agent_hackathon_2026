@@ -10,7 +10,7 @@ session does not.
 to be reachable, the same way `alphagate.execution` does not re-export `stdio`.
 """
 
-from alphagate.marketdata.port import MarketData, OptionBar
+from alphagate.marketdata.port import MarketData, OptionBar, StockSnapshot
 from alphagate.marketdata.recorded import RecordedMarketData
 
-__all__ = ["MarketData", "OptionBar", "RecordedMarketData"]
+__all__ = ["MarketData", "OptionBar", "RecordedMarketData", "StockSnapshot"]

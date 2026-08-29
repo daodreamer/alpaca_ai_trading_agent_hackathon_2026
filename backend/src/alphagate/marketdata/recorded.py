@@ -29,8 +29,8 @@ from alphagate.core.bar import AdjustmentMode, Bar, Feed
 from alphagate.core.errors import InvariantViolation
 from alphagate.core.identifiers import Ticker
 from alphagate.core.time_model import Timeframe
-from alphagate.marketdata.alpaca import to_bar, to_option_quote
-from alphagate.marketdata.port import OptionBar
+from alphagate.marketdata.alpaca import to_bar, to_option_quote, to_stock_snapshot
+from alphagate.marketdata.port import OptionBar, StockSnapshot
 from alphagate.options import OptionContract, OptionQuote, format_occ
 
 __all__ = ["RecordedMarketData"]
@@ -102,6 +102,33 @@ class RecordedMarketData:
         if not isinstance(quote, Mapping):
             raise InvariantViolation(f"no recorded quote for {symbol}")
         return (Decimal(str(quote["bp"])) + Decimal(str(quote["ap"]))) / 2
+
+    def stock_snapshots(
+        self, symbols: Sequence[Ticker]
+    ) -> Mapping[Ticker, StockSnapshot]:
+        """Marks from one captured `snapshots` payload — specs/09 D2.
+
+        One fixture for the whole batch, keyed by symbol, because that is what
+        the live route returns and a per-symbol file would let a test replay a
+        combination the API cannot produce.
+
+        A symbol with no entry is absent from the result, exactly as it is live.
+        That is the case the planner's `NO_MARK` skip exists for, and it has to
+        be reachable offline or it is only tested by hoping.
+        """
+        self.requests.append(("stock_snapshots", ",".join(sorted(str(s) for s in symbols))))
+        body = self._load("snapshots").get("snapshots", {})
+        if not isinstance(body, Mapping):
+            raise InvariantViolation("recorded snapshots payload has no 'snapshots' object")
+        wanted = {str(symbol) for symbol in symbols}
+        found: dict[Ticker, StockSnapshot] = {}
+        for raw_symbol, snapshot in body.items():
+            if str(raw_symbol) not in wanted or not isinstance(snapshot, Mapping):
+                continue
+            mark = to_stock_snapshot(str(raw_symbol), snapshot)
+            if mark is not None:
+                found[mark.symbol] = mark
+        return found
 
     def option_chain(
         self,

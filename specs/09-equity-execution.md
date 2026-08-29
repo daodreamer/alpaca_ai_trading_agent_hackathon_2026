@@ -84,7 +84,7 @@ rounds to nothing. That is a real hole in the book and the record should say so.
 Never the book's own bars: the book is as of yesterday's close and the order
 fills today.
 
-## D3 — The no-trade band, and why daily drift is not a signal
+## D3 — The no-trade band, and why it is proportional
 
 The strategy rebalances every 5 sessions and holds 10 core names. Between
 rebalances the target weights do not change, but the *held* weights drift with
@@ -94,13 +94,28 @@ backtest never paid.
 So an intent is emitted only when
 
 ```
-|delta_notional| ≥ max(band_pct × equity, min_order_notional)
+|delta_notional| ≥ max(drift_band_pct × max(target_notional, held_notional),
+                       min_order_notional)
 ```
 
-Default band 0.25% of equity, minimum order $25. Both are executor policy, both
+Default band 20% of the **position**, floor $25. Both are executor policy, both
 are recorded in the journal beside the plan, and neither is a strategy
 parameter — the strategy is what `aqr` validated, and this is the cost of
 placing it.
+
+**The first version made the band a fraction of equity, and it was wrong in a
+way worth recording.** 0.25% of a $100k account is $253. The book's sleeve
+positions are 0.192% of equity — $194 each — so every sleeve position was
+permanently inside the band: the hundred names the strategy holds could never be
+established, the ten core names would have been bought into an otherwise-cash
+account, and the result would have been a tenth of the strategy with nothing
+reporting an error. It was visible only because `equity-status` prints what is
+*outside* the band, and the sleeve was not in the list.
+
+A proportional band cannot fail that way, because the threshold for establishing
+a position is a fraction of the position rather than a constant it might be
+smaller than. Measured against the larger of target and holding, so one rule
+covers establishing, drifting and exiting.
 
 ## D4 — Sells before buys, and a deterministic order
 

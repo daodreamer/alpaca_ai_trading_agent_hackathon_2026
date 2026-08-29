@@ -37,12 +37,18 @@ import httpx
 
 from alphagate.core.bar import AdjustmentMode, Bar, Feed
 from alphagate.core.errors import InvariantViolation
-from alphagate.core.identifiers import Ticker
+from alphagate.core.identifiers import Ticker, ticker
 from alphagate.core.time_model import SessionKind, Timeframe
-from alphagate.marketdata.port import OptionBar
+from alphagate.marketdata.port import OptionBar, StockSnapshot
 from alphagate.options import Greeks, OptionContract, OptionQuote, parse_occ
 
-__all__ = ["DEFAULT_DATA_URL", "AlpacaMarketData", "to_bar", "to_option_quote"]
+__all__ = [
+    "DEFAULT_DATA_URL",
+    "AlpacaMarketData",
+    "to_bar",
+    "to_option_quote",
+    "to_stock_snapshot",
+]
 
 DEFAULT_DATA_URL: Final = "https://data.alpaca.markets"
 SOURCE: Final = "alpaca-rest"
@@ -51,6 +57,14 @@ _SNAPSHOT_PAGE_LIMIT: Final = 1_000
 """The ceilings the API actually enforces, which differ per endpoint. Sending
 10,000 to the options snapshot route is a 400: `"invalid limit: larger than the
 allowed maximum of 1000"`. Found by asking it, not by reading about it."""
+
+_SNAPSHOT_BATCH: Final = 200
+"""Symbols per `/v2/stocks/snapshots` request.
+
+The route takes a long comma-separated list and the practical ceiling is URL
+length rather than an API limit, so this is chosen to keep the query string well
+under any proxy's cap. A 104-name book is one request; the full S&P 500 is
+three."""
 
 _MAX_PAGES: Final = 50
 """A cap on the pagination loop. A server that keeps handing back a cursor is a
@@ -121,6 +135,49 @@ def to_bar(
         vwap=_optional_decimal(payload.get("vw")),
         trade_count=payload.get("n"),
     )
+
+
+def to_stock_snapshot(symbol: str, snapshot: Mapping[str, Any]) -> StockSnapshot | None:
+    """One `/v2/stocks/snapshots` entry, or `None` if it cannot be priced. Pure.
+
+    Preference order is quote mid, then last trade, and the result records which
+    it was. A one-sided market is not an error here the way it is in
+    `latest_price`: on a hundred-name sleeve some name is always mid-auction or
+    thinly quoted, and refusing the whole batch over one of them would be a
+    reason to stop trading ninety-nine healthy positions.
+
+    What is *not* accepted is a bar close standing in for a price. The daily bar
+    is in this payload and it is tempting; it is also yesterday, and using it
+    would produce a mark that looks live and is not.
+    """
+    try:
+        name = ticker(symbol)
+    except InvariantViolation:
+        return None
+
+    quote = snapshot.get("latestQuote")
+    if isinstance(quote, Mapping):
+        bid = _optional_decimal(quote.get("bp"))
+        ask = _optional_decimal(quote.get("ap"))
+        if bid is not None and ask is not None and bid > 0 and ask > 0:
+            return StockSnapshot(
+                symbol=name,
+                price=(bid + ask) / 2,
+                as_of=_timestamp(quote.get("t"), field_name="quote timestamp"),
+                from_quote=True,
+            )
+
+    trade = snapshot.get("latestTrade")
+    if isinstance(trade, Mapping):
+        price = _optional_decimal(trade.get("p"))
+        if price is not None and price > 0:
+            return StockSnapshot(
+                symbol=name,
+                price=price,
+                as_of=_timestamp(trade.get("t"), field_name="trade timestamp"),
+                from_quote=False,
+            )
+    return None
 
 
 def to_option_quote(symbol: str, snapshot: Mapping[str, Any]) -> OptionQuote | None:
@@ -281,6 +338,41 @@ class AlpacaMarketData:
         if bid <= 0 or ask <= 0:
             raise InvariantViolation(f"{symbol} has a one-sided market: bid {bid}, ask {ask}")
         return (bid + ask) / 2
+
+    def stock_snapshots(
+        self, symbols: Sequence[Ticker]
+    ) -> Mapping[Ticker, StockSnapshot]:
+        """Marks for many symbols, batched — specs/09 D2.
+
+        `/v2/stocks/snapshots` returns the latest quote, the latest trade and the
+        daily bar in one response, which is why it is used here rather than the
+        quotes endpoint: a name with no two-sided market is common on the sleeve
+        of a hundred-position book, and a separate fallback request per such
+        symbol would undo the batching that made this worth writing.
+
+        Batched at 200 symbols. The route accepts a long list and the URL is the
+        binding constraint, not the API.
+
+        A symbol whose entry is missing, malformed, or non-positive is **left
+        out** rather than defaulted. The planner reports it as unpriced, which is
+        the honest answer; a zero or a stale invented price would flow into a
+        target notional and out the other side as an order.
+        """
+        found: dict[Ticker, StockSnapshot] = {}
+        wanted = sorted({str(symbol) for symbol in symbols})
+        for start in range(0, len(wanted), _SNAPSHOT_BATCH):
+            batch = wanted[start : start + _SNAPSHOT_BATCH]
+            payload = self._get("/v2/stocks/snapshots", {"symbols": ",".join(batch)})
+            body = payload.get("snapshots", payload)
+            if not isinstance(body, Mapping):
+                continue
+            for raw_symbol, snapshot in body.items():
+                if not isinstance(snapshot, Mapping):
+                    continue
+                mark = to_stock_snapshot(str(raw_symbol), snapshot)
+                if mark is not None:
+                    found[mark.symbol] = mark
+        return found
 
     def option_chain(
         self,

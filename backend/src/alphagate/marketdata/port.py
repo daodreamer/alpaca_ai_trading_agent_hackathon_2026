@@ -24,6 +24,7 @@ through one door (specs/01 Rule 1b) and this is not it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
@@ -32,7 +33,30 @@ from alphagate.core.bar import Bar
 from alphagate.core.identifiers import Ticker
 from alphagate.options import OptionContract, OptionQuote
 
-__all__ = ["MarketData", "OptionBar"]
+__all__ = ["MarketData", "OptionBar", "StockSnapshot"]
+
+
+@dataclass(frozen=True, slots=True)
+class StockSnapshot:
+    """What one equity is worth right now, and how sure we are of it.
+
+    Added for the equity path (specs/09 D2), which needs a *hundred* marks per
+    pass rather than one. `latest_price` answers for a single symbol and costs a
+    round trip; a rebalance over the S&P 500 point-in-time universe would spend
+    the whole slot on it.
+
+    `price` is the mid when there is a two-sided quote and the last trade when
+    there is not. Both are recorded so the caller can tell which it got: a mark
+    from a trade five minutes ago and a mark from a live two-sided market are
+    different amounts of confidence, and the freshness check downstream should
+    be measuring the one it actually used.
+    """
+
+    symbol: Ticker
+    price: Decimal
+    as_of: datetime
+    from_quote: bool
+    """True when `price` is a quote mid, False when it fell back to a trade."""
 
 
 class OptionBar:
@@ -85,6 +109,19 @@ class MarketData(Protocol):
 
     def latest_price(self, symbol: Ticker) -> Decimal:
         """Mid of the current top of book."""
+        ...
+
+    def stock_snapshots(
+        self, symbols: Sequence[Ticker]
+    ) -> Mapping[Ticker, StockSnapshot]:
+        """Marks for many symbols in as few round trips as possible.
+
+        A symbol the provider has nothing for is **absent** from the result
+        rather than defaulted. The planner then skips it with a stated reason
+        (specs/09 D2), which is the honest reading of "we do not know what this
+        is worth" — and an invented price is the one input that would make every
+        number downstream a guess without saying so.
+        """
         ...
 
     def option_chain(

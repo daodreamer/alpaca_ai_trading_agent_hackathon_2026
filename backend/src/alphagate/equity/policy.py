@@ -33,18 +33,34 @@ __all__ = ["DEFAULT_EQUITY_POLICY", "EquityPolicy"]
 class EquityPolicy:
     """One immutable configuration. Never mutated; replaced wholesale."""
 
-    no_trade_band_pct: Decimal
-    """Minimum drift, as a fraction of equity, before a symbol is traded.
+    drift_band_pct: Decimal
+    """Minimum drift before a symbol is traded, as a fraction of **that
+    position's own size** — not of the account.
 
     specs/09 D3. The strategy rebalances every five sessions; between them the
     targets do not move but the holdings drift with price, so a naive diff would
-    trade every name every day and pay costs no backtest ever charged."""
+    trade every name every day and pay costs no backtest ever charged.
+
+    Proportional rather than a flat fraction of equity, and the first version was
+    the flat one and was wrong in a way worth recording. A 0.25% band on a $100k
+    account is $253. The book's sleeve positions are 0.192% of equity — $194
+    each — so *every sleeve position was permanently inside the band*: the
+    hundred names the strategy holds could never be established at all, and the
+    ten core names would have been bought into an account that was otherwise
+    cash. The book would have been a tenth of the strategy, and nothing would
+    have reported an error.
+
+    A band relative to position size cannot have that failure, because the
+    threshold for establishing a position is a fraction of the position rather
+    than a constant it might be smaller than."""
 
     min_order_notional: Decimal
     """Absolute floor on one order, in account currency.
 
-    A band expressed only as a fraction of equity still admits a $3 order on a
-    small account, and a $3 order is all spread."""
+    The proportional band alone would admit a $4 order on a $20 position, and a
+    $4 order is all spread. This is the floor that makes the band cost-aware, and
+    it is the binding constraint on exactly the small sleeve names where it
+    should be."""
 
     max_position_pct: Decimal
     """Ceiling on one resulting position. The book's own largest core weight is
@@ -82,7 +98,7 @@ class EquityPolicy:
 
     def __post_init__(self) -> None:
         for name in (
-            "no_trade_band_pct",
+            "drift_band_pct",
             "min_order_notional",
             "max_position_pct",
             "max_gross",
@@ -118,13 +134,23 @@ class EquityPolicy:
     # Absolute limits, derived from the equity they are a fraction of
     # --------------------------------------------------------------- #
 
-    def band(self, equity: Decimal) -> Decimal:
-        """The drift a symbol must exceed before it is traded, in currency.
+    def threshold(self, target_notional: Decimal, held_notional: Decimal) -> Decimal:
+        """The drift one symbol must exceed before it is traded, in currency.
 
-        The larger of the two thresholds, so both bind: the fractional band on a
-        large account and the absolute floor on a small one.
+        Measured against the **larger** of what is wanted and what is held, which
+        is what makes the same rule cover all three cases:
+
+        * *establishing* a position — held is zero, so the threshold is a
+          fraction of the target and the full target clears it;
+        * *drifting* — the two are close, so it is a fraction of the position;
+        * *exiting* — the target is zero, so it is a fraction of the holding, and
+          the whole holding clears it.
+
+        Floored by `min_order_notional`, so a tiny position is not rebalanced by
+        orders worth less than their spread.
         """
-        return max(self.no_trade_band_pct * equity, self.min_order_notional)
+        size = max(abs(target_notional), abs(held_notional))
+        return max(self.drift_band_pct * size, self.min_order_notional)
 
     def max_position(self, equity: Decimal) -> Decimal:
         return self.max_position_pct * equity
@@ -134,9 +160,11 @@ class EquityPolicy:
 
 
 DEFAULT_EQUITY_POLICY: Final = EquityPolicy(
-    # 0.25% of a $100k account is $250. Below that on a 104-name book the order
-    # is smaller than a single sleeve position, so trading it is churn.
-    no_trade_band_pct=Decimal("0.0025"),
+    # A fifth of the position. On a $8,276 core name that is $1,655 of drift
+    # before an order — roughly a 20% move, which a five-session rebalance
+    # period will usually correct anyway. On a $194 sleeve name it is $39, and
+    # the $25 floor below is what stops it going lower.
+    drift_band_pct=Decimal("0.20"),
     min_order_notional=Decimal(25),
     # Comfortably above the book's 8.2% largest name and far below anything that
     # would read as a concentrated bet.
