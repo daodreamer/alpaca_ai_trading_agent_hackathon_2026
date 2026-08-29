@@ -3,14 +3,16 @@
 These encode specs/01-architecture.md as tests rather than prose. Adapted from
 the guard suite that ships with `alphagate.core` upstream.
 
-Guard 1 — the pure layers (core, options, risk) import only the standard library
-          and each other.
+Guard 1 — the pure layers (core, options, risk, equity) import only the standard
+          library and each other.
 Guard 2 — no LLM SDK outside `alphagate.agent`. Rule 1 of specs/01.
 Guard 3 — no network stack in the pure layers. Rule 2's precondition.
 Guard 4 — `Decimal` is never constructed from a float literal. Money is exact.
-Guard 5 — `GatedOrder` is minted only inside `alphagate.risk.gate`, and
-          `execution` accepts nothing else. Rule 2 of specs/01, which is the
-          whole claim of the project.
+Guard 5 — each gated order type is minted inside exactly one module, and
+          `execution` accepts nothing else. Rule 2 of specs/01 and specs/09 D7,
+          which together are the whole claim of the project.
+Guard 9 — `alphagate` does not import `aqr`, and `aqr` does not import
+          `alphagate`. specs/09 D0: the seam between the two projects is a file.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "alphagate"
 
-PURE_PACKAGES = ("core", "options", "risk")
+PURE_PACKAGES = ("core", "options", "risk", "equity")
 LLM_PACKAGES = frozenset({"anthropic", "openai", "google", "litellm", "langchain"})
 NETWORK_PACKAGES = frozenset(
     {"httpx", "requests", "aiohttp", "websockets", "urllib3", "fastapi", "starlette"}
@@ -130,55 +132,86 @@ def test_pure_packages_are_present_or_not_yet_written(package: str) -> None:
 
 
 # ---------------------------------------------------------------------- #
-# Guard 5 — the one door. specs/01 Rule 2, specs/03 D3, specs/04 D1.
+# Guard 5 — the doors. specs/01 Rule 2, specs/03 D3, specs/04 D1, specs/09 D7.
 # ---------------------------------------------------------------------- #
 
-GATE_MODULE = SRC / "risk" / "gate.py"
+GATED_TYPES = {
+    "GatedOrder": SRC / "risk" / "gate.py",
+    "GatedEquityOrder": SRC / "risk" / "equity_gate.py",
+}
+"""Every type that means "this passed a Gate", and the one module allowed to
+mint it.
+
+A dict rather than two tests, because the failure this guard exists to catch is
+a *third* order path arriving with no guard of its own. Adding a gated type
+without adding a row here leaves it uncovered — so the entry-point test below
+asserts that every `submit*` in `execution` names a key of this mapping, which
+turns that omission into a failure rather than a silence."""
+
+APPROVAL_TYPES = {
+    "Approved": SRC / "risk" / "gate.py",
+    "ApprovedEquity": SRC / "risk" / "equity_gate.py",
+}
 
 
-def test_gated_orders_are_minted_in_exactly_one_module() -> None:
+@pytest.mark.parametrize("name", sorted(GATED_TYPES | APPROVAL_TYPES))
+def test_gated_orders_are_minted_in_exactly_one_module(name: str) -> None:
     """A `GatedOrder(...)` call anywhere else is a bypass, whatever it is named.
 
-    `verdict.py` refuses such a call at runtime; this is the static half, and it
-    fails during a normal test run rather than at 09:31 on a trading morning.
+    The verdict modules refuse such a call at runtime by walking the stack; this
+    is the static half, and it fails during a normal test run rather than at
+    09:31 on a trading morning.
     """
+    minting = (GATED_TYPES | APPROVAL_TYPES)[name]
     offenders: list[str] = []
     for path in _python_files(SRC):
-        if path == GATE_MODULE:
+        if path == minting:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "GatedOrder":
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == name:
                 offenders.append(f"{path.relative_to(SRC)}:{node.lineno}")
     assert not offenders, (
-        "only alphagate.risk.gate may mint a GatedOrder:\n" + "\n".join(offenders)
+        f"only {minting.relative_to(SRC)} may mint a {name}:\n" + "\n".join(offenders)
     )
 
 
 def test_execution_accepts_nothing_but_a_gated_order() -> None:
-    """specs/04 D1. `submit` takes a `GatedOrder`; there is no REST fallback,
-    because a fallback is a bypass."""
+    """specs/04 D1 and specs/09 D7. Every entry point takes a gated type.
+
+    Scanned by *prefix* — any function in `execution` whose name starts with
+    `submit` — rather than by exact name. A second order path called
+    `submit_equity` would have slipped past a guard that only knew the word
+    `submit`, and the whole point of this file is that a new door cannot be
+    added without a key.
+    """
     execution = SRC / "execution"
     if not execution.is_dir():
         pytest.skip("alphagate.execution not implemented yet — see specs/04")
 
-    entry = execution / "submit.py"
-    candidates = [entry] if entry.is_file() else list(_python_files(execution))
     submits = []
-    for path in candidates:
+    for path in _python_files(execution):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "submit":
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("submit"):
                 submits.append((path, node))
     assert submits, "alphagate.execution exists but exposes no `submit`"
 
+    found: set[str] = set()
     for path, node in submits:
         first = node.args.args[0] if node.args.args else None
         annotation = ast.unparse(first.annotation) if first and first.annotation else None
-        assert annotation == "GatedOrder", (
-            f"{path.relative_to(SRC)}:{node.lineno} — submit's first parameter is "
-            f"{annotation!r}, not GatedOrder"
+        assert annotation in GATED_TYPES, (
+            f"{path.relative_to(SRC)}:{node.lineno} — {node.name}'s first parameter "
+            f"is {annotation!r}, which is not one of {sorted(GATED_TYPES)}. A door "
+            "that accepts an ungated type is a bypass."
         )
+        found.add(annotation)
+    assert found == set(GATED_TYPES), (
+        f"every gated type needs a door: {sorted(set(GATED_TYPES) - found)} has none, "
+        "which means it is minted and never used, or used through a path this "
+        "guard cannot see"
+    )
     # An override is a *parameter* or a *name*, never a word in a sentence. The
     # first version of this guard scanned raw text and tripped on the docstring
     # explaining why no bypass exists, which is the wrong thing to fail on.
@@ -428,3 +461,53 @@ def test_the_status_snapshot_is_the_only_bridge() -> None:
             assert not node.module.startswith("alphagate."), (
                 f"the status reader must not import {node.module}; it parses JSON"
             )
+
+
+# ---------------------------------------------------------------------- #
+# Guard 9 — the two projects in this repository stay apart. specs/09 D0.
+# ---------------------------------------------------------------------- #
+
+RESEARCHER = Path(__file__).resolve().parents[2] / "ai_quant_researcher" / "src" / "aqr"
+
+
+def test_alphagate_never_imports_the_researcher() -> None:
+    """The handoff is a JSON file, and it stays a file.
+
+    `ai_quant_researcher` holds no money and places no orders, so it has no
+    `Decimal` rule and no Risk Gate; AlphaGate has both. An import in either
+    direction would make one project's invariants the other's problem, which
+    CLAUDE.md §2b already says not to do.
+
+    Checked as an import rather than as a dependency declaration because the
+    dependency is what would be *noticed*. A stray `sys.path` append and a
+    single `from aqr...` is what this actually looks like when it happens.
+    """
+    offenders: list[str] = []
+    for path in _python_files(SRC):
+        for name in _top_level_imports(path):
+            if name == "aqr":
+                offenders.append(f"{path.relative_to(SRC)} imports aqr")
+    assert not offenders, (
+        "alphagate must not import the researcher; the seam is the target book "
+        "file (specs/09 D0):\n" + "\n".join(offenders)
+    )
+
+
+def test_the_researcher_never_imports_alphagate() -> None:
+    """The other direction, checked from here because this suite is the one CI runs.
+
+    `ai_quant_researcher/tests/test_boundaries.py` asserts its own half — that no
+    trading host, order path or broker SDK appears under `src/aqr/`. This is the
+    narrower claim that the two packages do not know each other exists, and it
+    lives here so that adding the import to *either* side fails *this* build.
+    """
+    if not RESEARCHER.is_dir():  # pragma: no cover - the sibling project exists
+        pytest.skip("ai_quant_researcher is not checked out beside backend/")
+    offenders: list[str] = []
+    for path in _python_files(RESEARCHER):
+        for name in _top_level_imports(path):
+            if name == "alphagate":
+                offenders.append(f"{path.relative_to(RESEARCHER)} imports alphagate")
+    assert not offenders, (
+        "the researcher must not import alphagate:\n" + "\n".join(offenders)
+    )

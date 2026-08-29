@@ -51,6 +51,18 @@ from alphagate.risk import (
     evaluate,
 )
 
+# The equity door is tested against the same target book the planner and the
+# Gate are. See `tests/risk/conftest.py` for why these are imported rather than
+# redefined.
+from tests.equity.conftest import (  # noqa: F401
+    book,
+    book_payload,
+    holdings,
+    marks,
+    policy,
+    portfolio,
+)
+
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "mcp"
 
 SPY: Ticker = ticker("SPY")
@@ -211,10 +223,10 @@ def gated(
         proposal_id=proposal_id,
         risk_as_of=NOW,
     )
-    book = PortfolioSnapshot(
+    snapshot = PortfolioSnapshot(
         equity=equity, positions=(), drawdown_pct=Decimal(0), fills_today=0
     )
-    verdict = evaluate(proposal, book, DEFAULT_LIMITS, NOW)
+    verdict = evaluate(proposal, snapshot, DEFAULT_LIMITS, NOW)
     assert isinstance(verdict, Approved), (
         "fixture proposal was vetoed: "
         f"{[c.name for c in verdict.checks if not c.passed]}"

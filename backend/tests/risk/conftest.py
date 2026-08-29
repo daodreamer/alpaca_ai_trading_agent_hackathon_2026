@@ -184,3 +184,27 @@ def snapshot(
 @pytest.fixture
 def limits() -> RiskLimits:
     return DEFAULT_LIMITS
+
+
+# --------------------------------------------------------------------- #
+# The equity Gate's fixtures — specs/09 D5.
+# --------------------------------------------------------------------- #
+#
+# Re-exported from `tests/equity/conftest.py` rather than redefined. Two
+# fixtures for one target book would drift, and the drift would be between the
+# artefact the *planner* is tested against and the artefact the *Gate* is tested
+# against — which is precisely the pair that has to agree, since the plan the
+# Gate judges is the one the planner produced.
+#
+# `pytest_plugins` in a non-root conftest is an error in modern pytest, so the
+# fixture functions are imported by name. That is the supported way to share
+# them across packages and it keeps the definition in one file.
+
+from tests.equity.conftest import (  # noqa: E402, F401
+    book,
+    book_payload,
+    holdings,
+    marks,
+    policy,
+    portfolio,
+)
