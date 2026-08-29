@@ -1,9 +1,310 @@
+*Language:* **English** · [简体中文](README.zh-CN.md)
+
 # AlphaGate
 
 **Trading agents that can be overruled.**
 
 Built for the [Alpaca AI Trading Agents Hackathon](https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon)
 (28 Aug – 4 Sep 2026), Options Alpha Agents track.
+
+> **Never used something like this before?** Jump to
+> [**Start here**](#start-here) — it assumes you know nothing, and gets you to a
+> running dashboard in about half an hour.
+>
+> **Want to know how it works?** Read
+> [**Architecture and workflow**](docs/ARCHITECTURE.md) — diagrams of every
+> stage, from a guess to a placed order.
+
+---
+
+## Start here
+
+*A guide that assumes you have never done any of this before. If you already
+know what a paper-trading API key is, skip to [the Manual](#manual).*
+
+### What is this?
+
+It is a computer program that buys and sells shares for you, automatically.
+
+What makes it unusual is **the order in which it does things**. Most programs
+like this start by guessing what will go up. This one starts by *testing* a
+guess against fifteen years of old market data, then testing it again against
+two years of data it was deliberately never allowed to look at. Only a guess
+that survives both tests is allowed to touch the account — and even then, every
+single order it wants to place has to get past a separate piece of code called
+the **Risk Gate**, whose only job is to say *no*.
+
+Think of it as a scientist and a safety inspector working in the same building.
+The scientist proposes; the inspector refuses.
+
+### Is this real money?
+
+**No.** This runs on an Alpaca **paper trading** account — a free practice
+account with pretend money in it. It looks and behaves exactly like the real
+thing, and none of it is real.
+
+The program is built so that it *cannot* connect to a real-money account, and
+this is checked twice: real Alpaca keys begin with `AK` and practice keys begin
+with `PK`, and the web address for real trading is different from the practice
+one. If either of those two signals says "real", the program refuses to start.
+
+**Do not change that.** Nothing in this repository is investment advice, and
+nobody has tested it with money that matters.
+
+### What you need
+
+| | |
+| --- | --- |
+| A computer | Windows, macOS or Linux all work |
+| An internet connection | it talks to Alpaca's servers |
+| About 30 minutes | most of it is waiting for downloads |
+| A free Alpaca account | takes 2 minutes, no money required |
+
+You do **not** need to know how to program. You will be typing commands into a
+terminal, which is a window where you type instructions instead of clicking
+things.
+
+- **Windows:** press the Start button, type `powershell`, press Enter.
+- **macOS:** press ⌘ + Space, type `terminal`, press Enter.
+- **Linux:** you know where it is.
+
+### Step 1 — install the tool that runs the program
+
+This project is written in Python. Rather than installing Python yourself, you
+install one small program called **uv**, which fetches the right Python version
+and every library for you.
+
+Copy this line into your terminal and press Enter.
+
+**Windows:**
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**macOS or Linux:**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then **close the terminal and open a new one** — this is important, because the
+new window is the one that knows `uv` exists. Check it worked:
+
+```bash
+uv --version
+```
+
+If you see a version number, you are done with this step.
+
+### Step 2 — get the code
+
+```bash
+git clone <the repository URL>
+cd hackathon_alpaca_ai_trading_20260828
+```
+
+If you do not have `git`, download the repository as a ZIP from its web page,
+unzip it, and use your terminal to move into the unzipped folder.
+
+**Every command in this guide is typed from inside that folder.** If a command
+says "not found", check you are in the right place — type `ls` (macOS/Linux) or
+`dir` (Windows) and you should see `README.md` in the list.
+
+### Step 3 — get your free practice keys
+
+1. Go to [alpaca.markets](https://alpaca.markets) and sign up. It is free.
+2. Once you are logged in, find the switch that says **Paper Trading** and make
+   sure it is turned **on**. This is the practice account.
+3. Look for **API Keys** and click **Generate New Key**.
+4. You will be shown two long strings of letters and numbers: a **Key ID** and a
+   **Secret Key**.
+
+**Copy them somewhere now.** The secret one is shown exactly once and never
+again. If you lose it, generate a new pair — no harm done.
+
+Check the Key ID starts with **`PK`**. If it starts with `AK`, you are looking
+at a real-money key and the Paper Trading switch was off. Go back and turn it
+on.
+
+### Step 4 — tell the program your keys
+
+In the project folder there is a file called `.env.example`. Make a copy of it
+named `.env.local`:
+
+**Windows:**
+
+```powershell
+copy .env.example .env.local
+```
+
+**macOS or Linux:**
+
+```bash
+cp .env.example .env.local
+```
+
+Now open `.env.local` in any text editor (Notepad is fine) and fill in three
+lines:
+
+```
+ALPACA_API_KEY_ID=PK................
+ALPACA_API_SECRET_KEY=................
+ALPHAGATE_STRATEGY_FINGERPRINT=3f6e2c8a9309068b
+```
+
+The first two are your keys from Step 3. The third one names **which strategy
+this account is allowed to trade** — that long string is the identifier of the
+one strategy that passed all the tests. The program refuses to trade anything
+else, and that refusal is the whole point: without it, dropping a different file
+into a folder would silently change what your account holds.
+
+`.env.local` is never uploaded anywhere and is excluded from version control, so
+your keys stay on your computer.
+
+### Step 5 — check that everything works
+
+```bash
+uv run --directory backend python -m alphagate equity-preflight
+```
+
+The first time you run this it will download Python and a handful of libraries.
+That is the slow part. Afterwards it takes a few seconds.
+
+You should see a list like this:
+
+```
+AlphaGate equity pre-flight — 2026-08-29T12:37:28+00:00
+
+[  ok  ] strategy pinned — 3f6e2c8a9309068b
+[  ok  ] a target book exists — .../rs_volatility_consistency_neutral_v1-3f6e2c8a9309068b-2026-08-27.json
+[  ok  ] the book may be executed — rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b] as of 2026-08-27
+[  ok  ] the book is fresh — 2d old, limit 7d
+[  ok  ] the sealed window did not refute it — alpha +16.72%/yr  beta 0.43  t +2.22  looks 1
+[  ok  ] account readable — equity 100000.00
+[  ok  ] account not blocked
+[  ok  ] 0 equity positions held, 104 wanted
+[  ok  ] market closed — next open 2026-08-31 13:30 UTC
+
+Ready.
+```
+
+Every one of those lines is a question the program asked and got an answer to.
+The two that matter most:
+
+- **"the book may be executed"** — the list of what to buy passed all six of its
+  validity checks. It names the right strategy, it is not out of date, and the
+  final out-of-sample test did not disprove it.
+- **"account readable"** — your keys work and the program can see your practice
+  account.
+
+If any line says `FAIL`, the text after it tells you what to fix. See
+[If something goes wrong](#if-something-goes-wrong).
+
+### Step 6 — see what it *would* do, without doing it
+
+```bash
+uv run --directory backend python -m alphagate equity-plan
+```
+
+This is the safe command. It works out every order it would place and then
+**places none of them**. Read it, and if you disagree, nothing has happened.
+
+You will see one line summarising the pass, like:
+
+```
+2026-08-31-EQ-000  PLANNED  104 of 108 intents gated, not sent
+```
+
+or, on most days:
+
+```
+2026-08-31-EQ-000  NO_TRADES  104 symbols inside the 20% band
+```
+
+`NO_TRADES` is normal and correct. This strategy only adjusts its holdings
+every five trading days, so on four days out of five the honest answer is
+"what we already own is close enough". A program that traded every day would be
+paying fees for nothing.
+
+### Step 7 — look at it in a browser
+
+The pretty version needs one extra tool: **Node.js**. Install it from
+[nodejs.org](https://nodejs.org) (take the "LTS" version), open a *new*
+terminal, then:
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+uv run --directory backend python -m alphagate serve
+```
+
+Now open **http://127.0.0.1:8000** in your browser.
+
+You will find three tabs. Click **Equity**. The first thing on the page is not
+your positions — it is *why this strategy is allowed to trade at all*: its name,
+its identifier, the idea behind it in one paragraph, and the numbers from the
+out-of-sample test. Below that is the actual list of what it wants to hold
+against what you actually hold.
+
+**Do not want to install Node?** You can see the same information as text:
+
+```bash
+uv run --directory backend python -m alphagate equity-status
+```
+
+### Step 8 — let it trade
+
+**Only do this when the US stock market is open** — roughly 09:30 to 16:00 New
+York time, Monday to Friday. The program checks anyway and will politely refuse
+otherwise.
+
+```bash
+uv run --directory backend python -m alphagate equity-run
+```
+
+This stays running. It re-checks your account every thirty seconds so the
+dashboard stays live, and it adjusts your holdings once, fifteen minutes after
+the opening bell. Press `Ctrl` + `C` to stop it; nothing is lost, because
+everything it decided is already written to disk.
+
+If you want to watch it run through the whole day without it placing anything,
+add `--dry-run`.
+
+### If something goes wrong
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `uv: command not found` | the terminal does not know about `uv` yet | close the terminal, open a new one |
+| `FAIL credentials present` | `.env.local` is missing or empty | redo Step 4 |
+| `refuses to build an MCP transport` | your key looks like a real-money key | check the Key ID starts with `PK` and Paper Trading was on |
+| `FAIL a target book exists` | the file listing what to hold is missing | see [Refreshing the strategy's holdings](#refreshing-the-strategys-holdings) |
+| `FAIL the book is fresh` | that file is more than a week old | same as above |
+| `108 stale_mark` | every price is out of date | the market is closed. This is correct behaviour |
+| `the market is closed` | it is a weekend or a holiday | wait for a weekday |
+| nothing happens for a long time | the first run is downloading Python | let it finish; it is once only |
+
+### A small dictionary
+
+| Word | What it means here |
+| --- | --- |
+| **Paper trading** | Practice trading with pretend money. Real prices, fake wallet. |
+| **API key** | A password that lets a program use your account instead of you clicking. |
+| **Position** | Shares you currently own. "104 positions" means 104 different companies. |
+| **Weight** | How much of your account one company should be. 0.08 means 8%. |
+| **Target book** | The list of weights the strategy wants. Not orders — a description of a destination. |
+| **Rebalance** | Buying and selling so what you hold matches what you want to hold. |
+| **Drift** | How far one holding has wandered from its target, in dollars. |
+| **Band** | How much drift is tolerated before bothering to trade. Here, 20% of the position. |
+| **Backtest** | Running a strategy against old data to see what it would have done. |
+| **Out of sample** | Data the strategy was never allowed to see while it was being designed. The only honest test. |
+| **The Gate** | The code that can refuse any order. It has no AI in it, on purpose. |
+| **Kill switch** | An automatic stop that latches if the account falls too far. Only a human can clear it. |
+| **Journal** | An append-only file recording every decision, including the decisions to do nothing. |
+
+---
 
 ## The idea
 
@@ -224,6 +525,42 @@ been established at all. That was the first version, and
 rule: an absent target is a target of zero, so the whole position is the drift.
 Nothing to forget to run.
 
+### Refreshing the strategy's holdings
+
+The repository ships with a target book already built, so everything above works
+on a fresh clone. That book goes stale after a week, and the strategy re-picks
+its holdings every five sessions, so it has to be rebuilt.
+
+```bash
+python scripts/pipeline.py            # refresh data → rebuild the book → trade it
+python scripts/pipeline.py --dry-run  # rebuild the book, plan against it, place nothing
+python scripts/pipeline.py book       # just rebuild it; the data is already current
+```
+
+The `refresh` stage pulls about 160 MB of daily bars for 682 companies and takes
+several minutes. `book` re-runs the *already validated* strategy over that data
+and writes the weights it holds today; it is deterministic, and it refuses
+outright unless the registry knows the strategy, its seal has been spent, and
+the sealed run did not refute it.
+
+**What the pipeline deliberately does not do is search for a new strategy.** A
+research campaign spends looks against the sealed window — the multiplicity
+denominator every claim here is discounted by — and a nightly job that quietly
+screened another seven candidates would invalidate the `t` printed on the
+dashboard without anyone noticing. Starting one is a decision a person makes:
+
+```bash
+cd ai_quant_researcher
+uv run aqr research --provider deepseek --iterations 40 --source csv \
+    --universe sp500_pit --csv-root data-sp500
+uv run aqr experiments                      # what has been tried, winners and losers
+uv run aqr preregister FINGERPRINT          # declare a candidate before reading sealed data
+uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
+```
+
+See [ai_quant_researcher/README.md](ai_quant_researcher/README.md) for what each
+of those does and why the seal is arranged the way it is.
+
 ### Watching it
 
 ```bash
@@ -239,8 +576,8 @@ position with its current mark and how far it is from the profit target and the
 stop, the four budgeted limits against what is used, and any broker legs the
 journal cannot account for.
 
-The **dashboard** is the same information with a Live tab and a Journal tab, and
-it is the thing to open during a demo:
+The **dashboard** is the same information across three tabs, and it is the
+thing to open during a demo:
 
 - **Options** — health, money, positions with a bar showing each one travelling
   between its stop and its target, room left before the Gate refuses its own
@@ -268,8 +605,8 @@ honestly: if the agent stops, the file stops being rewritten and the page says
 
 ### Building the dashboard
 
-The Live tab is a React app (Vite, Tailwind v4, shadcn/ui) that builds into the
-Python package, so one process serves the page and the API:
+The Options and Equity tabs are a React app (Vite, Tailwind v4, shadcn/ui) that
+builds into the Python package, so one process serves the page and the API:
 
 ```bash
 cd frontend && npm install && npm run build   # → backend/src/alphagate/interface/static/
@@ -310,15 +647,24 @@ payloads, which is why it takes twenty seconds.
 
 See [specs/](specs/) for the contracts.
 
+## How it works
+
+[**Architecture and workflow**](docs/ARCHITECTURE.md) is the illustrated
+version: the two systems and the file between them, the research pipeline from a
+guess to a validated strategy, one rebalance pass as a sequence diagram, how a
+weight becomes a number of shares, the two Gates side by side, the layering and
+the nine guards that enforce it, and the daily loop.
+
 ## Repository layout
 
 | Directory | What it is |
 | --- | --- |
 | [backend/](backend/) | **AlphaGate itself.** The options agent, the Risk Gate, execution, the journal. This is the competition entry. |
 | [specs/](specs/) | Contracts, written before the code they govern. |
-| [frontend/](frontend/) | The dashboard's Live tab — Vite + React + shadcn/ui, built into the Python package. |
+| [frontend/](frontend/) | The dashboard's live tabs — Vite + React + shadcn/ui, built into the Python package. |
 | [journal/](journal/) | The decision records the agent writes — one line per cycle, append-only. Committed: this is the evidence the submission rests on ([specs/06](specs/06-journal.md) D1). |
 | [adr/](adr/) | Decisions and the reasoning behind them. |
+| [docs/](docs/) | [Architecture and workflow](docs/ARCHITECTURE.md), with diagrams. English and 简体中文. |
 | [ai_quant_researcher/](ai_quant_researcher/) | A separate system sharing the repository: an equities strategy-research lab that implements [specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md). It produces the strategy the equity agent executes, and imports nothing from AlphaGate. |
 | [scripts/](scripts/) | `pipeline.py` — refresh, rebuild the book, trade it. Runs both projects' CLIs as subprocesses and imports neither. |
 
