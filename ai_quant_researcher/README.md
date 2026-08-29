@@ -133,17 +133,15 @@ ledger with a hash chain answers *what*, so an audit is a query rather than an
 act of trust. Editing a stored verdict without replaying the loads that produced
 it does not reproduce the digest.
 
-**The rows are not on the disk.** `data-research/` is physically truncated at
-the embargo; `data-sealed/` holds the full history and only `SealedProvider`
+**The rows are not on the disk.** `data-sp500/` is physically truncated at
+the embargo; `data-sp500-sealed/` holds the full history and only `SealedProvider`
 can read it, which needs an explicit token *and* the sealed phase. `aqr
 seal-check` verifies the claim without loading anything into the process doing
 the checking:
 
 ```
 root               files  latest bar  past embargo  canary
-data-research      55     2024-08-30  none          armed
-data-sealed        54     2026-08-26  54            -
-data-sp500         681    2024-08-30  none          -
+data-sp500         681    2024-08-30  none          armed
 data-sp500-sealed  682    2026-08-27  598           -
 ```
 

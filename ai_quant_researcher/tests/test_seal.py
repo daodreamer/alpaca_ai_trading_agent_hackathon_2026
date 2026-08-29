@@ -76,7 +76,7 @@ def _bars(symbol: str, when: datetime, n: int = 10) -> Bars:
 
 
 def _load(
-    symbol: str = "AAPL", *, source: str = "csv:data-research", max_ts: int = 0
+    symbol: str = "AAPL", *, source: str = "csv:data-sp500", max_ts: int = 0
 ) -> LoadRecord:
     return LoadRecord(
         source=source,

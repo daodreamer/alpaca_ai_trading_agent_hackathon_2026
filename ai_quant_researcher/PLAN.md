@@ -37,7 +37,7 @@ whole chain offline, asserting each artefact as it lands.
 | End-to-end | `tests/test_end_to_end.py` — research → evaluate → preregister → sealed run → target-book, offline, every artefact asserted |
 | Target-book handoff | `src/aqr/target_book.py` + `aqr target-book` — weights only, off `run_strategy`, refused unless the seal was spent and not refuted, recorded in `target_books` with a sha256 |
 | Sealed entry point | `src/aqr/cli_sealed.py` — a separate binary that cannot import `aqr.agent` or `aqr.cli`, reads only through `SealedProvider`, and promotes the process only after every refusal has already had its chance |
-| Cache separation | `data-research/` (Yahoo NASDAQ-50, truncated at embargo), `data-sealed/` (full), `data-sp500/` (Alpaca PIT, 681 series), `data-sp500-sealed/` (682 series through 2026-08-27). `aqr seal-check` audits all four |
+| Cache separation | `data-sp500/` (Alpaca PIT, 681 series, truncated at embargo), `data-sp500-sealed/` (682 series, full history through 2026-08-27). `aqr seal-check` audits both |
 | Portfolio engine | `src/aqr/backtest/portfolio.py` — always invested, `rank_by` ranking, 80% core / 20% sleeve (sleeve holds the benchmark while idle), forced exits `delisted` / `left_universe` |
 | Residual alpha | `src/aqr/backtest/alpha.py` — regression, not Sharpe difference. `t(alpha) <= 0` is fatal; positive-but-insignificant caps the verdict at REVIEW |
 | PIT universe | `data-universes/sp500_pit.json` — 682 members, 503–504 per day, 31.8% left the index in-window. Corrections and non-corrections recorded in the file |
@@ -715,13 +715,11 @@ nine-year benchmark Sharpe compares two market regimes wearing one label.
 ### 3.4 Build the sealed cache — **DONE**
 
 `data-sp500-sealed/` holds 682 series through 2026-08-27, 598 of them with rows
-past the embargo. `aqr seal-check` now audits both pairs by default:
+past the embargo. `aqr seal-check` now audits the pair by default:
 
 ```
 root               files  latest bar  past embargo  canary
-data-research      55     2024-08-30  none          armed
-data-sealed        54     2026-08-26  54            -
-data-sp500         681    2024-08-30  none          -
+data-sp500         681    2024-08-30  none          armed
 data-sp500-sealed  682    2026-08-27  598           -
 ```
 

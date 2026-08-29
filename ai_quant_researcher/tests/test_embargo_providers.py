@@ -26,8 +26,8 @@ import pytest
 
 from aqr.data.bars import Bars
 from aqr.data.embargo import (
-    RESEARCH_ROOT,
-    SEALED_ROOT,
+    SP500_RESEARCH_ROOT,
+    SP500_SEALED_ROOT,
     ResearchProvider,
     SealedProvider,
     SealToken,
@@ -161,9 +161,9 @@ def test_sealed_provider_returns_the_embargoed_years() -> None:
 
 
 def test_the_two_roots_are_distinct_and_named_for_what_they_hold() -> None:
-    assert RESEARCH_ROOT != SEALED_ROOT
-    assert "research" in RESEARCH_ROOT.name
-    assert "sealed" in SEALED_ROOT.name
+    assert SP500_RESEARCH_ROOT != SP500_SEALED_ROOT
+    assert "sealed" not in SP500_RESEARCH_ROOT.name
+    assert "sealed" in SP500_SEALED_ROOT.name
 
 
 def test_audit_reports_the_latest_bar_in_a_cache_root(tmp_path: Path) -> None:
@@ -270,6 +270,6 @@ def test_the_agent_layer_cannot_reach_the_sealed_provider() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module == "aqr.data.embargo":
                 for alias in node.names:
-                    if alias.name in ("SealedProvider", "SealToken", "SEALED_ROOT"):
+                    if alias.name in ("SealedProvider", "SealToken", "SP500_SEALED_ROOT"):
                         offenders.append(f"{path.relative_to(SRC)}:{node.lineno} {alias.name}")
     assert not offenders, "\n".join(offenders)

@@ -1,0 +1,1060 @@
+
+=== 2026-08-29 13:39:36 UTC ===
+uv run aqr pull --source alpaca --universe-file data-universes/sp500_pit.json --csv-root E:\dev\trade_research\hackathon_alpaca_ai_trading_20260828\ai_quant_researcher\data-sp500 --timeframe 1h --start 2016-01-01 --end 2026-08-29 --feed sip
+A 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+AA 1h: 11898 bars 2016-10-06 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+AAL 1h: 13062 bars 2016-01-04 -> 2024-08-30 -- ok
+AAP 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+ABBV 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+ABMD 1h: 10498 bars 2016-01-04 -> 2022-12-21
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+ABNB 1h: 5611 bars 2020-12-10 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+ABT 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+ACE 1h: 54 bars 2016-01-04 -> 2016-01-14 -- ok
+ACGL 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+ACN 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+ADBE 1h: 13057 bars 2016-01-04 -> 2024-08-30 -- ok
+ADI 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+ADM 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+ADP 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+ADS 1h: 9405 bars 2016-01-04 -> 2022-04-01 -- ok
+ADSK 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+ADT 1h: 10443 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 629 calendar days
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+AEE 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+AEP 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+AES 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+AET 1h: 4390 bars 2016-01-04 -> 2018-11-28 -- ok
+AFL 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+AGN 1h: 6554 bars 2016-01-04 -> 2020-05-08 -- ok
+AIG 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+AIV 1h: 13030 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+AIZ 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+AJG 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+AKAM 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+ALB 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+ALGN 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+ALK 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+ALL 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+ALLE 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+ALXN 1h: 8345 bars 2016-01-04 -> 2021-07-20 -- ok
+AMAT 1h: 13064 bars 2016-01-04 -> 2024-08-30 -- ok
+AMCR 1h: 7854 bars 2019-06-11 -> 2024-08-30 -- ok
+  - starts 3 year(s) later than requested -- short history, not a broken series
+AMD 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+AME 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+AMG 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+AMGN 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+AMP 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+AMT 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+AMZN 1h: 13067 bars 2016-01-04 -> 2024-08-30 -- ok
+AN 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+ANDV 1h: 1760 bars 2017-08-01 -> 2018-09-28 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+ANET 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+ANSS 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+AON 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+AOS 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+APA 1h: 13067 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APC 1h: 5429 bars 2016-01-04 -> 2019-08-08 -- ok
+APD 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+APH 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+APTV 1h: 10188 bars 2017-11-17 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 1 year(s) later than requested -- short history, not a broken series
+ARE 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+ARG 1h: 582 bars 2016-01-04 -> 2016-05-20 -- ok
+ARNC 1h: 10208 bars 2016-11-01 -> 2023-08-17
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+ATO 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+ATVI 1h: 11728 bars 2016-01-04 -> 2023-10-12 -- ok
+AVB 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+AVGO 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+AVY 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+AWK 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+AXON 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+AXP 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+AYI 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+AZO 1h: 13024 bars 2016-01-04 -> 2024-08-30 -- ok
+BA 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+BAC 1h: 13057 bars 2016-01-04 -> 2024-08-30 -- ok
+BALL 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+BAX 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+BBBY 1h: 11046 bars 2016-01-04 -> 2023-05-02
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+BBWI 1h: 4623 bars 2021-08-03 -> 2024-08-30 -- ok
+  - starts 5 year(s) later than requested -- short history, not a broken series
+BBY 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+BCR 1h: 3006 bars 2016-01-04 -> 2017-12-28 -- ok
+BDX 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+BEN 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+BF.B 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+BG 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+BHF 1h: 10687 bars 2017-07-17 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+BHI 1h: 2266 bars 2016-01-04 -> 2017-07-03 -- ok
+BIIB 1h: 13030 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+BIO 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+BKNG 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+BKR 1h: 10778 bars 2017-07-05 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+BLDR 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+BLK 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+BMS 1h: 5173 bars 2016-01-04 -> 2019-06-10 -- ok
+BMY 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+BNY 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+BR 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+BRCM 1h: 114 bars 2016-01-04 -> 2016-01-29 -- ok
+BRK.B 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+BRO 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+BSX 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+BWA 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+BX 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+BXLT 1h: 630 bars 2016-01-04 -> 2016-06-02 -- ok
+BXP 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+C 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+CA 1h: 4359 bars 2016-01-04 -> 2024-08-27
+  ! 18 gap(s), largest 1871 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CAG 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+CAH 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+CAM 1h: 372 bars 2016-01-04 -> 2016-04-01 -- ok
+CARR 1h: 6628 bars 2020-04-03 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+CAT 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+CB 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+CBOE 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+CBRE 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+CCE 1h: 4300 bars 2016-01-04 -> 2018-11-06 -- ok
+CCI 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+CCL 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+CDAY 1h: 8664 bars 2018-04-26 -> 2024-01-31 -- ok
+  - starts 2 year(s) later than requested -- short history, not a broken series
+CDNS 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+CDW 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+CE 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+CEG 1h: 3883 bars 2022-02-02 -> 2024-08-30 -- ok
+  - starts 6 year(s) later than requested -- short history, not a broken series
+CELG 1h: 5857 bars 2016-01-04 -> 2019-11-20 -- ok
+CERN 1h: 9683 bars 2016-01-04 -> 2022-06-07 -- ok
+CF 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+CFG 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+CHD 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+CHK 1h: 12135 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 228 calendar days
+  ! 7 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 1 zero-volume bar(s)
+CHRW 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+CHTR 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+CI 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+CINF 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+CL 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+CLX 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+CMA 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+CMCSA 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+CME 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+CMG 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+CMI 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+CMS 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+CNC 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+CNP 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+CNX 1h: 13034 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+COF 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+COL 1h: 4379 bars 2016-01-04 -> 2018-11-26 -- ok
+COO 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+COP 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+COR 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+COST 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+COTY 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+CPAY 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+CPB 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+CPGX 1h: 750 bars 2016-01-04 -> 2016-06-30 -- ok
+CPRI 1h: 13031 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CPRT 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+CPT 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+CRL 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+CRM 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+CRWD 1h: 7886 bars 2019-06-12 -> 2024-08-30 -- ok
+  - starts 3 year(s) later than requested -- short history, not a broken series
+CSCO 1h: 13064 bars 2016-01-04 -> 2024-08-30 -- ok
+CSGP 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+CSRA 1h: 3390 bars 2016-01-04 -> 2018-04-03 -- ok
+CSX 1h: 13046 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CTAS 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+CTLT 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+CTRA 1h: 7720 bars 2018-11-09 -> 2024-08-30
+  ! 1 gap(s), largest 242 calendar days
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 2 year(s) later than requested -- short history, not a broken series
+CTSH 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+CTVA 1h: 7893 bars 2019-06-03 -> 2024-08-30 -- ok
+  - starts 3 year(s) later than requested -- short history, not a broken series
+CTXS 1h: 10155 bars 2016-01-04 -> 2022-09-29 -- ok
+CVC 1h: 702 bars 2016-01-04 -> 2016-06-20 -- ok
+CVS 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+CVX 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+CXO 1h: 7597 bars 2016-01-04 -> 2021-01-15 -- ok
+CZR 1h: 13043 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+D 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+DAL 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+DAY 1h: 881 bars 2024-02-01 -> 2024-08-30 -- ok
+  - starts 8 year(s) later than requested -- short history, not a broken series
+DD 1h: 13035 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DE 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+DECK 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+DFS 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+DG 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+DGX 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+DHI 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+DHR 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+DIS 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+DISCA 1h: 9441 bars 2016-01-04 -> 2022-04-08 -- ok
+DISCK 1h: 9440 bars 2016-01-04 -> 2022-04-08 -- ok
+DISH 1h: 12038 bars 2016-01-04 -> 2023-12-29 -- ok
+DLR 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+DLTR 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+DNB 1h: 10925 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 509 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DO 1h: 10141 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 704 calendar days
+  ! 5 overnight move(s) over 40% -- these bars may not be split-adjusted
+DOC 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+DOV 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+DOW 1h: 10669 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 578 calendar days
+DPS 1h: 3790 bars 2016-01-04 -> 2018-07-09 -- ok
+DPZ 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+DRE 1h: 10148 bars 2016-01-04 -> 2022-09-30 -- ok
+DRI 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+DTE 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+DUK 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+DVA 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+DVN 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+DWDP 1h: 2623 bars 2017-09-01 -> 2019-05-31 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+DXC 1h: 11148 bars 2017-04-03 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+DXCM 1h: 13033 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EA 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+EBAY 1h: 13055 bars 2016-01-04 -> 2024-08-30 -- ok
+ECL 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+ED 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+EFX 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+EG 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+EIX 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+EL 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+ELV 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+EMC 1h: 2893 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 2441 calendar days
+EMN 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+EMR 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+ENDP 1h: 10023 bars 2016-01-04 -> 2022-08-25
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+ENPH 1h: 13057 bars 2016-01-04 -> 2024-08-30 -- ok
+EOG 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+EPAM 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+EQIX 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+EQT 1h: 13039 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+ES 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+ESRX 1h: 4467 bars 2016-01-04 -> 2018-12-20 -- ok
+ESS 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+ESV 1h: 5387 bars 2016-01-04 -> 2019-07-30 -- ok
+ETFC 1h: 7150 bars 2016-01-04 -> 2020-10-01 -- ok
+ETN 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+ETR 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+ETSY 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+EVHC 1h: 4186 bars 2016-01-04 -> 2018-10-10
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EVRG 1h: 9385 bars 2018-06-05 -> 2024-08-30 -- ok
+  - starts 2 year(s) later than requested -- short history, not a broken series
+EW 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+EXC 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+EXPD 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+EXPE 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+EXR 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+F 1h: 13062 bars 2016-01-04 -> 2024-08-30 -- ok
+FANG 1h: 13051 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FAST 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+FBHS 1h: 10466 bars 2016-01-04 -> 2022-12-14 -- ok
+FCX 1h: 13060 bars 2016-01-04 -> 2024-08-30 -- ok
+FDS 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+FDX 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+FE 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+FFIV 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+FICO 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+FIS 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+FISV 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+FITB 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+FL 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+FLIR 1h: 8072 bars 2016-01-04 -> 2021-05-13 -- ok
+FLR 1h: 13037 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+FLS 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+FLT 1h: 12368 bars 2016-01-04 -> 2024-03-22 -- ok
+FMC 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+FOSL 1h: 13039 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+FOX 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+FOXA 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+FRC 1h: 11015 bars 2016-01-04 -> 2023-04-28
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+FRT 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+FSLR 1h: 13055 bars 2016-01-04 -> 2024-08-30 -- ok
+FTI 1h: 11474 bars 2017-01-17 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+FTNT 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+FTR 1h: 6484 bars 2016-01-04 -> 2020-04-23
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+FTV 1h: 12276 bars 2016-07-05 -> 2024-08-30 -- ok
+  - starts 0 year(s) later than requested -- short history, not a broken series
+GAS 1h: 750 bars 2016-01-04 -> 2016-06-30 -- ok
+GD 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+GDDY 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+GE 1h: 13058 bars 2016-01-04 -> 2024-08-30 -- ok
+GEHC 1h: 2566 bars 2022-12-15 -> 2024-08-30 -- ok
+  - starts 6 year(s) later than requested -- short history, not a broken series
+GEN 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+GEV 1h: 635 bars 2024-04-02 -> 2024-08-30 -- ok
+  - starts 8 year(s) later than requested -- short history, not a broken series
+GGP 1h: 4000 bars 2016-01-04 -> 2018-08-27 -- ok
+GILD 1h: 13056 bars 2016-01-04 -> 2024-08-30 -- ok
+GIS 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+GL 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+GLW 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+GM 1h: 13058 bars 2016-01-04 -> 2024-08-30 -- ok
+GMCR 1h: 246 bars 2016-01-04 -> 2016-03-02 -- ok
+GME 1h: 13053 bars 2016-01-04 -> 2024-08-30
+  ! 9 overnight move(s) over 40% -- these bars may not be split-adjusted
+GNRC 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+GOOG 1h: 13060 bars 2016-01-04 -> 2024-08-30 -- ok
+GOOGL 1h: 13059 bars 2016-01-04 -> 2024-08-30 -- ok
+GPC 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+GPN 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+GPS 1h: 13008 bars 2016-01-04 -> 2024-08-21 -- ok
+GRMN 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+GS 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+GT 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+GWW 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+HAL 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+HAR 1h: 1792 bars 2016-01-04 -> 2017-03-10 -- ok
+HAS 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+HBAN 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+HBI 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+HCA 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+HD 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+HES 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+HFC 1h: 9323 bars 2016-01-04 -> 2022-03-14 -- ok
+HIG 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+HII 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+HLT 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+HOG 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+HOLX 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+HON 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+HOT 1h: 1098 bars 2016-01-04 -> 2016-09-22 -- ok
+HP 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+HPE 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+HPQ 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+HRB 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+HRL 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+HSIC 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+HST 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+HSY 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+HUBB 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+HUM 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+HWM 1h: 6644 bars 2020-04-01 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+IBM 1h: 13053 bars 2016-01-04 -> 2024-08-30 -- ok
+ICE 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+IDXX 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+IEX 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+IFF 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+ILMN 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+INCY 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+INFO 1h: 8455 bars 2016-07-13 -> 2022-02-25 -- ok
+  - starts 0 year(s) later than requested -- short history, not a broken series
+INTC 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+INTU 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+INVH 1h: 11401 bars 2017-02-01 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+IP 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+IPG 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+IPGP 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+IQV 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+IR 1h: 10983 bars 2017-05-12 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+IRM 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+ISRG 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+IT 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+ITW 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+IVZ 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+J 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+JBHT 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+JBL 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+JCI 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+JEF 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+JKHY 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+JNJ 1h: 13053 bars 2016-01-04 -> 2024-08-30 -- ok
+JNPR 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+JPM 1h: 13059 bars 2016-01-04 -> 2024-08-30 -- ok
+JWN 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+K 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+KDP 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+KEY 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+KEYS 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+KHC 1h: 13055 bars 2016-01-04 -> 2024-08-30 -- ok
+KIM 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+KKR 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+KLAC 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+KMB 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+KMI 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+KMX 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+KO 1h: 13057 bars 2016-01-04 -> 2024-08-30 -- ok
+KR 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+KSS 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+KSU 1h: 8953 bars 2016-01-04 -> 2021-12-13 -- ok
+KVUE 1h: 1998 bars 2023-05-04 -> 2024-08-30 -- ok
+  - starts 7 year(s) later than requested -- short history, not a broken series
+L 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+LDOS 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+LEG 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+LEN 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+LH 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+LHX 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+LIN 1h: 8757 bars 2018-10-31 -> 2024-08-30 -- ok
+  - starts 2 year(s) later than requested -- short history, not a broken series
+LKQ 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+LLL 1h: 6643 bars 2016-01-04 -> 2022-10-07
+  ! 1 gap(s), largest 837 calendar days
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+LLTC 1h: 1791 bars 2016-01-04 -> 2017-03-10 -- ok
+LLY 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+LM 1h: 6901 bars 2016-01-04 -> 2020-07-31 -- ok
+LMT 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+LNC 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+LNT 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+LOW 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+LRCX 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+LULU 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+LUMN 1h: 13048 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+LUV 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+LVLT 1h: 2768 bars 2016-01-04 -> 2017-10-31 -- ok
+LVS 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+LW 1h: 11725 bars 2016-11-10 -> 2024-08-30 -- ok
+  - starts 0 year(s) later than requested -- short history, not a broken series
+LYB 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+LYV 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+M 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+MA 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+MAA 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+MAC 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+MAR 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+MAS 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+MAT 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+MBC 1h: 2568 bars 2022-12-15 -> 2024-08-30 -- ok
+  - starts 6 year(s) later than requested -- short history, not a broken series
+MCD 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+MCHP 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+MCK 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+MCO 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+MDLZ 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+MDT 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+MET 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+META 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+MGM 1h: 13038 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+MHK 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+MJN 1h: 2188 bars 2016-01-04 -> 2017-06-14 -- ok
+MKC 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+MKTX 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+MLM 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+MMM 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+MNK 1h: 8303 bars 2016-01-04 -> 2023-08-25
+  ! 1 gap(s), largest 747 calendar days
+  ! 7 overnight move(s) over 40% -- these bars may not be split-adjusted
+MNST 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+MO 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+MOH 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+MON 1h: 4582 bars 2016-01-04 -> 2022-12-23
+  ! 14 gap(s), largest 1013 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+MOS 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+MPC 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+MPWR 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+MRK 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+MRNA 1h: 8643 bars 2018-12-07 -> 2024-08-30 -- ok
+  - starts 2 year(s) later than requested -- short history, not a broken series
+MRO 1h: 13049 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+MRSH 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+MS 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+MSCI 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+MSFT 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+MSI 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+MTB 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+MTCH 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+MTD 1h: 13024 bars 2016-01-04 -> 2024-08-30 -- ok
+MU 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+MUR 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+MXIM 1h: 8502 bars 2016-01-04 -> 2021-08-25 -- ok
+NAVI 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+NBL 1h: 7169 bars 2016-01-04 -> 2020-10-02 -- ok
+NCLH 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+NDAQ 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+NDSN 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+NEE 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+NEM 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+NFLX 1h: 13067 bars 2016-01-04 -> 2024-08-30 -- ok
+NFX 1h: 4695 bars 2016-01-04 -> 2019-02-13 -- ok
+NI 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+NKE 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+NKTR 1h: 13047 bars 2016-01-04 -> 2024-08-30
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+NLSN 1h: 10192 bars 2016-01-04 -> 2022-10-11
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+NOC 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+NOV 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+NOW 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+NRG 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+NSC 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+NTAP 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+NTRS 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+NUE 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+NVDA 1h: 13068 bars 2016-01-04 -> 2024-08-30 -- ok
+NVR 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+NWL 1h: 13054 bars 2016-01-04 -> 2024-08-30 -- ok
+NWS 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+NWSA 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+NXPI 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+O 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+ODFL 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+OGN 1h: 4876 bars 2021-06-03 -> 2024-08-30 -- ok
+  - starts 5 year(s) later than requested -- short history, not a broken series
+OI 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+OKE 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+OMC 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+ON 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+ORCL 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+ORLY 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+OTIS 1h: 6623 bars 2020-04-03 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+OXY 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+PANW 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+PAYC 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+PAYX 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+PBCT 1h: 9412 bars 2016-01-04 -> 2022-04-01 -- ok
+PBI 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+PCAR 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+PCG 1h: 13038 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+PCL 1h: 198 bars 2016-01-04 -> 2016-02-19 -- ok
+PCP 1h: 114 bars 2016-01-04 -> 2016-01-29 -- ok
+PDCO 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+PEG 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+PENN 1h: 13048 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+PEP 1h: 13056 bars 2016-01-04 -> 2024-08-30 -- ok
+PFE 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+PFG 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+PG 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+PGR 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+PH 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+PHM 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+PKG 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+PLD 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+PM 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+PNC 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+PODD 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+POM 1h: 336 bars 2016-01-04 -> 2016-03-23 -- ok
+POOL 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+PPG 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+PPL 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+PRGO 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+PRU 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+PSA 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+PSX 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+
+463 fetched, 1 already cached, 177 failed -> 
+E:\dev\trade_research\hackathon_alpaca_ai_trading_20260828\ai_quant_researcher\d
+ata-sp500\1h
+dataset version: alpaca:sip:all:rth:1h@embargo-2024-09-01:2016-01-01:2026-08-29
+PNR (ReadError: [WinError 10054] An existing connection was forcibly closed by 
+the remote host)
+PNW (ConnectError: [Errno 11001] getaddrinfo failed)
+PSKY (ValueError: PSKY: no bars from Alpaca for 2016-01-01 
+00:00:00+00:00..2024-09-01 00:00:00+00:00 at 1Hour)
+PTC (ReadError: [WinError 10054] An existing connection was forcibly closed by 
+the remote host)
+PVH (ReadError: [WinError 10054] An existing connection was forcibly closed by 
+the remote host)
+PWR (ConnectError: [Errno 11004] getaddrinfo failed)
+PXD (ConnectError: [Errno 11004] getaddrinfo failed)
+PYPL (ConnectError: [Errno 11004] getaddrinfo failed)
+Q (ConnectError: [Errno 11004] getaddrinfo failed)
+QCOM (ConnectError: [Errno 11004] getaddrinfo failed)
+QRVO (ConnectError: [Errno 11004] getaddrinfo failed)
+R (ConnectError: [Errno 11004] getaddrinfo failed)
+RAI (ConnectError: [Errno 11004] getaddrinfo failed)
+RCL (ConnectError: [Errno 11004] getaddrinfo failed)
+REG (ConnectError: [Errno 11004] getaddrinfo failed)
+REGN (ConnectError: [Errno 11004] getaddrinfo failed)
+RF (ConnectError: [Errno 11004] getaddrinfo failed)
+RHI (ConnectError: [Errno 11004] getaddrinfo failed)
+RHT (ConnectError: [Errno 11004] getaddrinfo failed)
+RIG (ConnectError: [Errno 11004] getaddrinfo failed)
+RJF (ConnectError: [Errno 11004] getaddrinfo failed)
+RL (ConnectError: [Errno 11004] getaddrinfo failed)
+RMD (ConnectError: [Errno 11004] getaddrinfo failed)
+ROK (ConnectError: [Errno 11004] getaddrinfo failed)
+ROL (ConnectError: [Errno 11004] getaddrinfo failed)
+ROP (ConnectError: [Errno 11004] getaddrinfo failed)
+ROST (ConnectError: [Errno 11004] getaddrinfo failed)
+RRC (ConnectError: [Errno 11004] getaddrinfo failed)
+RSG (ConnectError: [Errno 11004] getaddrinfo failed)
+RTN (ConnectError: [Errno 11004] getaddrinfo failed)
+RTX (ConnectError: [Errno 11004] getaddrinfo failed)
+RVTY (ConnectError: [Errno 11004] getaddrinfo failed)
+SBAC (ConnectError: [Errno 11004] getaddrinfo failed)
+SBNY (ConnectError: [Errno 11004] getaddrinfo failed)
+SBUX (ConnectError: [Errno 11004] getaddrinfo failed)
+SCG (ConnectError: [Errno 11004] getaddrinfo failed)
+SCHW (ConnectError: [Errno 11004] getaddrinfo failed)
+SE (ConnectError: [Errno 11004] getaddrinfo failed)
+SEDG (ConnectError: [Errno 11004] getaddrinfo failed)
+SEE (ConnectError: [Errno 11004] getaddrinfo failed)
+SHW (ConnectError: [Errno 11004] getaddrinfo failed)
+SIG (ConnectError: [Errno 11004] getaddrinfo failed)
+SIVB (ConnectError: [Errno 11004] getaddrinfo failed)
+SJM (ConnectError: [Errno 11004] getaddrinfo failed)
+SLB (ConnectError: [Errno 11004] getaddrinfo failed)
+SLG (ConnectError: [Errno 11004] getaddrinfo failed)
+SMCI (ConnectError: [Errno 11004] getaddrinfo failed)
+SNA (ConnectError: [Errno 11004] getaddrinfo failed)
+SNDK (ConnectError: [Errno 11004] getaddrinfo failed)
+SNI (ConnectError: [Errno 11004] getaddrinfo failed)
+SNPS (ConnectError: [Errno 11004] getaddrinfo failed)
+SO (ConnectError: [Errno 11004] getaddrinfo failed)
+SOLV (ConnectError: [Errno 11004] getaddrinfo failed)
+SPG (ConnectError: [Errno 11004] getaddrinfo failed)
+SPGI (ConnectError: [Errno 11004] getaddrinfo failed)
+SPLS (ConnectError: [Errno 11004] getaddrinfo failed)
+SRCL (ConnectError: [Errno 11004] getaddrinfo failed)
+SRE (ConnectError: [Errno 11004] getaddrinfo failed)
+STE (ConnectError: [Errno 11004] getaddrinfo failed)
+STI (ConnectError: [Errno 11004] getaddrinfo failed)
+STJ (ConnectError: [Errno 11004] getaddrinfo failed)
+STLD (ConnectError: [Errno 11004] getaddrinfo failed)
+STT (ConnectError: [Errno 11004] getaddrinfo failed)
+STX (ConnectError: [Errno 11004] getaddrinfo failed)
+STZ (ConnectError: [Errno 11004] getaddrinfo failed)
+SW (ConnectError: [Errno 11004] getaddrinfo failed)
+SWK (ConnectError: [Errno 11004] getaddrinfo failed)
+SWKS (ConnectError: [Errno 11004] getaddrinfo failed)
+SWN (ConnectError: [Errno 11004] getaddrinfo failed)
+SYF (ConnectError: [Errno 11004] getaddrinfo failed)
+SYK (ConnectError: [Errno 11004] getaddrinfo failed)
+SYY (ConnectError: [Errno 11004] getaddrinfo failed)
+T (ConnectError: [Errno 11004] getaddrinfo failed)
+TAP (ConnectError: [Errno 11004] getaddrinfo failed)
+TDC (ConnectError: [Errno 11004] getaddrinfo failed)
+TDG (ConnectError: [Errno 11004] getaddrinfo failed)
+TDY (ConnectError: [Errno 11004] getaddrinfo failed)
+TE (ConnectError: [Errno 11004] getaddrinfo failed)
+TECH (ConnectError: [Errno 11004] getaddrinfo failed)
+TEL (ConnectError: [Errno 11004] getaddrinfo failed)
+TER (ConnectError: [Errno 11004] getaddrinfo failed)
+TFC (ConnectError: [Errno 11004] getaddrinfo failed)
+TFX (ConnectError: [Errno 11004] getaddrinfo failed)
+TGNA (ConnectError: [Errno 11004] getaddrinfo failed)
+TGT (ConnectError: [Errno 11004] getaddrinfo failed)
+THC (ConnectError: [Errno 11004] getaddrinfo failed)
+TIF (ConnectError: [Errno 11004] getaddrinfo failed)
+TJX (ConnectError: [Errno 11004] getaddrinfo failed)
+TMO (ConnectError: [Errno 11004] getaddrinfo failed)
+TMUS (ConnectError: [Errno 11004] getaddrinfo failed)
+TPR (ConnectError: [Errno 11004] getaddrinfo failed)
+TRGP (ConnectError: [Errno 11004] getaddrinfo failed)
+TRIP (ConnectError: [Errno 11004] getaddrinfo failed)
+TRMB (ConnectError: [Errno 11004] getaddrinfo failed)
+TROW (ConnectError: [Errno 11004] getaddrinfo failed)
+TRV (ConnectError: [Errno 11004] getaddrinfo failed)
+TSCO (ConnectError: [Errno 11004] getaddrinfo failed)
+TSLA (ConnectError: [Errno 11004] getaddrinfo failed)
+TSN (ConnectError: [Errno 11004] getaddrinfo failed)
+TSS (ConnectError: [Errno 11004] getaddrinfo failed)
+TT (ConnectError: [Errno 11004] getaddrinfo failed)
+TTWO (ConnectError: [Errno 11004] getaddrinfo failed)
+TWC (ConnectError: [Errno 11004] getaddrinfo failed)
+TWTR (ConnectError: [Errno 11004] getaddrinfo failed)
+TWX (ConnectError: [Errno 11004] getaddrinfo failed)
+TXN (ConnectError: [Errno 11004] getaddrinfo failed)
+TXT (ConnectError: [Errno 11004] getaddrinfo failed)
+TYC (ConnectError: [Errno 11004] getaddrinfo failed)
+TYL (ConnectError: [Errno 11004] getaddrinfo failed)
+UA (ConnectError: [Errno 11004] getaddrinfo failed)
+UAA (ConnectError: [Errno 11004] getaddrinfo failed)
+UAL (ConnectError: [Errno 11004] getaddrinfo failed)
+UBER (ConnectError: [Errno 11004] getaddrinfo failed)
+UDR (ConnectError: [Errno 11004] getaddrinfo failed)
+UHS (ConnectError: [Errno 11004] getaddrinfo failed)
+ULTA (ConnectError: [Errno 11004] getaddrinfo failed)
+UNH (ConnectError: [Errno 11004] getaddrinfo failed)
+UNM (ConnectError: [Errno 11004] getaddrinfo failed)
+UNP (ConnectError: [Errno 11004] getaddrinfo failed)
+UPS (ConnectError: [Errno 11004] getaddrinfo failed)
+URBN (ConnectError: [Errno 11004] getaddrinfo failed)
+URI (ConnectError: [Errno 11004] getaddrinfo failed)
+USB (ConnectError: [Errno 11004] getaddrinfo failed)
+V (ConnectError: [Errno 11004] getaddrinfo failed)
+VAR (ConnectError: [Errno 11004] getaddrinfo failed)
+VFC (ConnectError: [Errno 11004] getaddrinfo failed)
+VIAB (ConnectError: [Errno 11004] getaddrinfo failed)
+VICI (ConnectError: [Errno 11004] getaddrinfo failed)
+VLO (ConnectError: [Errno 11004] getaddrinfo failed)
+VLTO (ConnectError: [Errno 11004] getaddrinfo failed)
+VMC (ConnectError: [Errno 11004] getaddrinfo failed)
+VMRK (ConnectError: [Errno 11004] getaddrinfo failed)
+VNO (ConnectError: [Errno 11004] getaddrinfo failed)
+VNT (ConnectError: [Errno 11004] getaddrinfo failed)
+VRSK (ConnectError: [Errno 11004] getaddrinfo failed)
+VRSN (ConnectError: [Errno 11004] getaddrinfo failed)
+VRTX (ConnectError: [Errno 11004] getaddrinfo failed)
+VST (ConnectError: [Errno 11004] getaddrinfo failed)
+VTR (ConnectError: [Errno 11004] getaddrinfo failed)
+VTRS (ConnectError: [Errno 11004] getaddrinfo failed)
+VZ (ConnectError: [Errno 11004] getaddrinfo failed)
+WAB (ConnectError: [Errno 11004] getaddrinfo failed)
+WAT (ConnectError: [Errno 11004] getaddrinfo failed)
+WBA (ConnectError: [Errno 11004] getaddrinfo failed)
+WBD (ConnectError: [Errno 11004] getaddrinfo failed)
+WCG (ConnectError: [Errno 11004] getaddrinfo failed)
+WDC (ConnectError: [Errno 11004] getaddrinfo failed)
+WEC (ConnectError: [Errno 11004] getaddrinfo failed)
+WELL (ConnectError: [Errno 11004] getaddrinfo failed)
+WFC (ConnectError: [Errno 11004] getaddrinfo failed)
+WFM (ConnectError: [Errno 11004] getaddrinfo failed)
+WHR (ConnectError: [Errno 11004] getaddrinfo failed)
+WLTW (ConnectError: [Errno 11004] getaddrinfo failed)
+WM (ConnectError: [Errno 11004] getaddrinfo failed)
+WMB (ConnectError: [Errno 11004] getaddrinfo failed)
+WMT (ConnectError: [Errno 11004] getaddrinfo failed)
+WRB (ConnectError: [Errno 11004] getaddrinfo failed)
+WST (ConnectError: [Errno 11004] getaddrinfo failed)
+WTW (ConnectError: [Errno 11004] getaddrinfo failed)
+WU (ConnectError: [Errno 11004] getaddrinfo failed)
+WY (ConnectError: [Errno 11004] getaddrinfo failed)
+WYN (ConnectError: [Errno 11004] getaddrinfo failed)
+WYNN (ConnectError: [Errno 11004] getaddrinfo failed)
+XEC (ConnectError: [Errno 11004] getaddrinfo failed)
+XEL (ConnectError: [Errno 11004] getaddrinfo failed)
+XL (ConnectError: [Errno 11004] getaddrinfo failed)
+XLNX (ConnectError: [Errno 11004] getaddrinfo failed)
+XOM (ConnectError: [Errno 11004] getaddrinfo failed)
+XRAY (ConnectError: [Errno 11004] getaddrinfo failed)
+XRX (ConnectError: [Errno 11004] getaddrinfo failed)
+XYL (ConnectError: [Errno 11004] getaddrinfo failed)
+YHOO (ConnectError: [Errno 11004] getaddrinfo failed)
+YUM (ConnectError: [Errno 11004] getaddrinfo failed)
+ZBH (ConnectError: [Errno 11004] getaddrinfo failed)
+ZBRA (ConnectError: [Errno 11004] getaddrinfo failed)
+ZION (ConnectError: [Errno 11004] getaddrinfo failed)
+ZTS (ConnectError: [Errno 11004] getaddrinfo failed)
+41 series failed the quality check and were not cached. Try --feed sip, a later 
+--start, or another --source.
+
+exit 0
+
+=== 2026-08-29 18:01:39 UTC === RESUME research 1h (skips cached)
+warning: `VIRTUAL_ENV=e:\dev\trade_research\hackathon_alpaca_ai_trading_20260828\backend\.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+AA 1h: 11898 bars 2016-10-06 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+ABMD 1h: 10498 bars 2016-01-04 -> 2022-12-21
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+ADT 1h: 10443 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 629 calendar days
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+AIV 1h: 13030 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APA 1h: 13067 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+APTV 1h: 10188 bars 2017-11-17 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 1 year(s) later than requested -- short history, not a broken series
+ARNC 1h: 10208 bars 2016-11-01 -> 2023-08-17
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 0 year(s) later than requested -- short history, not a broken series
+BBBY 1h: 11046 bars 2016-01-04 -> 2023-05-02
+  ! 4 overnight move(s) over 40% -- these bars may not be split-adjusted
+BIIB 1h: 13030 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+CA 1h: 4359 bars 2016-01-04 -> 2024-08-27
+  ! 18 gap(s), largest 1871 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CHK 1h: 12135 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 228 calendar days
+  ! 7 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - 1 zero-volume bar(s)
+CNX 1h: 13034 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CPRI 1h: 13031 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CSX 1h: 13046 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+CTRA 1h: 7720 bars 2018-11-09 -> 2024-08-30
+  ! 1 gap(s), largest 242 calendar days
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 2 year(s) later than requested -- short history, not a broken series
+CZR 1h: 13043 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DD 1h: 13035 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DNB 1h: 10925 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 509 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+DO 1h: 10141 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 704 calendar days
+  ! 5 overnight move(s) over 40% -- these bars may not be split-adjusted
+DOW 1h: 10669 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 578 calendar days
+DXCM 1h: 13033 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+EMC 1h: 2893 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 2441 calendar days
+ENDP 1h: 10023 bars 2016-01-04 -> 2022-08-25
+  ! 3 overnight move(s) over 40% -- these bars may not be split-adjusted
+EQT 1h: 13039 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+exit 127
+
+=== 2026-08-29 18:19:42 UTC === RESUME research 1h, 176 network-failed symbols only
+warning: `VIRTUAL_ENV=e:\dev\trade_research\hackathon_alpaca_ai_trading_20260828\backend\.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+PNR 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+PNW 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+PTC 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+PVH 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+PWR 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+PXD 1h: 12539 bars 2016-01-04 -> 2024-05-02 -- ok
+PYPL 1h: 13063 bars 2016-01-04 -> 2024-08-30 -- ok
+Q 1h: 2828 bars 2016-01-04 -> 2017-11-14 -- ok
+QCOM 1h: 13065 bars 2016-01-04 -> 2024-08-30 -- ok
+QRVO 1h: 13042 bars 2016-01-04 -> 2024-08-30 -- ok
+R 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+RAI 1h: 2348 bars 2016-01-04 -> 2017-07-24 -- ok
+RCL 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+REG 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+REGN 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+RF 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+RHI 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+RHT 1h: 5289 bars 2016-01-04 -> 2019-07-08
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+RIG 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+RJF 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+RL 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+RMD 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+ROK 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+ROL 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+ROP 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+ROST 1h: 13046 bars 2016-01-04 -> 2024-08-30 -- ok
+RRC 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+RSG 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+RTN 1h: 6405 bars 2016-01-04 -> 2020-04-02 -- ok
+RTX 1h: 13040 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+RVTY 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+SBAC 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+SBNY 1h: 10817 bars 2016-01-04 -> 2023-03-10 -- ok
+SBUX 1h: 13061 bars 2016-01-04 -> 2024-08-30 -- ok
+SCG 1h: 4514 bars 2016-01-04 -> 2018-12-31 -- ok
+SCHW 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+SE 1h: 12056 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 237 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SEDG 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+SEE 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+SHW 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+SIG 1h: 13035 bars 2016-01-04 -> 2024-08-30
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+SIVB 1h: 10812 bars 2016-01-04 -> 2023-03-09 -- ok
+SJM 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+SLB 1h: 13045 bars 2016-01-04 -> 2024-08-30 -- ok
+SLG 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+SMCI 1h: 10958 bars 2016-01-04 -> 2024-08-30
+  ! 1 gap(s), largest 509 calendar days
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SNA 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+SNI 1h: 3276 bars 2016-01-04 -> 2018-03-06 -- ok
+SNPS 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+SO 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+SOLV 1h: 641 bars 2024-04-01 -> 2024-08-30 -- ok
+  - starts 8 year(s) later than requested -- short history, not a broken series
+SPG 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+SPGI 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+SPLS 1h: 2559 bars 2016-01-04 -> 2017-09-12 -- ok
+SRCL 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+SRE 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+STE 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+STI 1h: 1383 bars 2022-05-02 -> 2024-08-30
+  ! 30 gap(s), largest 39 calendar days
+  ! 6 overnight move(s) over 40% -- these bars may not be split-adjusted
+  - starts 6 year(s) later than requested -- short history, not a broken series
+STJ 1h: 1522 bars 2016-01-04 -> 2017-01-04 -- ok
+STLD 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+STT 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+STX 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+STZ 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+SW 1h: 13030 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+SWK 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+SWKS 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+SWN 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+SYF 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+SYK 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+SYY 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+T 1h: 13056 bars 2016-01-04 -> 2024-08-30 -- ok
+TAP 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+TDC 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+TDG 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+TDY 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+TE 1h: 6154 bars 2020-01-10 -> 2024-08-30
+  ! 3 gap(s), largest 7 calendar days
+  - starts 4 year(s) later than requested -- short history, not a broken series
+TECH 1h: 13036 bars 2016-01-04 -> 2024-08-30 -- ok
+TEL 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+TER 1h: 13053 bars 2016-01-04 -> 2024-08-30 -- ok
+TFC 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+TFX 1h: 13024 bars 2016-01-04 -> 2024-08-30 -- ok
+TGNA 1h: 13027 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+TGT 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+THC 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+TIF 1h: 7553 bars 2016-01-04 -> 2021-01-06 -- ok
+TJX 1h: 13033 bars 2016-01-04 -> 2024-08-30 -- ok
+TMO 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+TMUS 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+TPR 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+TRGP 1h: 13026 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+TRIP 1h: 13047 bars 2016-01-04 -> 2024-08-30 -- ok
+TRMB 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+TROW 1h: 13038 bars 2016-01-04 -> 2024-08-30 -- ok
+TRV 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+TSCO 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+TSLA 1h: 13067 bars 2016-01-04 -> 2024-08-30 -- ok
+TSN 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+TSS 1h: 5585 bars 2016-01-04 -> 2019-09-17 -- ok
+TT 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+TTWO 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+TWC 1h: 564 bars 2016-01-04 -> 2016-05-17 -- ok
+TWTR 1h: 10282 bars 2016-01-04 -> 2022-10-27 -- ok
+TWX 1h: 3698 bars 2016-01-04 -> 2018-06-14 -- ok
+TXN 1h: 13048 bars 2016-01-04 -> 2024-08-30 -- ok
+TXT 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+TYC 1h: 1020 bars 2016-01-04 -> 2016-09-02 -- ok
+TYL 1h: 13024 bars 2016-01-04 -> 2024-08-30 -- ok
+UA 1h: 13042 bars 2016-01-04 -> 2024-08-30
+  ! 1 overnight move(s) over 40% -- these bars may not be split-adjusted
+UAA 1h: 12646 bars 2016-04-08 -> 2024-08-30 -- ok
+  - starts 0 year(s) later than requested -- short history, not a broken series
+UAL 1h: 13067 bars 2016-01-04 -> 2024-08-30 -- ok
+UBER 1h: 7997 bars 2019-05-10 -> 2024-08-30 -- ok
+  - starts 3 year(s) later than requested -- short history, not a broken series
+UDR 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+UHS 1h: 13024 bars 2016-01-04 -> 2024-08-30 -- ok
+ULTA 1h: 13044 bars 2016-01-04 -> 2024-08-30 -- ok
+UNH 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+UNM 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+UNP 1h: 13034 bars 2016-01-04 -> 2024-08-30 -- ok
+UPS 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+URBN 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+URI 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+USB 1h: 13035 bars 2016-01-04 -> 2024-08-30 -- ok
+V 1h: 13050 bars 2016-01-04 -> 2024-08-30 -- ok
+VAR 1h: 7952 bars 2016-01-04 -> 2021-04-14 -- ok
+VFC 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+VIAB 1h: 5908 bars 2016-01-04 -> 2019-12-04 -- ok
+VICI 1h: 9891 bars 2018-02-01 -> 2024-08-30 -- ok
+  - starts 2 year(s) later than requested -- short history, not a broken series
+VLO 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+VLTO 1h: 1382 bars 2023-10-02 -> 2024-08-30 -- ok
+  - starts 7 year(s) later than requested -- short history, not a broken series
+VMC 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+VMRK 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+VNO 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+VNT 1h: 5837 bars 2020-10-09 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+VRSK 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+VRSN 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+VRTX 1h: 13043 bars 2016-01-04 -> 2024-08-30 -- ok
+VST 1h: 10990 bars 2017-05-10 -> 2024-08-30 -- ok
+  - starts 1 year(s) later than requested -- short history, not a broken series
+VTR 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+VTRS 1h: 5724 bars 2020-11-12 -> 2024-08-30 -- ok
+  - starts 4 year(s) later than requested -- short history, not a broken series
+VZ 1h: 13053 bars 2016-01-04 -> 2024-08-30 -- ok
+WAB 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+WAT 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+WBA 1h: 13058 bars 2016-01-04 -> 2024-08-30 -- ok
+WBD 1h: 3635 bars 2022-04-04 -> 2024-08-30 -- ok
+  - starts 6 year(s) later than requested -- short history, not a broken series
+WCG 1h: 6108 bars 2016-01-04 -> 2020-01-23 -- ok
+WDC 1h: 13055 bars 2016-01-04 -> 2024-08-30 -- ok
+WEC 1h: 13030 bars 2016-01-04 -> 2024-08-30 -- ok
+WELL 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+WFC 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+WFM 1h: 2494 bars 2016-01-04 -> 2017-08-25 -- ok
+WHR 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+WLTW 1h: 9055 bars 2016-01-05 -> 2022-01-07 -- ok
+WM 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+WMB 1h: 13029 bars 2016-01-04 -> 2024-08-30 -- ok
+WMT 1h: 13053 bars 2016-01-04 -> 2024-08-30 -- ok
+WRB 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+WST 1h: 13025 bars 2016-01-04 -> 2024-08-30 -- ok
+WTW 1h: 13031 bars 2016-01-05 -> 2024-08-30 -- ok
+WU 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+WY 1h: 13032 bars 2016-01-04 -> 2024-08-30 -- ok
+WYN 1h: 3637 bars 2016-01-04 -> 2018-05-31 -- ok
+WYNN 1h: 13052 bars 2016-01-04 -> 2024-08-30 -- ok
+XEC 1h: 8658 bars 2016-01-04 -> 2021-09-30 -- ok
+XEL 1h: 13039 bars 2016-01-04 -> 2024-08-30 -- ok
+XL 1h: 6899 bars 2016-01-04 -> 2022-11-11
+  ! 1 gap(s), largest 832 calendar days
+  ! 2 overnight move(s) over 40% -- these bars may not be split-adjusted
+XLNX 1h: 9212 bars 2016-01-04 -> 2022-02-11 -- ok
+XOM 1h: 13051 bars 2016-01-04 -> 2024-08-30 -- ok
+XRAY 1h: 13040 bars 2016-01-04 -> 2024-08-30 -- ok
+XRX 1h: 13049 bars 2016-01-04 -> 2024-08-30 -- ok
+XYL 1h: 13027 bars 2016-01-04 -> 2024-08-30 -- ok
+YHOO 1h: 2200 bars 2016-01-04 -> 2017-06-16 -- ok
+YUM 1h: 13031 bars 2016-01-04 -> 2024-08-30 -- ok
+ZBH 1h: 13026 bars 2016-01-04 -> 2024-08-30 -- ok
+ZBRA 1h: 13037 bars 2016-01-04 -> 2024-08-30 -- ok
+ZION 1h: 13041 bars 2016-01-04 -> 2024-08-30 -- ok
+ZTS 1h: 13028 bars 2016-01-04 -> 2024-08-30 -- ok
+
+163 fetched, 0 already cached, 1 failed -> 
+E:\dev\trade_research\hackathon_alpaca_ai_trading_20260828\ai_quant_researcher\
+data-sp500\1h
+dataset version: alpaca:sip:all:rth:1h@embargo-2024-09-01:2016-01-01:2026-08-29
+SNDK (ValueError: SNDK: no bars from Alpaca for 2016-01-01 
+00:00:00+00:00..2024-09-01 00:00:00+00:00 at 1Hour)
+12 series failed the quality check and were not cached. Try --feed sip, a later
+--start, or another --source.
+exit 0

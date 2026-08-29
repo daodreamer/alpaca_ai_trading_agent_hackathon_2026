@@ -35,8 +35,6 @@ from aqr.data.alpaca import AlpacaProvider
 from aqr.data.bars import Bars
 from aqr.data.cross_source import compare as compare_sources
 from aqr.data.embargo import (
-    RESEARCH_ROOT,
-    SEALED_ROOT,
     SP500_RESEARCH_ROOT,
     SP500_SEALED_ROOT,
     ResearchProvider,
@@ -173,7 +171,7 @@ def _dataset_version(provider: Provider, source: str, start: str, end: str, time
     return f"{detail}:{start}:{end}"
 
 
-DEFAULT_CSV_ROOT = "data"
+DEFAULT_CSV_ROOT = "data-sp500"
 
 
 def _csv_root_for(universe: str, csv_root: str) -> str:
@@ -479,7 +477,7 @@ def pull(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D", help="1m, 5m, 15m, 30m, 1h, 1D or 1W."),
-    csv_root: str = typer.Option("data", help="Cache root: <root>/<timeframe>/<symbol>.csv."),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT, help="Cache root: <root>/<timeframe>/<symbol>.csv."),
     force: bool = typer.Option(False, help="Refetch symbols already cached."),
     keep_suspect: bool = typer.Option(
         False, help="Cache series that failed the quality check anyway. Say why in the journal."
@@ -686,7 +684,7 @@ def compare(
 def inspect_cache(
     symbols: str = typer.Option("", help="Comma-separated symbols. Default: everything cached."),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data", help="Cache root to read."),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT, help="Cache root to read."),
     verbose: bool = typer.Option(False, help="List the exact dates behind each complaint."),
     problems_only: bool = typer.Option(False, help="Hide series with nothing to report."),
 ) -> None:
@@ -838,7 +836,7 @@ def seal_check(
     roots = (
         [Path(root)]
         if root
-        else [RESEARCH_ROOT, SEALED_ROOT, SP500_RESEARCH_ROOT, SP500_SEALED_ROOT]
+        else [SP500_RESEARCH_ROOT, SP500_SEALED_ROOT]
     )
     table = Table(box=None, pad_edge=False)
     for column in ("root", "files", "latest bar", "past embargo", "canary"):
@@ -903,7 +901,7 @@ def validate(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data"),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
 ) -> None:
     """Parse a strategy and check it against data without evaluating it."""
     spec = load_file(strategy)
@@ -931,7 +929,7 @@ def backtest(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data"),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
     universe: str = typer.Option(
         "",
         help=(
@@ -996,7 +994,7 @@ def walkforward(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data"),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
     train_bars: int = typer.Option(
         TRAIN_BARS, help="Bars per training window. See splits.TRAIN_BARS for the geometry."
     ),
@@ -1029,7 +1027,7 @@ def evaluate(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data"),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
     universe: str = typer.Option(
         "",
         help=(
@@ -1087,7 +1085,7 @@ def research(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
-    csv_root: str = typer.Option("data"),
+    csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
     db: Path = typer.Option(Path("runs/research.sqlite")),
     provider: str = typer.Option(
         "offline", help="Who proposes: offline | deepseek | anthropic."
