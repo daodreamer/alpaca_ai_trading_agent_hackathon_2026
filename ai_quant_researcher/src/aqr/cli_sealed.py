@@ -38,6 +38,7 @@ records that exposure rather than denying it.
 
 from __future__ import annotations
 
+import csv
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -48,7 +49,7 @@ from rich.table import Table
 
 from aqr.backtest.engine import BacktestConfig
 from aqr.data.alpaca import AlpacaProvider
-from aqr.data.bars import Bars
+from aqr.data.bars import Bars, ensure_utc
 from aqr.data.embargo import SealedProvider, SealToken, audit_cache_root
 from aqr.data.providers import CsvProvider, Provider
 from aqr.data.quality import inspect as inspect_bars
@@ -222,6 +223,113 @@ def pull(
 
 
 @app.command()
+def backfill(
+    start: str = typer.Option(
+        "",
+        help=(
+            "First bar to copy from the research cache. "
+            f"Default: {WARMUP_DAYS} days before the embargo."
+        ),
+    ),
+    timeframe: str = typer.Option("1D"),
+    sealed_root: str = typer.Option(SEALED_SP500_ROOT, help="Sealed cache to extend."),
+    research_root: str = typer.Option(
+        "data-sp500", help="Research cache to copy warm-up bars from."
+    ),
+    dry_run: bool = typer.Option(False, help="Show what would be copied without writing."),
+) -> None:
+    """Copy pre-embargo bars from the research cache into the sealed cache.
+
+    The sealed cache only needs embargoed years for the seal to be meaningful,
+    but long-lookback features need history before the embargo to be warm on the
+    first sealed session. Re-pulling that history from the vendor is slow; this
+    command reuses the research cache, which already holds the same bars up to
+    the embargo boundary.
+    """
+    first = _parse_date(start) if start else EMBARGO_START - timedelta(days=WARMUP_DAYS)
+    first_ts = int(first.timestamp())
+
+    sealed_dir = Path(sealed_root) / timeframe
+    research_dir = Path(research_root) / timeframe
+    if not sealed_dir.exists():
+        raise typer.BadParameter(f"no sealed cache at {sealed_dir}")
+    if not research_dir.exists():
+        raise typer.BadParameter(f"no research cache at {research_dir}")
+
+    backfilled = 0
+    rows_added = 0
+    earliest: datetime | None = None
+
+    for sealed_path in sorted(sealed_dir.glob("*.csv")):
+        symbol = sealed_path.stem
+        if symbol == "__CANARY__":
+            continue
+        research_path = research_dir / f"{symbol}.csv"
+        if not research_path.exists():
+            continue
+
+        with sealed_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = reader.fieldnames or [
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "available_time",
+            ]
+            sealed_rows = list(reader)
+
+        if sealed_rows:
+            first_sealed = min(
+                ensure_utc(datetime.fromisoformat(row["timestamp"])) for row in sealed_rows
+            )
+            first_sealed_ts = int(first_sealed.timestamp())
+        else:
+            # Empty sealed file: usually a delisted name the vendor pull could not
+            # fill past the embargo. The research cache still has its pre-embargo
+            # history, and that is enough for the membership table to explain the
+            # absence once the timeline is extended backward.
+            first_sealed_ts = int(EMBARGO_START.timestamp())
+
+        prefix_rows: list[dict[str, str]] = []
+        with research_path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                ts = int(ensure_utc(datetime.fromisoformat(row["timestamp"])).timestamp())
+                if first_ts <= ts < first_sealed_ts:
+                    prefix_rows.append(row)
+        if not prefix_rows:
+            continue
+
+        backfilled += 1
+        rows_added += len(prefix_rows)
+        prefix_first = ensure_utc(datetime.fromisoformat(prefix_rows[0]["timestamp"]))
+        if earliest is None or prefix_first < earliest:
+            earliest = prefix_first
+
+        if dry_run:
+            continue
+
+        combined = prefix_rows + sealed_rows
+        combined.sort(key=lambda r: r["timestamp"])
+        with sealed_path.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(combined)
+
+    summary = (
+        f"{backfilled} symbol(s) backfilled, {rows_added} rows added "
+        f"from {first.date().isoformat()}"
+    )
+    if earliest is not None:
+        summary += f", earliest new bar {earliest.date().isoformat()}"
+    console.print(summary)
+    if dry_run:
+        console.print("[yellow]dry run: no files written[/yellow]")
+
+
+@app.command()
 def declared(
     db: Path = typer.Option(Path("runs/research.sqlite"), help="Experiment database."),
 ) -> None:
@@ -332,7 +440,7 @@ def run(
             f"actual earliest bar {actual_first.date().isoformat()} "
             f"({warmup_sessions} sessions before embargo)"
         )
-        if actual_first > EMBARGO_START - timedelta(days=WARMUP_DAYS):
+        if actual_first.date() > first.date():
             console.print(
                 f"[yellow]warning: sealed cache starts only "
                 f"{(EMBARGO_START - actual_first).days} days before the embargo; "

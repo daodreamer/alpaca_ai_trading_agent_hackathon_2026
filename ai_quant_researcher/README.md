@@ -993,8 +993,13 @@ a measurement that counts.
 uv run aqr registry --status PAPER --limit 20
 
 # 2. Make sure the sealed cache exists for the strategy's timeframe.
-#    This is the full-history cache; it is not the research cache.
+#    This is the cache that holds the embargoed years; it is not the research cache.
 uv run python -m aqr.cli_sealed pull --timeframe 1D
+
+# 2b. If the sealed cache only starts a few days before the embargo (common
+#     after an intraday pull), copy the pre-embargo warm-up bars from the
+#     research cache. Fast, local, no network.
+uv run python -m aqr.cli_sealed backfill --timeframe 1D
 
 # 3. Pre-register the candidate. Do this in a separate command, before any
 #    sealed bar is read, so the declaration is recorded untainted.
@@ -1024,8 +1029,14 @@ Key rules:
   `cli_sealed run` output shows both the *requested* warm-up date and the
   *actual* earliest bar in the cache; if it says "actual earliest bar
   2024-08-28 (3 sessions before embargo)", your sealed cache is too short and
-  long-lookback features are cold-starting. Fix it by rebuilding with full
-  history:
+  long-lookback features are cold-starting. Fix it the fast way by copying the
+  missing pre-embargo bars from the research cache:
+  ```bash
+  uv run python -m aqr.cli_sealed backfill --timeframe 1D
+  ```
+  This is a local file copy, no network, and it also fills the empty sealed
+  files for names that delisted before the embargo. If you prefer, you can
+  instead re-pull the full history (slower, hits the vendor):
   ```bash
   uv run python -m aqr.cli_sealed pull --timeframe 1D --start 2016-01-01 --force
   ```
