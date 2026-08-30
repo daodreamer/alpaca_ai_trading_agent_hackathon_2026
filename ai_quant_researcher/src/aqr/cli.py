@@ -32,7 +32,7 @@ from aqr.backtest.engine import BacktestConfig
 from aqr.backtest.metrics import compute_metrics
 from aqr.backtest.run import run_strategy
 from aqr.data.alpaca import AlpacaProvider
-from aqr.data.bars import Bars
+from aqr.data.bars import Bars, bars_per_year
 from aqr.data.cross_source import compare as compare_sources
 from aqr.data.embargo import (
     SP500_RESEARCH_ROOT,
@@ -831,7 +831,9 @@ def seal_check(
 
     The canary is reported rather than counted as a violation: it is *supposed*
     to sit in the research root holding embargoed rows, because a tripwire
-    placed where a peek cannot happen catches nothing.
+    placed where a peek cannot happen catches nothing. It is reported per
+    timeframe, because one armed timeframe must not read as cover for the
+    others.
     """
     roots = (
         [Path(root)]
@@ -854,12 +856,17 @@ def seal_check(
         colour = "green" if report.clean == expected_clean else "red"
         latest = report.latest.date().isoformat() if report.latest else "-"
         offenders = str(len(report.offenders)) if report.offenders else "none"
+        canary = (
+            f"armed ({', '.join(report.canary_timeframes)})"
+            if report.canary_present
+            else "-"
+        )
         table.add_row(
             f"[{colour}]{path.name}[/{colour}]",
             str(report.files),
             latest,
             offenders,
-            "armed" if report.canary_present else "-",
+            canary,
         )
     console.print(table)
     console.print()
@@ -1085,6 +1092,14 @@ def research(
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D"),
+    timeframes: str = typer.Option(
+        "",
+        help=(
+            "Comma-separated granularities the proposer may choose from (1D, 1h, 4h). "
+            "Overrides --timeframe when set; the first entry is the default a "
+            "proposal falls back to."
+        ),
+    ),
     csv_root: str = typer.Option(DEFAULT_CSV_ROOT),
     db: Path = typer.Option(Path("runs/research.sqlite")),
     provider: str = typer.Option(
@@ -1094,43 +1109,70 @@ def research(
     save_to: str = typer.Option("strategies", help="Where surviving strategies are written."),
 ) -> None:
     """Run the research loop: propose, test, record, repeat."""
+    allowed = tuple(t.strip() for t in timeframes.split(",") if t.strip()) or (timeframe,)
+    unknown = [t for t in allowed if t not in ("1D", "1h", "4h")]
+    if unknown:
+        raise typer.BadParameter(f"unknown timeframe(s): {', '.join(unknown)}; use 1D, 1h, 4h")
     requested = _universe(universe, "" if universe else symbols, universe_limit)
-    data, labels, membership, _version = _load(
-        source, requested, start, end, timeframe, csv_root,
-        universe=universe, tolerant=True,
-    )
 
-    # A symbol that IPO'd in 2021 cannot take part in a 2010 walk-forward. Drop
-    # it here and say so, rather than letting it contribute empty folds.
-    short_history = {s: len(b) for s, b in data.items() if len(b) < min_bars}
-    if short_history:
-        console.print(
-            f"[yellow]dropped {len(short_history)} symbol(s) with under {min_bars} bars: "
-            + ", ".join(f"{s} ({n})" for s, n in sorted(short_history.items()))
-            + "[/yellow]"
+    # Every allowed granularity gets its own load: a candidate is evaluated on
+    # the bar size it asked for, and only that one.
+    data_by_timeframe: dict[str, dict[str, Bars]] = {}
+    labels_by_timeframe: dict[str, dict[str, list[str]]] = {}
+    membership: PointInTimeUniverse | None = None
+    version = ""
+    for tf in allowed:
+        data, labels, membership, tf_version = _load(
+            source, requested, start, end, tf, csv_root,
+            universe=universe, tolerant=True,
         )
-        data = {s: b for s, b in data.items() if s not in short_history}
-        if labels:
-            labels = {s: v for s, v in labels.items() if s not in short_history}
-    if not data:
-        raise typer.BadParameter("every requested symbol was dropped for lack of history")
-    names = sorted(data)
-    console.print(f"researching {len(names)} symbols on {timeframe} bars from {source}")
+        # A symbol that IPO'd in 2021 cannot take part in a 2010 walk-forward.
+        # Drop it here and say so, rather than letting it contribute empty
+        # folds. min_bars is denominated in daily bars; scale it to this bar
+        # size or an hourly run would demand 1500 years of history.
+        scaled_min = round(min_bars * bars_per_year(tf) / 252.0)
+        short_history = {s: len(b) for s, b in data.items() if len(b) < scaled_min}
+        if short_history:
+            console.print(
+                f"[yellow]dropped {len(short_history)} symbol(s) with under "
+                f"{scaled_min} {tf} bars: "
+                + ", ".join(f"{s} ({n})" for s, n in sorted(short_history.items()))
+                + "[/yellow]"
+            )
+            data = {s: b for s, b in data.items() if s not in short_history}
+            if labels:
+                labels = {s: v for s, v in labels.items() if s not in short_history}
+        if not data:
+            raise typer.BadParameter(
+                f"every requested symbol was dropped for lack of {tf} history"
+            )
+        data_by_timeframe[tf] = data
+        labels_by_timeframe[tf] = labels or {}
+        if tf == allowed[0]:
+            version = tf_version
+    # A name missing from one granularity's cache would trade on a different
+    # universe per timeframe; the intersection is the honest universe.
+    names = sorted(set.intersection(*map(set, data_by_timeframe.values())))
+    default_tf = allowed[0]
+    console.print(f"researching {len(names)} symbols on {'/'.join(allowed)} bars from {source}")
     proposer = _proposer(provider, model)
 
     with Registry(db) as registry:
         loop = ResearchLoop(
-            data=data,
+            data=data_by_timeframe[default_tf],
             registry=registry,
             config=ResearchConfig(
                 symbols=names,
-                timeframe=timeframe,
+                timeframe=default_tf,
+                timeframes=allowed,
                 iterations=iterations,
-                dataset_version=_version,
+                dataset_version=version,
                 save_accepted_to=save_to,
             ),
             proposer=proposer,
-            regime_labels=labels,
+            regime_labels=labels_by_timeframe[default_tf],
+            data_by_timeframe=data_by_timeframe,
+            regime_labels_by_timeframe=labels_by_timeframe,
             membership=membership,
         )
         for step in loop.run():

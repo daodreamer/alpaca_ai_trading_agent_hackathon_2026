@@ -141,7 +141,7 @@ the checking:
 
 ```
 root               files  latest bar  past embargo  canary
-data-sp500         681    2024-08-30  none          armed
+data-sp500         681    2024-08-30  none          armed (1D, 1h, 4h)
 data-sp500-sealed  682    2026-08-27  598           -
 ```
 
@@ -150,7 +150,12 @@ is a symbol that exists only after the embargo, in the research root and nowhere
 else. Nothing legitimate loads it, so its appearance anywhere is physical
 evidence rather than an inference. It is reported by the audit and not counted
 as a violation, because a tripwire placed where a peek cannot happen catches
-nothing.
+nothing. The tripwire is armed in every timeframe — 1D, 1h and 4h — and the
+audit reports them individually, because one armed timeframe must not read as
+cover for the others. The bars are synthetic and written by
+`scripts/pull_sp500_intraday.py` after each research pull, so a rebuilt cache
+re-arms them; and they are committed, because a tripwire nobody can see is not
+evidence.
 
 **What none of it proves.** The seal shows the embargoed *data* was not read. It
 cannot show the embargoed *period* did not inform a decision: the researcher
@@ -480,6 +485,11 @@ driver, which pulls 1h for both caches and resamples it into 4h:
 ```
 uv run python ../scripts/pull_sp500_intraday.py --timeframe all
 ```
+
+The same driver also re-arms the canaries — the synthetic tripwire symbol in
+the research root — across all three timeframes, so a fresh clone that rebuilds
+its caches ends with the seal's tripwires in place too. `--canary-only` does
+just that step, without touching the network.
 
 `data-sp500/` is truncated at the embargo (the search window);
 `data-sp500-sealed/` holds the full history (the sealed window). The two are
@@ -917,6 +927,14 @@ reversion, volatility, volume, structure, overnight and cross-section).
 A market-neutral strategy adds a `short_entry` beside `entry` and sets
 `direction: market_neutral`.
 
+Intraday works the same way: set `timeframe: 1h` or `4h` and every lookback is
+counted in those bars. The hourly cache holds six bars per regular session
+(10:00–16:00 ET — the 09:30–10:00 half-hour is not in the data), the 4h cache
+two. The research loop can also offer the model a choice:
+`aqr research --timeframes 1D,1h,4h` lets each hypothesis carry its own
+`timeframe` field, restricted to that allowed set, and the walk-forward
+geometry and history requirements scale to whichever bar size was picked.
+
 ---
 
 ## The sealed run: what actually happened when the envelope was opened
@@ -1092,9 +1110,11 @@ adding them:
   What it produces instead is a [target book](#the-handoff-a-target-book-not-an-order),
   and `tests/test_boundaries.py` fails the build if a trading host, an order
   path or a broker SDK ever appears under `src/aqr/`.
-- **Intraday research** — the providers now fetch 1m–1h bars and the metrics
-  annualise correctly, but nothing has been researched on them yet, and the
-  cost model is calibrated for daily holding periods.
+- **Intraday costs** — the loop itself now researches on 1h and 4h bars as well
+  as daily (`aqr research --timeframes 1D,1h,4h`; the model picks a granularity
+  per hypothesis, inside that set). What has not been re-measured is the cost
+  model, which is still calibrated for daily holding periods — treat intraday
+  scores with that caveat until it is.
 
 The pieces that would be hardest to retrofit — point-in-time data, causal
 features, the search-cost accounting, the lifecycle state machine — are the ones

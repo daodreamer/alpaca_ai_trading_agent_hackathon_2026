@@ -45,6 +45,7 @@ RESEARCH_END = "2026-08-29"
 SEALED_START = "2024-06-01"
 ALPACA_TIMEFRAMES = ("1h",)
 OPT_IN_TIMEFRAMES = ("5m", "1m")
+CANARY_TIMEFRAMES = ("1D", "1h", "4h")
 
 
 def _run(cmd: list[str], log: Path) -> int:
@@ -110,6 +111,7 @@ def resample_4h(root: str) -> int:
     sys.path.insert(0, str(AQR / "src"))
     from aqr.data.providers import CsvProvider
     from aqr.data.resample import aggregate_bars
+    from aqr.seal import CANARY_SYMBOL
 
     provider = CsvProvider(root)
     source_dir = provider.root / "1h"
@@ -120,6 +122,10 @@ def resample_4h(root: str) -> int:
     written = 0
     for path in sorted(source_dir.glob("*.csv")):
         symbol = path.stem
+        if symbol == CANARY_SYMBOL:
+            # The tripwire is written by write_canaries, not resampled, and
+            # loading it here would taint this process's seal for nothing.
+            continue
         bars = provider.load(
             symbol,
             datetime(2010, 1, 1, tzinfo=UTC),
@@ -131,6 +137,22 @@ def resample_4h(root: str) -> int:
             provider.write(resampled)
             written += 1
     print(f"{root}/4h: {written} symbols resampled from 1h")
+    return 0
+
+
+def write_canaries() -> int:
+    """Arm the tripwire in every research-root timeframe.
+
+    The canary lives in the research cache and nowhere else -- never the
+    sealed root, where embargoed rows are expected. Idempotent, so it runs
+    after every research pull and can be re-run on its own.
+    """
+    sys.path.insert(0, str(AQR / "src"))
+    from aqr.data.embargo import write_canary
+
+    for timeframe in CANARY_TIMEFRAMES:
+        path = write_canary(RESEARCH_ROOT, timeframe)
+        print(f"canary armed: {path}")
     return 0
 
 
@@ -147,7 +169,15 @@ def main() -> int:
     parser.add_argument("--research-only", action="store_true")
     parser.add_argument("--sealed-only", action="store_true")
     parser.add_argument("--resample-only", action="store_true", help="Only build 4h from 1h.")
+    parser.add_argument(
+        "--canary-only",
+        action="store_true",
+        help="Only re-arm the research-root canaries.",
+    )
     args = parser.parse_args()
+
+    if args.canary_only:
+        return write_canaries()
 
     if args.resample_only:
         code = resample_4h(RESEARCH_ROOT)
@@ -173,6 +203,8 @@ def main() -> int:
             code = resample_4h(SEALED_ROOT)
             if code:
                 return code
+    if not args.sealed_only:
+        return write_canaries()
     return 0
 
 

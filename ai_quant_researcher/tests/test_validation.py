@@ -13,6 +13,7 @@ import pytest
 
 from aqr.backtest.engine import BacktestConfig, Trade, run_backtest
 from aqr.backtest.metrics import compute_metrics
+from aqr.data.bars import bars_per_year
 from aqr.dsl.schema import StrategySpec, Universe
 from aqr.validation.overfitting import deflated_sharpe, detect_overfitting
 from aqr.validation.params import apply_params, get_param, neighbours, set_param, slots
@@ -22,7 +23,14 @@ from aqr.validation.robustness import (
     parameter_stability,
     regime_robustness,
 )
-from aqr.validation.splits import purge_overlap, three_way_split, walk_forward_folds
+from aqr.validation.splits import (
+    TEST_BARS,
+    TRAIN_BARS,
+    purge_overlap,
+    three_way_split,
+    walk_forward_folds,
+    window_bars,
+)
 from aqr.validation.walkforward import run_walk_forward
 
 
@@ -62,6 +70,26 @@ class TestSplits:
         assert len(purged) <= len(folds)
         for fold in purged:
             assert len(fold.test) >= 1
+
+
+class TestWindowBars:
+    """``TRAIN_BARS`` / ``TEST_BARS`` are daily-bar figures: two years of fit,
+    half a year of judgement. Used raw on hourly bars they would fit on ~77
+    trading days -- a different walk-forward geometry, not a smaller one."""
+
+    def test_daily_bars_return_the_constants_exactly(self) -> None:
+        assert window_bars("1D") == (TRAIN_BARS, TEST_BARS) == (504, 126)
+
+    def test_intraday_windows_cover_the_same_wall_clock(self) -> None:
+        train, test = window_bars("1h")
+        assert (train, test) == (3276, 819)
+        assert train / bars_per_year("1h") == pytest.approx(504 / 252.0)
+        assert test / bars_per_year("1h") == pytest.approx(126 / 252.0)
+
+    def test_four_hour_bars_scale_by_the_same_ratio(self) -> None:
+        train, test = window_bars("4h")
+        assert (train, test) == (819, 205)
+        assert train / bars_per_year("4h") == pytest.approx(2.0)
 
 
 class TestParams:

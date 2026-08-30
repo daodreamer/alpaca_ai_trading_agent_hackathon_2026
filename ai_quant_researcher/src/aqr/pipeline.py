@@ -52,7 +52,7 @@ from aqr.validation.robustness import (
     parameter_stability,
     regime_robustness,
 )
-from aqr.validation.splits import TEST_BARS, TRAIN_BARS
+from aqr.validation.splits import window_bars
 from aqr.validation.walkforward import WalkForwardReport, run_walk_forward
 
 __all__ = ["ResearchOutcome", "code_hash", "evaluate_candidate"]
@@ -173,8 +173,8 @@ def evaluate_candidate(
     regime_labels: dict[str, list[str]] | None = None,
     membership: PointInTimeUniverse | None = None,
     config: BacktestConfig | None = None,
-    train_bars: int = TRAIN_BARS,
-    test_bars: int = TEST_BARS,
+    train_bars: int | None = None,
+    test_bars: int | None = None,
     grid: dict[str, list[float]] | None = None,
     registry: Registry | None = None,
     llm_model: str | None = None,
@@ -203,6 +203,33 @@ def evaluate_candidate(
         return outcome
     subset = {s: data[s] for s in universe}
     primary = subset[universe[0]]
+
+    # The spec's bar size and the data's must agree. The timeframe is part of
+    # where bars live (``CsvProvider.path_for``), so a mismatch here means the
+    # caller loaded the wrong directory -- and would otherwise backtest an
+    # hourly rule against daily bars without a word.
+    mismatched = {
+        s: b.timeframe for s, b in subset.items() if b.timeframe != spec.universe.timeframe
+    }
+    if mismatched:
+        detail = ", ".join(f"{s} on {tf}" for s, tf in sorted(mismatched.items()))
+        outcome.rejected_early = (
+            f"spec is on {spec.universe.timeframe} bars but the loaded data is {detail}"
+        )
+        _record(
+            outcome, spec, data, registry, llm_model, prompt_hash,
+            dataset_version, config.costs,
+        )
+        return outcome
+
+    # The walk-forward geometry is denominated in *this* bar size: 504 daily
+    # bars is two years of fit, 504 hourly bars is seven weeks, and one number
+    # cannot mean both. Explicit arguments override the per-timeframe default.
+    default_train, default_test = window_bars(spec.universe.timeframe)
+    if train_bars is None:
+        train_bars = default_train
+    if test_bars is None:
+        test_bars = default_test
 
     # --- cheap gate: does this strategy even make sense on this data? ----- #
     report = validate_against(spec, primary, CrossSection(subset))
@@ -376,23 +403,42 @@ def _residual(wf: WalkForwardReport, oos_bars: dict[str, Bars]) -> ResidualAlpha
 
     equity = wf.stitched_equity
     with np.errstate(divide="ignore", invalid="ignore"):
-        strat_returns = equity[1:] / equity[:-1] - 1.0
-    strat_sessions = (wf.stitched_timeline // 86_400).astype(np.int64)[1:]
+        bar_returns = equity[1:] / equity[:-1] - 1.0
+    bar_sessions = (wf.stitched_timeline // 86_400).astype(np.int64)[1:]
+
+    # The stitched curve is per *bar* and the benchmark per *session*. On
+    # intraday data a session holds several bars, so compound each session's
+    # bars into one strategy return before pairing; otherwise every bar of a
+    # day is regressed against the same daily return. On daily bars each
+    # session holds exactly one bar and the compounding is the identity.
+    strat_by_session: dict[int, float] = {}
+    for r, day in zip(bar_returns.tolist(), bar_sessions.tolist(), strict=True):
+        key = int(day)
+        previous = strat_by_session.get(key)
+        # A first entry stored verbatim keeps the daily case -- one bar per
+        # session -- bit-for-bit identical to the unaggregated return.
+        strat_by_session[key] = (
+            r if previous is None else (1.0 + previous) * (1.0 + r) - 1.0
+        )
 
     # ``sessions`` has one more entry than ``bench_returns``: the return at index
     # i belongs to the transition *into* session i+1.
     bench_by_session = dict(zip(sessions[1:].tolist(), bench_returns.tolist(), strict=True))
 
     paired = [
-        (float(r), bench_by_session[int(day)])
-        for r, day in zip(strat_returns.tolist(), strat_sessions.tolist(), strict=True)
-        if int(day) in bench_by_session
+        (day, strat_r, bench_by_session[day])
+        for day, strat_r in strat_by_session.items()
+        if day in bench_by_session
     ]
     if len(paired) < 3:
         return None
-    strat = np.array([a for a, _ in paired], dtype=np.float64)
-    bench = np.array([b for _, b in paired], dtype=np.float64)
-    return residual_alpha(strat, bench, periods_per_year=periods_per_year(wf.stitched_timeline))
+    strat = np.array([s for _, s, _ in paired], dtype=np.float64)
+    bench = np.array([b for _, _, b in paired], dtype=np.float64)
+    # The paired series is per session, so annualise against session spacing,
+    # not bar spacing -- on hourly bars the bar factor would inflate alpha
+    # six-and-a-half times.
+    paired_timeline = np.array([day for day, _, _ in paired], dtype=np.int64) * 86_400
+    return residual_alpha(strat, bench, periods_per_year=periods_per_year(paired_timeline))
 
 
 def _worst_case(wf: WalkForwardReport) -> Metrics:

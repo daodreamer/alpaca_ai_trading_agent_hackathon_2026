@@ -18,6 +18,7 @@ phase. Two locks rather than one, because the failure they guard is unrecoverabl
 from __future__ import annotations
 
 import ast
+import csv
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from aqr.data.embargo import (
     SealedProvider,
     SealToken,
     audit_cache_root,
+    write_canary,
 )
 from aqr.seal import CANARY_SYMBOL, EMBARGO_START, Contamination, Phase, Seal, scope
 
@@ -216,6 +218,46 @@ def test_audit_reports_the_canary_without_calling_it_contamination(tmp_path: Pat
     assert report.canary_present is True
     assert report.offenders == ()
     assert report.clean is True
+
+
+def test_write_canary_arms_the_audit_without_contamination(tmp_path: Path) -> None:
+    """A generated canary is recognised as the tripwire, not as an offence."""
+    write_canary(tmp_path, "1h")
+    report = audit_cache_root(tmp_path)
+    assert report.canary_present is True
+    assert report.canary_timeframes == ("1h",)
+    assert report.offenders == ()
+    assert report.clean is True
+
+
+def test_write_canary_reports_each_armed_timeframe(tmp_path: Path) -> None:
+    """A root-level boolean cannot say which timeframes are armed, and one
+    armed timeframe must not read as cover for the others."""
+    for timeframe in ("1D", "1h", "4h"):
+        write_canary(tmp_path, timeframe)
+    report = audit_cache_root(tmp_path)
+    assert report.canary_timeframes == ("1D", "1h", "4h")
+
+
+def test_write_canary_rows_are_all_past_the_embargo(tmp_path: Path) -> None:
+    """The tripwire only trips on a post-embargo read, so every one of its
+    rows has to sit inside the embargo window."""
+    for timeframe in ("1D", "1h", "4h"):
+        path = write_canary(tmp_path, timeframe)
+        with path.open(newline="", encoding="utf-8") as fh:
+            stamps = [row["timestamp"] for row in csv.DictReader(fh)]
+        assert stamps, f"{timeframe}: no rows"
+        assert all(
+            datetime.fromisoformat(stamp).astimezone(UTC) >= EMBARGO_START for stamp in stamps
+        )
+
+
+def test_write_canary_is_idempotent(tmp_path: Path) -> None:
+    """The content is a pure function of the timeframe, so a cache rebuild
+    re-arms the tripwire byte for byte."""
+    first = write_canary(tmp_path, "4h").read_bytes()
+    second = write_canary(tmp_path, "4h").read_bytes()
+    assert first == second
 
 
 def test_audit_does_not_taint_the_ambient_seal(tmp_path: Path) -> None:

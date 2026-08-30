@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from aqr.core import indicators as ind
-from aqr.data.bars import Array, Bars
+from aqr.data.bars import Array, Bars, bars_per_year
 
 if TYPE_CHECKING:
     from aqr.features.cross_section import CrossSection
@@ -209,18 +209,22 @@ _register(
 _register(
     "realized_vol",
     1,
-    lambda b, a: ind.realized_vol(b.close, _int(a, 0, 20)),
+    lambda b, a: ind.realized_vol(
+        b.close, _int(a, 0, 20), annualize=bars_per_year(b.timeframe)
+    ),
     lambda a: _int(a, 0, 20) + 1,
-    "realized_vol(n): annualised realised volatility of log returns",
+    "realized_vol(n): annualised realised volatility of log returns, n bars",
 )
 _register(
     "vol_pct",
     2,
     lambda b, a: ind.percentile_rank(
-        ind.realized_vol(b.close, _int(a, 0, 20)), _int(a, 1, 252)
+        ind.realized_vol(b.close, _int(a, 0, 20), annualize=bars_per_year(b.timeframe)),
+        _int(a, 1, round(bars_per_year(b.timeframe))),
     ),
     lambda a: _int(a, 0, 20) + _int(a, 1, 252) + 1,
-    "vol_pct(n, lookback): percentile rank of realised vol within its own history",
+    "vol_pct(n, lookback): percentile rank of realised vol within its own "
+    "history; the default lookback is one year of bars at this timeframe",
 )
 
 # --------------------------------------------------------------------------- #
@@ -369,7 +373,7 @@ def _zscore(close: Array, period: int) -> Array:
 # market" is the oldest documented equity anomaly there is, and no rule could
 # express it, because every rule saw one instrument at a time.
 #
-# Point-in-time correctness lives in aqr.features.cross_section: at session t
+# Point-in-time correctness lives in aqr.features.cross_section: at bar t
 # the peer set is exactly the symbols that had a bar at t, so a rank is never
 # taken against a universe assembled with hindsight.
 # --------------------------------------------------------------------------- #

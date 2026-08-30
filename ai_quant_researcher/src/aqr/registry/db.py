@@ -781,7 +781,8 @@ class Registry:
         the part that stops the next hypothesis repeating the last one.
         """
         rows = self._conn.execute(
-            "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, overfitting, error "
+            "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, overfitting, "
+            "timeframe, error "
             "FROM experiments ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -795,6 +796,7 @@ class Registry:
                     "hypothesis": row["hypothesis"],
                     "verdict": row["verdict"] or ("ERROR" if row["error"] else "UNKNOWN"),
                     "score": row["score"],
+                    "timeframe": row["timeframe"],
                     "oos_sharpe": oos.get("sharpe"),
                     "oos_trades": oos.get("num_trades"),
                     "overfitting": over.get("verdict"),

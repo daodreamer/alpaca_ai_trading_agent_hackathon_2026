@@ -251,3 +251,83 @@ class TestRankDefinition:
             expected[i, finite] = pairwise / (values.size - 1)
 
         np.testing.assert_array_equal(CrossSection._rank_rows(grid), expected)
+
+
+def _intraday_bars(closes: list[float], *, symbol: str) -> Bars:
+    """Hourly bars inside a single session (and the next), all same day."""
+    base = datetime(2020, 1, 1, tzinfo=UTC)
+    n = len(closes)
+    stamps = np.array(
+        [int((base + timedelta(hours=i)).timestamp()) for i in range(n)],
+        dtype=np.int64,
+    )
+    c = np.array(closes, dtype=np.float64)
+    return Bars(
+        symbol=symbol,
+        timeframe="1h",
+        event_time=stamps,
+        open=c,
+        high=c * 1.01,
+        low=c * 0.99,
+        close=c,
+        volume=np.full(n, 1e6),
+    )
+
+
+class TestIntraday:
+    """A session grid is a look-ahead grid on intraday bars.
+
+    Four hourly bars share one session. Averaging them into one row hands the
+    10:00 bar the cross-section of the 13:00 close -- a rank built from returns
+    that will not exist for another three hours. The grid is keyed on exact bar
+    timestamps so each bar gets the cross-section of its own close; on daily
+    data every symbol's bar closes at the same timestamp, so nothing there
+    changes.
+    """
+
+    def test_bars_within_a_session_get_their_own_cross_section(self) -> None:
+        universe = {
+            "A": _intraday_bars([100.0, 110.0, 100.0, 100.0], symbol="A"),
+            "B": _intraday_bars([100.0, 100.0, 110.0, 100.0], symbol="B"),
+        }
+        rank = CrossSection(universe).rank("A", 1)
+        # Bar 1: A rose 10% against a flat B -- the strongest name.
+        assert rank[1] == pytest.approx(1.0)
+        # Bar 2: A fell back while B rose 10% -- now the weakest. A session
+        # grid would repeat bar 1's (or the day's last) rank here.
+        assert rank[2] == pytest.approx(0.0)
+
+    def test_a_later_bar_in_the_same_session_cannot_change_an_earlier_rank(
+        self,
+    ) -> None:
+        base = {
+            "A": _intraday_bars([100.0, 101.0, 102.0, 103.0], symbol="A"),
+            "B": _intraday_bars([100.0, 99.0, 98.0, 97.0], symbol="B"),
+        }
+        before = CrossSection(base).rank("A", 1)[1]
+
+        # B does something dramatic, but only on the last bar of the session.
+        moved = {
+            "A": _intraday_bars([100.0, 101.0, 102.0, 103.0], symbol="A"),
+            "B": _intraday_bars([100.0, 99.0, 98.0, 500.0], symbol="B"),
+        }
+        after = CrossSection(moved).rank("A", 1)[1]
+        assert before == pytest.approx(after)
+
+    def test_relative_return_uses_only_returns_known_at_that_bar(self) -> None:
+        universe = {
+            "A": _intraday_bars([100.0, 110.0, 100.0, 100.0], symbol="A"),
+            "B": _intraday_bars([100.0, 100.0, 95.0, 100.0], symbol="B"),
+        }
+        cs = CrossSection(universe)
+        # Bar 1: A +10%, B flat -- the median of two is their midpoint, so A
+        # sits 5 points above it.
+        assert cs.relative_return("A", 1)[1] == pytest.approx(0.05)
+        # Bar 2: A -1/11, B -5%; a session grid would still show bar 1's gap.
+        assert cs.relative_return("A", 1)[2] == pytest.approx(
+            ((-1.0 / 11.0) - (-0.05)) / 2.0
+        )
+        # Breadth moves with the bars instead of freezing at the day's last
+        # reading: one gainer at bar 1, none at bar 2.
+        assert cs.breadth("A", 1)[1] == pytest.approx(0.5)
+        assert cs.breadth("A", 1)[2] == pytest.approx(0.0)

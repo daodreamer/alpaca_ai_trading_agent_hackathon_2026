@@ -203,3 +203,50 @@ def _trade(*, pnl: float) -> object:
         mae=0.0,
         mfe=0.0,
     )
+
+
+class TestTimeframeScaling:
+    """The windows are wall-clock spans, not fixed bar counts.
+
+    Sixty bars is a quarter on a daily chart and nine days on an hourly one.
+    The classifier converts with ``bars_per_year`` so the same hypothesis --
+    a quarter of drift, a year of vol history -- is tested at every bar size.
+    On daily bars the conversion factor is exactly one, so every label above
+    is computed by the same arithmetic as before.
+    """
+
+    def test_daily_windows_are_the_daily_constants(self) -> None:
+        from aqr.features.regime import LOOKBACK, MIN_VOL_HISTORY, TRADING_DAYS, _windows
+
+        assert _windows("1D") == (LOOKBACK, MIN_VOL_HISTORY, TRADING_DAYS)
+
+    def test_hourly_windows_cover_the_same_wall_clock(self) -> None:
+        from aqr.features.regime import _windows
+
+        lookback, min_vol_history, per_year = _windows("1h")
+        assert (lookback, min_vol_history, per_year) == (390, 1638, 1638.0)
+        # A quarter and a year of trading time, whatever the bar size.
+        assert lookback / per_year == pytest.approx(60 / 252.0)
+        assert min_vol_history / per_year == pytest.approx(1.0)
+
+    def test_an_hourly_uptrend_is_measured_over_an_hourly_quarter(self) -> None:
+        """z is drift * sqrt(lookback) / per-bar noise. With the daily 60-bar
+        lookback this path scores z ~ 1.2 and reads as a range; over the
+        correct 390-bar quarter it is z ~ 3, a trend."""
+        rng = np.random.default_rng(23)
+        n = 2400
+        steps = 0.0006 + rng.normal(0.0, 0.004, n)
+        close = 100.0 * np.exp(np.cumsum(steps))
+        bars = Bars(
+            symbol="HRLY",
+            timeframe="1h",
+            event_time=np.arange(n, dtype=np.int64) * 3600 + 1_600_000_000,
+            open=close,
+            high=close * 1.001,
+            low=close * 0.999,
+            close=close,
+            volume=np.full(n, 1e6),
+        )
+        tail = regime_series(bars)[-200:]
+        assert tail.count("TREND_BULL") / len(tail) > 0.7
+        assert "UNKNOWN" not in tail

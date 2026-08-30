@@ -7,7 +7,7 @@ of "this stock is moving and its peers are not".
 
 Three properties carry it, and each fails silently if it is got wrong.
 
-**Point in time.** The cross-section at session ``t`` holds exactly the symbols
+**Point in time.** The cross-section at bar ``t`` holds exactly the symbols
 that had a bar at ``t``. Ranking against a universe assembled with hindsight is
 look-ahead of the most flattering kind: the anomaly it discovers is "the stocks
 that were later added to the index outperformed". A symbol contributes from its
@@ -18,10 +18,15 @@ something dramatic afterwards cannot reach back and change it, which the tests
 pin the same way they pin every other feature.
 
 **Alignment.** Symbols share neither a bar count nor a calendar, so the work is
-done on a session grid and the answer is read back onto each symbol's own bars.
+done on a grid of exact bar timestamps and the answer is read back onto each
+symbol's own bars. Timestamps rather than sessions: on intraday bars a session
+holds many bars, and a session grid would hand every bar of the day the ranks
+of the day's *last* bar -- the 10:00 bar reading a cross-section that only
+exists at 16:00 is look-ahead wearing a calendar. On daily bars every symbol's
+bar closes at the same timestamp, so the grid is the session grid exactly.
 
 The whole grid is built once per universe and memoised, and so is every
-per-session reduction taken from it -- ranks, medians, breadth. Both halves of
+per-timestamp reduction taken from it -- ranks, medians, breadth. Both halves of
 that matter. Caching the grid but ranking it again for each symbol is still
 quadratic in the universe size, and a research loop that redoes a
 five-hundred-name ranking five hundred times per feature is a research loop that
@@ -48,10 +53,10 @@ MIN_PEERS = 2
 
 @dataclass(slots=True)
 class CrossSection:
-    """The universe, aligned on sessions, for peer-relative features."""
+    """The universe, aligned on bar timestamps, for peer-relative features."""
 
     peers: Mapping[str, Bars]
-    _sessions: np.ndarray = field(init=False)
+    _stamps: np.ndarray = field(init=False)
     _rows: dict[str, np.ndarray] = field(init=False)
     _columns: dict[str, int] = field(init=False)
     _cache: dict[tuple[str, str, int], Array] = field(init=False, default_factory=dict)
@@ -59,13 +64,13 @@ class CrossSection:
     def __post_init__(self) -> None:
         if not self.peers:
             raise ValueError("a cross-section needs at least one symbol")
-        self._sessions = np.unique(
-            np.concatenate([b.session for b in self.peers.values()])
+        self._stamps = np.unique(
+            np.concatenate([b.event_time for b in self.peers.values()])
         )
-        # Where each symbol's bars land on the shared session grid. Computed
+        # Where each symbol's bars land on the shared timestamp grid. Computed
         # once; every feature reads it.
         self._rows = {
-            symbol: np.searchsorted(self._sessions, bars.session)
+            symbol: np.searchsorted(self._stamps, bars.event_time)
             for symbol, bars in self.peers.items()
         }
         # Column order is the sorted symbol order, fixed here so that no lookup
@@ -81,7 +86,7 @@ class CrossSection:
     def rank(self, symbol: str, period: int) -> Array:
         """Percentile rank of this symbol's ``period``-bar return, in [0, 1].
 
-        1.0 is the strongest name in the universe on that session. NaN where the
+        1.0 is the strongest name in the universe on that bar. NaN where the
         symbol has no return yet, or where fewer than :data:`MIN_PEERS` symbols
         do -- a rank against nobody is not a weak signal, it is no signal.
         """
@@ -99,7 +104,7 @@ class CrossSection:
         """Fraction of the universe with a positive ``period``-bar return.
 
         A market-state feature rather than a symbol one -- it is the same number
-        for every symbol on a given session, and is aligned to this symbol's
+        for every symbol on a given bar, and is aligned to this symbol's
         bars only so it can be combined with the rest.
         """
         return self._compute("breadth", symbol, period)
@@ -150,18 +155,18 @@ class CrossSection:
         return value
 
     def _return_grid(self, period: int) -> np.ndarray:
-        """``sessions x symbols`` of trailing ``period``-bar returns.
+        """``timestamps x symbols`` of trailing ``period``-bar returns.
 
-        NaN where a symbol has no bar on that session, or has not yet
+        NaN where a symbol has no bar at that timestamp, or has not yet
         accumulated ``period`` bars of its own history. Both absences mean the
         same thing to every consumer here: this name does not take part in this
-        session's cross-section.
+        timestamp's cross-section.
         """
         return self._grid("grid", period, lambda: self._build_return_grid(period))
 
     def _build_return_grid(self, period: int) -> np.ndarray:
         grid = np.full(
-            (self._sessions.size, len(self._columns)), np.nan, dtype=np.float64
+            (self._stamps.size, len(self._columns)), np.nan, dtype=np.float64
         )
         for symbol, column in self._columns.items():
             bars = self.peers[symbol]
@@ -191,16 +196,16 @@ class CrossSection:
 
     @staticmethod
     def _rank_rows(grid: np.ndarray) -> np.ndarray:
-        """Per-session percentile rank, ignoring absent symbols.
+        """Per-timestamp percentile rank, ignoring absent symbols.
 
         The rank of a name is the count of present peers strictly below it over
         ``n - 1``, so the weakest name is 0.0 and the strongest is 1.0 whatever
-        ``n`` is on that session, and ties share the lower value.
+        ``n`` is at that timestamp, and ties share the lower value.
 
         Counted by sorting the row and binary-searching it rather than by
-        comparing every pair: ``n log n`` per session instead of ``n**2``. On a
+        comparing every pair: ``n log n`` per timestamp instead of ``n**2``. On a
         five-hundred-name universe the pairwise form builds a quarter-million
-        element boolean matrix per session, which is what made this unusable.
+        element boolean matrix per timestamp, which is what made this unusable.
         """
         present = np.isfinite(grid)
         counts = present.sum(axis=1)

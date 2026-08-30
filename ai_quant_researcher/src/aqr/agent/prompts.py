@@ -129,6 +129,31 @@ _OBSERVABILITY: dict[str, str] = {
         "You are working with WEEKLY bars: one bar per week, open/high/low/"
         "close/volume only. Nothing inside the week is observable."
     ),
+    # Measured against the cache, not assumed: 1h holds six bars per session
+    # (the 09:30-10:00 half-hour is absent -- the bars align to the clock hour
+    # and the bar covering it starts before the bell, so the session filter
+    # dropped it), and 4h is aggregated from 1h with the tail emitted short.
+    "1h": (
+        "You are working with HOURLY bars: six bars per regular session "
+        "(09:30-16:00 ET, no pre- or post-market), covering 10:00-16:00 ET "
+        "-- the 09:30-10:00 half-hour is NOT in the data, so no opening-drive "
+        "rule can fire. `vwap` is session-anchored and a genuine intraday VWAP "
+        "here. `gap()`, `prev_close()` and `overnight_return()` see only the "
+        "previous bar; a true overnight gap exists solely on a session's first "
+        "bar. Every lookback is counted in bars: ema(200) spans about 33 "
+        "sessions and simply does not exist for the first 200 bars, so a rule "
+        "needing long history fires on nothing until the warmup has passed."
+    ),
+    "4h": (
+        "You are working with 4-HOUR bars: two bars per regular session "
+        "(10:00-14:00 and 14:00-16:00 ET, aggregated from the hourly bars, no "
+        "pre- or post-market). `vwap` is session-anchored and a genuine "
+        "intraday VWAP here. `gap()`, `prev_close()` and `overnight_return()` "
+        "see only the previous bar; a true overnight gap exists solely on a "
+        "session's first bar. Every lookback is counted in bars: ema(200) "
+        "spans about 100 sessions -- five months -- and does not exist for the "
+        "first 200 bars, so prefer short lookbacks at this granularity."
+    ),
 }
 
 _INTRADAY_NOTE = (
@@ -255,6 +280,16 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
             "type": "integer",
             "description": "Your own estimate. Used to check your intuition against reality.",
         },
+        "timeframe": {
+            "type": "string",
+            "enum": ["1D", "1h", "4h"],
+            "description": (
+                "The bar size the hypothesis is evaluated on. Choose the granularity "
+                "the mechanism actually needs; every parameter you write -- ema, roc, "
+                "highest, max_holding_bars -- is then counted in bars of THIS size. "
+                "ema(200) on 1h is about 33 sessions, not 200 days."
+            ),
+        },
     },
     "required": [
         "name",
@@ -268,6 +303,7 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
         "take_profit_r_multiple",
         "max_holding_bars",
         "expected_trades_per_year",
+        "timeframe",
     ],
     "additionalProperties": False,
 }
@@ -288,6 +324,8 @@ def _render_memory(memory: list[dict[str, Any]]) -> str:
         sharpe = item.get("oos_sharpe")
         trades = item.get("oos_trades")
         detail = []
+        if item.get("timeframe"):
+            detail.append(f"{item['timeframe']} bars")
         if sharpe is not None:
             detail.append(f"OOS Sharpe {sharpe:.2f}")
         if trades is not None:
@@ -311,14 +349,39 @@ def build_user_prompt(
     memory: list[dict[str, Any]],
     instruction: str | None = None,
     parent: dict[str, Any] | None = None,
+    timeframes: tuple[str, ...] | None = None,
 ) -> str:
-    """The volatile half of the prompt: memory, universe, and this turn's ask."""
+    """The volatile half of the prompt: memory, universe, and this turn's ask.
+
+    ``timeframes`` is the run's allowed set. With one entry the granularity is
+    fixed and the prompt says so; with several, the model chooses per
+    hypothesis and needs each granularity's observability note to choose well.
+    """
+    if timeframes and len(timeframes) > 1:
+        observability = "\n\n".join(
+            f"On {tf} bars: {observability_note(tf)}" for tf in timeframes
+        )
+        observability += (
+            "\n\nPick the timeframe that fits each hypothesis and write it into "
+            'the "timeframe" field; different hypotheses in the same campaign '
+            "may use different granularities. Every parameter you write is "
+            "counted in bars of the timeframe you chose."
+        )
+        universe_line = (
+            f"Universe: {', '.join(symbols)}. Allowed timeframes: {', '.join(timeframes)}."
+        )
+    else:
+        observability = observability_note(timeframe)
+        universe_line = (
+            f"Universe: {', '.join(symbols)} on {timeframe} bars. "
+            f'The schema\'s "timeframe" field is fixed to "{timeframe}" here.'
+        )
     parts = [
         feature_catalogue(),
         "",
-        observability_note(timeframe),
+        observability,
         "",
-        f"Universe: {', '.join(symbols)} on {timeframe} bars.",
+        universe_line,
         "",
         _render_memory(memory),
         "",

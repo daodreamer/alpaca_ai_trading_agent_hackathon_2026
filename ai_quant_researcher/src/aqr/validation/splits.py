@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from aqr.data.bars import Bars
+from aqr.data.bars import Bars, bars_per_year
 
 __all__ = [
     "TEST_BARS",
@@ -29,6 +29,7 @@ __all__ = [
     "purge_overlap",
     "three_way_split",
     "walk_forward_folds",
+    "window_bars",
 ]
 
 
@@ -109,6 +110,19 @@ def three_way_split(
 # it should be reported as one, not absorbed into a threshold.
 TRAIN_BARS = 504
 TEST_BARS = 126
+
+
+def window_bars(timeframe: str) -> tuple[int, int]:
+    """The default walk-forward geometry in *this timeframe's* bars.
+
+    ``TRAIN_BARS`` / ``TEST_BARS`` are denominated in daily bars: two years of
+    fit, half a year of judgement. 504 hourly bars is only ~77 trading days --
+    a different geometry, not a smaller one -- so callers working off another
+    bar size scale by ``bars_per_year``. On daily bars the factor is exactly
+    one and the pair is ``(TRAIN_BARS, TEST_BARS)`` unchanged.
+    """
+    scale = bars_per_year(timeframe) / 252.0
+    return round(TRAIN_BARS * scale), round(TEST_BARS * scale)
 
 
 def walk_forward_folds(

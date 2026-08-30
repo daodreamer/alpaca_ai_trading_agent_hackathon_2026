@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from aqr.core import indicators as ind
+from aqr.data.bars import Bars
 
 
 class TestMovingAverages:
@@ -182,3 +183,74 @@ def test_every_indicator_returns_the_input_length() -> None:
         *ind.macd(close),
     ]
     assert all(out.size == n for out in outputs)
+
+
+class TestTimeframeAnnualisation:
+    """Annualisation is a bars-per-year figure, not a hard-coded 252.
+
+    On hourly bars the daily default understates realised vol by
+    ``sqrt(252 / 1638)`` -- about 2.5x -- and every feature built on it reads
+    a quiet market as calmer than it is. The registry builders hold the
+    timeframe, so they pass it through; on daily bars the factor is exactly
+    the old default and nothing moves.
+    """
+
+    @staticmethod
+    def _bars(timeframe: str, n: int, step_s: int) -> Bars:
+        rng = np.random.default_rng(5)
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
+        return Bars(
+            symbol="TEST",
+            timeframe=timeframe,
+            event_time=np.arange(n, dtype=np.int64) * step_s + 1_600_000_000,
+            open=close,
+            high=close * 1.01,
+            low=close * 0.99,
+            close=close,
+            volume=np.full(n, 1e6),
+        )
+
+    def test_realized_vol_annualises_by_bars_per_year(self) -> None:
+        from aqr.data.bars import bars_per_year
+        from aqr.features.registry import resolve
+
+        hourly = self._bars("1h", 400, 3600)
+        spec = resolve("realized_vol")
+        assert spec.build is not None
+        got = spec.build(hourly, (20.0,))
+        np.testing.assert_allclose(
+            got,
+            ind.realized_vol(hourly.close, 20, annualize=bars_per_year("1h")),
+            equal_nan=True,
+        )
+        daily_scale = ind.realized_vol(hourly.close, 20, annualize=252)
+        assert np.nanmean(got) == pytest.approx(
+            np.nanmean(daily_scale) * np.sqrt(1638.0 / 252.0)
+        )
+
+    def test_the_daily_default_is_unchanged(self) -> None:
+        from aqr.features.registry import resolve
+
+        daily = self._bars("1D", 400, 86_400)
+        spec = resolve("realized_vol")
+        assert spec.build is not None
+        np.testing.assert_allclose(
+            spec.build(daily, (20.0,)),
+            ind.realized_vol(daily.close, 20),
+            equal_nan=True,
+        )
+
+    def test_vol_pct_defaults_to_a_year_of_bars_at_this_timeframe(self) -> None:
+        from aqr.data.bars import bars_per_year
+        from aqr.features.registry import resolve
+
+        hourly = self._bars("1h", 1700, 3600)
+        spec = resolve("vol_pct")
+        assert spec.build is not None
+        got = spec.build(hourly, (20.0,))
+        expected = ind.percentile_rank(
+            ind.realized_vol(hourly.close, 20, annualize=bars_per_year("1h")),
+            round(bars_per_year("1h")),
+        )
+        np.testing.assert_allclose(got, expected, equal_nan=True)
+        assert np.isfinite(got[-1]), "a year of hourly bars must be enough history"

@@ -12,16 +12,25 @@ which is the same code path a real run takes after the proposal arrives.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from aqr.agent.prompts import PROPOSAL_SCHEMA, SYSTEM_PROMPT, build_user_prompt, prompt_hash
-from aqr.agent.proposer import HeuristicProposer, Proposal, build_spec, spec_to_proposal_fields
+from aqr.agent.proposer import (
+    HeuristicProposer,
+    Proposal,
+    build_spec,
+    check_proposal,
+    spec_to_proposal_fields,
+)
 from aqr.agent.research import ResearchConfig, ResearchLoop
+from aqr.data.providers import SyntheticProvider
 from aqr.features.registry import REGISTRY
 from aqr.pipeline import evaluate_candidate
 from aqr.registry.db import Registry
+from aqr.validation.splits import window_bars
 
 
 class _ScriptedProposer:
@@ -287,3 +296,94 @@ class TestResearchLoop:
                 config=ResearchConfig(symbols=["SPY"], iterations=3, save_accepted_to=None),
             ).run()
             assert all(s.status != "LIVE" for s in reg.strategies())
+
+
+class TestTimeframes:
+    """The proposer may choose a granularity, inside the run's allowed set."""
+
+    def test_a_proposal_may_choose_a_timeframe_inside_the_allowed_set(self) -> None:
+        proposal = Proposal(dict(GOOD, timeframe="1h"), "test")
+        spec = build_spec(proposal, ["SPY"], allowed_timeframes=("1D", "1h"))
+        assert spec.universe.timeframe == "1h"
+
+    def test_a_timeframe_outside_the_allowed_set_is_refused(self) -> None:
+        proposal = Proposal(dict(GOOD, timeframe="4h"), "test")
+        with pytest.raises(ValueError, match="timeframe"):
+            build_spec(proposal, ["SPY"], allowed_timeframes=("1D", "1h"))
+
+    def test_a_proposal_without_a_timeframe_gets_the_run_default(self) -> None:
+        spec = build_spec(Proposal(dict(GOOD), "test"), ["SPY"], timeframe="1h")
+        assert spec.universe.timeframe == "1h"
+
+    def test_check_proposal_names_an_unknown_timeframe(self) -> None:
+        problems = check_proposal(dict(GOOD, timeframe="5m"))
+        assert any("timeframe" in p and "5m" in p for p in problems)
+
+    def test_a_multi_timeframe_prompt_covers_each_granularity_and_the_choice(self) -> None:
+        prompt = build_user_prompt(
+            symbols=["SPY"], timeframe="1D", memory=[], timeframes=("1D", "1h", "4h")
+        )
+        assert "On 1h bars" in prompt and "On 4h bars" in prompt
+        assert "six bars per regular session" in prompt
+        assert "two bars per regular session" in prompt
+        assert 'write it into the "timeframe" field' in prompt
+
+    def test_a_single_timeframe_prompt_fixes_the_field(self) -> None:
+        prompt = build_user_prompt(symbols=["SPY"], timeframe="1D", memory=[])
+        assert 'fixed to "1D"' in prompt
+
+    def test_memory_renders_each_experiments_timeframe(self) -> None:
+        rendered = build_user_prompt(
+            symbols=["SPY"],
+            timeframe="1D",
+            memory=[{"name": "a", "verdict": "REJECT", "timeframe": "1h"}],
+        )
+        assert "1h bars" in rendered
+
+    def test_the_heuristic_proposer_stamps_the_run_default(self) -> None:
+        fields = HeuristicProposer().propose(symbols=["SPY"], timeframe="1h", memory=[]).fields
+        assert fields["timeframe"] == "1h"
+
+    def test_proposal_fields_round_trip_the_timeframe(self) -> None:
+        proposal = Proposal(dict(GOOD, timeframe="1h"), "test")
+        spec = build_spec(proposal, ["SPY"], allowed_timeframes=("1D", "1h"))
+        assert spec_to_proposal_fields(spec)["timeframe"] == "1h"
+
+    def test_a_timeframe_mismatch_is_rejected_before_any_backtest(self, universe) -> None:
+        """An hourly spec on daily bars is a data error, not a bad strategy."""
+        proposal = Proposal(dict(GOOD, timeframe="1h"), "t")
+        spec = build_spec(proposal, ["SPY"], allowed_timeframes=("1D", "1h"))
+        outcome = evaluate_candidate(spec, universe)
+        assert outcome.verdict == "REJECT"
+        assert "1h" in (outcome.rejected_early or "")
+        assert outcome.backtests_run == 0
+
+    def test_the_loop_evaluates_each_candidate_on_its_own_bar_size(self, tmp_path) -> None:
+        provider = SyntheticProvider()
+        start, end = datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 8, 1, tzinfo=UTC)
+        daily = {"SPY": provider.load("SPY", start, end)}
+        hourly = {"SPY": provider.load("SPY", start, end, "1h")}
+        proposer = _ScriptedProposer(dict(GOOD, timeframe="1h"))
+        with Registry(tmp_path / "r.sqlite") as reg:
+            loop = ResearchLoop(
+                data=daily,
+                registry=reg,
+                config=ResearchConfig(
+                    symbols=["SPY"],
+                    iterations=1,
+                    timeframes=("1D", "1h"),
+                    save_accepted_to=None,
+                    mutate_best_every=0,
+                ),
+                proposer=proposer,  # type: ignore[arg-type]
+                data_by_timeframe={"1D": daily, "1h": hourly},
+            )
+            steps = loop.run()
+            memory_timeframe = reg.memory()[0]["timeframe"]
+        step = steps[0]
+        assert step.error is None
+        assert step.spec is not None and step.spec.universe.timeframe == "1h"
+        assert memory_timeframe == "1h"
+        assert step.outcome is not None and step.outcome.walk_forward is not None
+        train, _ = window_bars("1h")
+        assert len(step.outcome.walk_forward.folds[0].fold.train) == train

@@ -234,8 +234,13 @@ def stochastic_k(high: Array, low: Array, close: Array, period: int = 14) -> Arr
         return np.where(rng == 0.0, 50.0, 100.0 * (close - lo) / rng)
 
 
-def realized_vol(close: Array, period: int = 20, annualize: int = 252) -> Array:
-    """Annualised realised volatility of log returns."""
+def realized_vol(close: Array, period: int = 20, annualize: float = 252.0) -> Array:
+    """Annualised realised volatility of log returns.
+
+    ``annualize`` is bars per year, not days: 252 on daily bars, 1638 on
+    hourly ones. Callers with a timeframe in hand should pass
+    ``bars_per_year(timeframe)`` rather than the daily default.
+    """
     close = _as_array(close)
     _validate_period(period, "realized_vol")
     out = np.full(close.size, np.nan)

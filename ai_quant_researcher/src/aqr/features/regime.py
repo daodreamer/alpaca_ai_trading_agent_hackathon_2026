@@ -24,7 +24,7 @@ skips trades whose regime is unknown.
 whether the recent move is large *relative to the volatility of this
 instrument*. The statistic is the drift's t-value::
 
-    z = log(close[t] / close[t - LOOKBACK]) / (sigma * sqrt(LOOKBACK / 252))
+    z = log(close[t] / close[t - LOOKBACK]) / (sigma * sqrt(LOOKBACK / bars_per_year))
 
 A z of 3 means the move is three standard deviations of noise; a z of 0.4 means
 the market went nowhere in a way that happens to have a sign. This is scale-free,
@@ -56,19 +56,21 @@ from __future__ import annotations
 import numpy as np
 
 from aqr.core.indicators import realized_vol
-from aqr.data.bars import Bars
+from aqr.data.bars import Bars, bars_per_year
 
 __all__ = ["REGIMES", "classify", "regime_series"]
 
 REGIMES = ("TREND_BULL", "TREND_BEAR", "RANGE_LOW_VOL", "RANGE_HIGH_VOL", "UNKNOWN")
 
-# Bars over which the drift is measured. A quarter: long enough that noise
-# averages out, short enough that a regime change is visible while it matters.
+# Bars over which the drift is measured, in daily-bar units: a quarter. Long
+# enough that noise averages out, short enough that a regime change is visible
+# while it matters. ``_windows`` converts it to the timeframe's own bar count.
 LOOKBACK = 60
 
 # The recent-volatility window, and how many readings the expanding baseline
-# needs before it means anything. A "normal" built from thirty bars is not a
-# normal, and comparing against it produces regime labels that flip on noise.
+# needs before it means anything (again in daily-bar units: a year). A "normal"
+# built from thirty bars is not a normal, and comparing against it produces
+# regime labels that flip on noise.
 VOL_FAST = 20
 MIN_VOL_HISTORY = 252
 
@@ -84,6 +86,21 @@ HIGH_VOL_RATIO = 1.3
 TRADING_DAYS = 252.0
 
 
+def _windows(timeframe: str) -> tuple[int, int, float]:
+    """Wall-clock windows converted to this timeframe's bar counts.
+
+    ``LOOKBACK`` is a quarter and ``MIN_VOL_HISTORY`` a year *of trading time*;
+    on hourly bars that is 6.5 times as many bars. On daily bars the factor is
+    exactly one and the constants above apply unchanged.
+
+    Returns ``(lookback, min_vol_history, bars_per_year)`` -- the third element
+    is the annualisation factor for both the vol estimate and the z scale.
+    """
+    per_year = bars_per_year(timeframe)
+    scale = per_year / TRADING_DAYS
+    return round(LOOKBACK * scale), round(MIN_VOL_HISTORY * scale), per_year
+
+
 def _labels(bars: Bars) -> list[str]:
     n = len(bars)
     if n == 0:
@@ -92,7 +109,8 @@ def _labels(bars: Bars) -> list[str]:
     close = np.asarray(bars.close, dtype=np.float64)
     out = ["UNKNOWN"] * n
 
-    fast = realized_vol(close, VOL_FAST, annualize=int(TRADING_DAYS))
+    lookback, min_vol_history, per_year = _windows(bars.timeframe)
+    fast = realized_vol(close, VOL_FAST, annualize=per_year)
 
     # Expanding mean of every volatility reading so far. Cumulative sums keep it
     # O(n) and, more importantly, keep it exactly causal: the value at t is a
@@ -102,16 +120,16 @@ def _labels(bars: Bars) -> list[str]:
     total = np.cumsum(np.where(seen, fast, 0.0))
     with np.errstate(divide="ignore", invalid="ignore"):
         baseline = np.where(
-            count >= MIN_VOL_HISTORY, total / np.maximum(count, 1), np.nan
+            count >= min_vol_history, total / np.maximum(count, 1), np.nan
         )
 
     # The drift's t-value. Both terms are trailing: the numerator ends at t, the
     # denominator is an estimate made from bars up to t.
     with np.errstate(divide="ignore", invalid="ignore"):
         move = np.full(n, np.nan)
-        if n > LOOKBACK:
-            move[LOOKBACK:] = np.log(close[LOOKBACK:] / close[:-LOOKBACK])
-        scale = fast * np.sqrt(LOOKBACK / TRADING_DAYS)
+        if n > lookback:
+            move[lookback:] = np.log(close[lookback:] / close[:-lookback])
+        scale = fast * np.sqrt(lookback / per_year)
         z = np.where(scale > 0, move / scale, np.nan)
         ratio = np.where(baseline > 0, fast / baseline, np.nan)
 

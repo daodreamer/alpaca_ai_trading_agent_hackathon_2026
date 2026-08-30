@@ -40,7 +40,7 @@ from aqr.dsl.validator import validate_against
 from aqr.features.cross_section import CrossSection
 from aqr.pipeline import ResearchOutcome, evaluate_candidate
 from aqr.registry.db import ExperimentRecord, Registry
-from aqr.validation.splits import TEST_BARS, TRAIN_BARS
+from aqr.validation.splits import window_bars
 
 __all__ = ["ResearchConfig", "ResearchLoop", "ResearchStep", "saved_filename"]
 
@@ -61,11 +61,19 @@ def saved_filename(spec: StrategySpec) -> str:
 class ResearchConfig:
     symbols: list[str]
     timeframe: str = "1D"
+    """The default granularity: what the proposer is told to fall back to and
+    what a proposal without a ``timeframe`` field compiles to."""
+    timeframes: tuple[str, ...] = ("1D",)
+    """The allowed set a proposal may choose from. A choice outside it is a
+    compile failure, fed back to the model like any other invalid field."""
     iterations: int = 8
     risk_per_trade: float = 0.0075
     max_positions: int = 3
-    train_bars: int = TRAIN_BARS
-    test_bars: int = TEST_BARS
+    train_bars: int | None = None
+    test_bars: int | None = None
+    """Walk-forward geometry. ``None`` derives it from each candidate's own bar
+    size via ``window_bars`` -- 504 daily bars is two years, 504 hourly bars is
+    seven weeks, and one number cannot mean both. Explicit values override."""
     memory_depth: int = 20
     mutate_best_every: int = 3
     """Every Nth iteration, refine the best strategy so far instead of proposing
@@ -108,6 +116,11 @@ class ResearchLoop:
     proposer: Proposer = field(default_factory=HeuristicProposer)
     backtest_config: BacktestConfig = field(default_factory=BacktestConfig)
     regime_labels: dict[str, list[str]] | None = None
+    data_by_timeframe: dict[str, dict[str, Bars]] | None = None
+    """Bars per allowed granularity, for campaigns that let the proposer choose.
+    ``data`` stays the default granularity's set, so a single-timeframe run
+    needs nothing more."""
+    regime_labels_by_timeframe: dict[str, dict[str, list[str]]] | None = None
     membership: PointInTimeUniverse | None = None
     """Which names were index members on each session. ``None`` means the whole
     of ``data`` is tradable throughout -- correct for a synthetic run, and the
@@ -134,6 +147,27 @@ class ResearchLoop:
 
     # ----------------------------------------------------------------- #
 
+    def _data_for(self, timeframe: str) -> dict[str, Bars]:
+        """The bars a candidate on ``timeframe`` is evaluated against."""
+        if self.data_by_timeframe is None:
+            return self.data
+        return self.data_by_timeframe.get(timeframe, self.data)
+
+    def _labels_for(self, timeframe: str) -> dict[str, list[str]] | None:
+        """Regime labels are per bar, so a label set fits one granularity only.
+        A candidate off the default gets ``None`` and the pipeline estimates
+        labels from the bars it is handed."""
+        if self.regime_labels_by_timeframe is not None:
+            return self.regime_labels_by_timeframe.get(timeframe)
+        return self.regime_labels if timeframe == self.config.timeframe else None
+
+    def _windows_for(self, timeframe: str) -> tuple[int, int]:
+        """Walk-forward geometry for a candidate on ``timeframe``."""
+        default = window_bars(timeframe)
+        train = self.config.train_bars if self.config.train_bars is not None else default[0]
+        test = self.config.test_bars if self.config.test_bars is not None else default[1]
+        return train, test
+
     def _iterate(self, iteration: int) -> ResearchStep:
         memory = self.registry.memory(self.config.memory_depth)
         parent = self._parent_for(iteration)
@@ -144,6 +178,7 @@ class ResearchLoop:
                 timeframe=self.config.timeframe,
                 memory=memory,
                 parent=parent,
+                timeframes=self.config.timeframes,
             )
         except Exception as exc:  # a proposer failure must not end the run
             placeholder = Proposal(fields={"name": f"proposal_failed_{iteration}"}, source="error")
@@ -158,6 +193,7 @@ class ResearchLoop:
                 proposal,
                 self.config.symbols,
                 self.config.timeframe,
+                allowed_timeframes=self.config.timeframes,
                 risk_per_trade=self.config.risk_per_trade,
                 max_positions=self.config.max_positions,
                 parent_fingerprint=(parent or {}).get("fingerprint"),
@@ -188,14 +224,15 @@ class ResearchLoop:
             self._record_failure(step)
             return step
 
+        train_bars, test_bars = self._windows_for(spec.universe.timeframe)
         step.outcome = evaluate_candidate(
             spec,
-            self.data,
-            regime_labels=self.regime_labels,
+            self._data_for(spec.universe.timeframe),
+            regime_labels=self._labels_for(spec.universe.timeframe),
             membership=self.membership,
             config=self.backtest_config,
-            train_bars=self.config.train_bars,
-            test_bars=self.config.test_bars,
+            train_bars=train_bars,
+            test_bars=test_bars,
             registry=self.registry,
             llm_model=proposal.model,
             prompt_hash=proposal.prompt_hash,
@@ -229,6 +266,7 @@ class ResearchLoop:
                 repaired,
                 self.config.symbols,
                 self.config.timeframe,
+                allowed_timeframes=self.config.timeframes,
                 risk_per_trade=self.config.risk_per_trade,
                 max_positions=self.config.max_positions,
             )
@@ -245,7 +283,8 @@ class ResearchLoop:
 
     def _satisfiable(self, spec: StrategySpec) -> list[str] | None:
         """The validator's complaints about ``spec``, or ``None`` if it is fine."""
-        traded = {s: self.data[s] for s in spec.universe.symbols if s in self.data}
+        data = self._data_for(spec.universe.timeframe)
+        traded = {s: data[s] for s in spec.universe.symbols if s in data}
         if not traded:
             return None
         primary = next(iter(traded.values()))
@@ -261,7 +300,7 @@ class ResearchLoop:
                 strategy_name=dead.name,
                 hypothesis=dead.hypothesis,
                 symbols=tuple(self.config.symbols),
-                timeframe=self.config.timeframe,
+                timeframe=dead.universe.timeframe,
                 data_start="",
                 data_end="",
                 dataset_version=self.config.dataset_version,
@@ -297,7 +336,16 @@ class ResearchLoop:
                 ),
                 hypothesis=str(step.proposal.fields.get("hypothesis", "")),
                 symbols=tuple(self.config.symbols),
-                timeframe=self.config.timeframe,
+                # The granularity the candidate actually asked for, not the run
+                # default: a failed 1h proposal filed under 1D would tell the
+                # next prompt the wrong thing was tried.
+                timeframe=(
+                    spec.universe.timeframe
+                    if spec
+                    else str(
+                        step.proposal.fields.get("timeframe") or self.config.timeframe
+                    )
+                ),
                 data_start="",
                 data_end="",
                 dataset_version=self.config.dataset_version,

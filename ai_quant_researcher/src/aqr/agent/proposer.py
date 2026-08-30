@@ -65,6 +65,7 @@ class Proposer(Protocol):
         memory: list[dict[str, Any]],
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
+        timeframes: tuple[str, ...] | None = None,
     ) -> Proposal: ...
 
 
@@ -78,6 +79,7 @@ def build_spec(
     symbols: list[str],
     timeframe: str = "1D",
     *,
+    allowed_timeframes: tuple[str, ...] | None = None,
     risk_per_trade: float = 0.0075,
     max_positions: int = 3,
     parent_fingerprint: str | None = None,
@@ -87,8 +89,19 @@ def build_spec(
     The universe, the risk budget and the position limit come from the run
     configuration, never from the proposal. A model that could choose its own
     universe could choose the one its idea happens to work on.
+
+    The timeframe is the one degree of freedom a proposal *may* choose, and
+    only within ``allowed_timeframes`` -- the same philosophy as the universe:
+    the run configuration bounds the choice, the model makes it. An
+    out-of-set choice raises, which the research loop records as a compile
+    failure and feeds back to the model.
     """
     fields = proposal.fields
+    allowed = allowed_timeframes or (timeframe,)
+    chosen = str(fields.get("timeframe") or "").strip() or timeframe
+    if chosen not in allowed:
+        raise ValueError(f"timeframe must be one of {list(allowed)}, got {chosen!r}")
+    timeframe = chosen
     ratio = float(fields.get("take_profit_r_multiple") or 0.0)
     take_profit = (
         TakeProfit(type="none", ratio=1.0)
@@ -224,6 +237,14 @@ def check_proposal(fields: dict[str, Any]) -> list[str]:
             "strategy needs both legs, or it is a long-only strategy wearing the label"
         )
 
+    tf = str(fields.get("timeframe") or "").strip()
+    known = PROPOSAL_SCHEMA["properties"]["timeframe"]["enum"]
+    if tf and tf not in known:
+        problems.append(
+            f"timeframe must be one of {known}, got {tf!r}; every parameter is "
+            "counted in bars of the timeframe you choose"
+        )
+
     for name in _NUMERIC_FIELDS:
         value = fields.get(name)
         if value is not None and not isinstance(value, (int, float)):
@@ -341,6 +362,7 @@ class AnthropicProposer:
         memory: list[dict[str, Any]],
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
+        timeframes: tuple[str, ...] | None = None,
     ) -> Proposal:
         user = build_user_prompt(
             symbols=symbols,
@@ -348,6 +370,7 @@ class AnthropicProposer:
             memory=memory,
             instruction=instruction,
             parent=parent,
+            timeframes=timeframes,
         )
         # The SDK types these as TypedDicts. Importing them would pull anthropic
         # to module scope and break the optional-extra design, so the widening
@@ -493,6 +516,7 @@ class OpenAICompatProposer:
         memory: list[dict[str, Any]],
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
+        timeframes: tuple[str, ...] | None = None,
     ) -> Proposal:
         system = self._system_prompt()
         user = build_user_prompt(
@@ -501,6 +525,7 @@ class OpenAICompatProposer:
             memory=memory,
             instruction=instruction,
             parent=parent,
+            timeframes=timeframes,
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system},
@@ -757,6 +782,12 @@ class HeuristicProposer:
     architecture section 25, with the important constraint that a mutation is
     only ever accepted on out-of-sample evidence, which is enforced by the
     evaluator rather than here.
+
+    The heuristic proposer does not explore across granularities: it stamps
+    every proposal with the run's default timeframe and leaves cross-timeframe
+    choice to the model proposers. Note the template parameters are daily-scale
+    semantics -- ema(200), roc(60), a 20-bar holding period -- so on a non-1D
+    default they measure a *shorter* horizon than their hypotheses describe.
     """
 
     def __init__(self, seed: int = 20260826) -> None:
@@ -772,6 +803,7 @@ class HeuristicProposer:
         memory: list[dict[str, Any]],
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
+        timeframes: tuple[str, ...] | None = None,
     ) -> Proposal:
         if parent:
             return self._mutate(parent)
@@ -783,6 +815,7 @@ class HeuristicProposer:
                 fields.setdefault("direction", "long")
                 fields["signal_exit"] = ""
                 fields["expected_trades_per_year"] = 20
+                fields["timeframe"] = timeframe
                 return Proposal(fields=fields, source="heuristic")
         # Library exhausted: recombine a regime with a different entry, which is
         # the cheapest way to ask a genuinely new question of the same data.
@@ -802,6 +835,7 @@ class HeuristicProposer:
         fields["direction"] = direction
         fields["signal_exit"] = ""
         fields["expected_trades_per_year"] = 15
+        fields["timeframe"] = timeframe
         return Proposal(fields=fields, source="heuristic")
 
     def _mutate(self, parent: dict[str, Any]) -> Proposal:
@@ -847,6 +881,7 @@ def spec_to_proposal_fields(spec: StrategySpec) -> dict[str, Any]:
             "hypothesis": spec.hypothesis,
             "mode": "portfolio",
             "direction": spec.direction,
+            "timeframe": spec.universe.timeframe,
             "regime": spec.regime or "",
             "rank_by": spec.rank_by or "",
             "screen": spec.screen or "",
@@ -859,6 +894,7 @@ def spec_to_proposal_fields(spec: StrategySpec) -> dict[str, Any]:
         "hypothesis": spec.hypothesis,
         "mode": "signal",
         "direction": spec.direction,
+        "timeframe": spec.universe.timeframe,
         "regime": spec.regime or "",
         "entry": spec.entry,
         "signal_exit": spec.exit.signal_exit or "",
