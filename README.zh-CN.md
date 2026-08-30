@@ -504,14 +504,16 @@ python scripts/pipeline.py book       # 只重建；数据已经是最新的
 ```bash
 cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
-    --universe sp500_pit --csv-root data-sp500 --timeframes 1D,1h,4h
+    --universe sp500_pit --csv-root data-sp500 --timeframes "1D,1h,4h"
 uv run aqr experiments                      # 试过什么，赢的和输的都在
 uv run aqr preregister FINGERPRINT          # 在读 sealed 数据之前先申报候选
 uv run python -m aqr.cli_sealed run FINGERPRINT   # 花掉唯一那一次机会
 ```
 
 `--timeframes` 让每个假设自己选 bar 粒度——日线、小时线或 4 小时线；
-1h/4h 缓存由 `python scripts/pull_sp500_intraday.py --timeframe all` 重建
+在 PowerShell 下要给值加引号，否则 `1D` 会被当成十进制数字字面量、
+传进程序的只剩 `1`。1h/4h 缓存由
+`python scripts/pull_sp500_intraday.py --timeframe all` 重建
 （同时重新武装它们的金丝雀）。研究端自己的 README 里有一条注意事项：
 成本模型仍是按日线持仓周期校准的，所以日内粒度的评分偏乐观。
 

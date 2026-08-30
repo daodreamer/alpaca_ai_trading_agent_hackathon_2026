@@ -552,17 +552,18 @@ dashboard without anyone noticing. Starting one is a decision a person makes:
 ```bash
 cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
-    --universe sp500_pit --csv-root data-sp500 --timeframes 1D,1h,4h
+    --universe sp500_pit --csv-root data-sp500 --timeframes "1D,1h,4h"
 uv run aqr experiments                      # what has been tried, winners and losers
 uv run aqr preregister FINGERPRINT          # declare a candidate before reading sealed data
 uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
 ```
 
 `--timeframes` lets each hypothesis pick its own bar granularity — daily,
-hourly or 4-hour; the 1h/4h caches are rebuilt (and their canaries re-armed)
-by `python scripts/pull_sp500_intraday.py --timeframe all`. One caveat from
-the lab's own README: the cost model is still calibrated for daily holding
-periods, so intraday scores read optimistic.
+hourly or 4-hour; quote the value on PowerShell, which otherwise reads `1D`
+as a decimal literal and passes `1`. The 1h/4h caches are rebuilt (and their
+canaries re-armed) by `python scripts/pull_sp500_intraday.py --timeframe all`.
+One caveat from the lab's own README: the cost model is still calibrated for
+daily holding periods, so intraday scores read optimistic.
 
 See [ai_quant_researcher/README.md](ai_quant_researcher/README.md) for what each
 of those does and why the seal is arranged the way it is.
