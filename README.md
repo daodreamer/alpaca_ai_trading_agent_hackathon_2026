@@ -392,7 +392,7 @@ one project's invariants the other's problem.
 | **Options strategy** — specs/07 D4 and D5 unimplemented. | blocked on research |
 | **Options backtest** — spec 08 not written. [specs/00](specs/00-brief.md) says this is what turns "up 2% in four days" into a claim about edge. | blocked on the above |
 
-2,344 tests green (pytest / ruff / mypy; frontend eslint / tsc), all offline.
+2,344 backend tests green, plus 1,021 in the research lab (pytest / ruff / mypy; frontend eslint / tsc), all offline.
 
 Development runs against a pre-existing paper account. The competition account is
 a **new, dedicated** one, switched over on 28 Aug — hard gate 4 in
@@ -552,11 +552,17 @@ dashboard without anyone noticing. Starting one is a decision a person makes:
 ```bash
 cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
-    --universe sp500_pit --csv-root data-sp500
+    --universe sp500_pit --csv-root data-sp500 --timeframes 1D,1h,4h
 uv run aqr experiments                      # what has been tried, winners and losers
 uv run aqr preregister FINGERPRINT          # declare a candidate before reading sealed data
 uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
 ```
+
+`--timeframes` lets each hypothesis pick its own bar granularity — daily,
+hourly or 4-hour; the 1h/4h caches are rebuilt (and their canaries re-armed)
+by `python scripts/pull_sp500_intraday.py --timeframe all`. One caveat from
+the lab's own README: the cost model is still calibrated for daily holding
+periods, so intraday scores read optimistic.
 
 See [ai_quant_researcher/README.md](ai_quant_researcher/README.md) for what each
 of those does and why the seal is arranged the way it is.
@@ -666,7 +672,7 @@ the nine guards that enforce it, and the daily loop.
 | [adr/](adr/) | Decisions and the reasoning behind them. |
 | [docs/](docs/) | [Architecture and workflow](docs/ARCHITECTURE.md), with diagrams. English and 简体中文. |
 | [ai_quant_researcher/](ai_quant_researcher/) | A separate system sharing the repository: an equities strategy-research lab that implements [specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md). It produces the strategy the equity agent executes, and imports nothing from AlphaGate. |
-| [scripts/](scripts/) | `pipeline.py` — refresh, rebuild the book, trade it. Runs both projects' CLIs as subprocesses and imports neither. |
+| [scripts/](scripts/) | `pipeline.py` — refresh, rebuild the book, trade it; `pull_sp500_intraday.py` — build the 1h/4h bar caches and arm their canaries; `pull_progress.py` — watch a pull. They run both projects' CLIs as subprocesses and import neither. |
 
 `ai_quant_researcher/` is a **sibling project, not part of AlphaGate**. It has
 its own `pyproject.toml`, its own virtualenv, its own test suite, and it imports

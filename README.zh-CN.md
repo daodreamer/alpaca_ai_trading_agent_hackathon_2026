@@ -361,7 +361,7 @@ python scripts/pipeline.py --dry-run  # 重建 book、按它做计划、一单�
 | **期权策略** —— specs/07 D4 和 D5 未实现。 | 等研究 |
 | **期权回测** —— spec 08 还没写。[specs/00](specs/00-brief.md) 说这才是把"四天涨了 2%"变成一个关于 edge 的主张的东西。 | 等上一条 |
 
-2,344 个测试全绿（pytest / ruff / mypy；前端 eslint / tsc），全部离线运行。
+2,344 个后端测试全绿，研究实验室另有 1,021 个（pytest / ruff / mypy；前端 eslint / tsc），全部离线运行。
 
 开发用的是一个已有的模拟账户。比赛账户是一个**全新的、专用的**账户，
 8 月 28 日切过去——这是 [specs/00-brief.md](specs/00-brief.md) 里的硬门槛 4，
@@ -504,11 +504,16 @@ python scripts/pipeline.py book       # 只重建；数据已经是最新的
 ```bash
 cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
-    --universe sp500_pit --csv-root data-sp500
+    --universe sp500_pit --csv-root data-sp500 --timeframes 1D,1h,4h
 uv run aqr experiments                      # 试过什么，赢的和输的都在
 uv run aqr preregister FINGERPRINT          # 在读 sealed 数据之前先申报候选
 uv run python -m aqr.cli_sealed run FINGERPRINT   # 花掉唯一那一次机会
 ```
+
+`--timeframes` 让每个假设自己选 bar 粒度——日线、小时线或 4 小时线；
+1h/4h 缓存由 `python scripts/pull_sp500_intraday.py --timeframe all` 重建
+（同时重新武装它们的金丝雀）。研究端自己的 README 里有一条注意事项：
+成本模型仍是按日线持仓周期校准的，所以日内粒度的评分偏乐观。
 
 每条命令做什么、以及 seal 为什么要这样安排，见
 [ai_quant_researcher/README.md](ai_quant_researcher/README.md)。
@@ -610,7 +615,7 @@ uv run --directory backend --extra dev mypy
 | [adr/](adr/) | 决策，以及背后的理由。 |
 | [docs/](docs/) | [架构与运作流程](docs/ARCHITECTURE.zh-CN.md)，带图。中英双语。 |
 | [ai_quant_researcher/](ai_quant_researcher/) | 共享这个仓库的另一套系统：一个实现 [specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md) 的股票策略研究实验室。它产出股票 agent 执行的那个策略，并且不从 AlphaGate import 任何东西。 |
-| [scripts/](scripts/) | `pipeline.py` —— 刷新、重建 book、交易它。用子进程调两个项目的 CLI，两个都不 import。 |
+| [scripts/](scripts/) | `pipeline.py` —— 刷新、重建 book、交易它；`pull_sp500_intraday.py` —— 构建 1h/4h bar 缓存并武装它们的金丝雀；`pull_progress.py` —— 查看拉取进度。它们用子进程调两个项目的 CLI，两个都不 import。 |
 
 `ai_quant_researcher/` 是一个**兄弟项目，不是 AlphaGate 的一部分**。
 它有自己的 `pyproject.toml`、自己的虚拟环境、自己的测试套件，
