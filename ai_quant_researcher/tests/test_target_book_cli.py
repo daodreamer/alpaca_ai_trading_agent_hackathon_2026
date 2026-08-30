@@ -232,6 +232,19 @@ def test_a_refuted_candidate_is_refused(tmp_path: Path) -> None:
     assert not (tmp_path / "books").exists()
 
 
+def test_a_divergent_timeframe_is_refused(db: Path, tmp_path: Path) -> None:
+    """``--timeframe`` picks the cache folder; the book is stamped with the
+    spec's own timeframe. A divergent pair would stamp "1D" on weights built
+    from other bars and still carry the sealed verdict, which was measured on
+    the spec's timeframe only. Synthetic bars would load fine, so only this
+    refusal stands between the two."""
+    out = tmp_path / "books"
+    result = _run(db, out, "--timeframe", "4h")
+    assert result.exit_code != 0
+    assert "declares 1D" in _text(result)
+    assert not out.exists()
+
+
 def test_a_spec_path_is_accepted_and_held_to_the_same_standard(
     db: Path, tmp_path: Path
 ) -> None:
@@ -277,3 +290,20 @@ def test_the_output_says_what_it_is_not(db: Path, tmp_path: Path) -> None:
     lowered = _text(result).lower()
     assert "weights only" in lowered
     assert "kill switch" in lowered
+
+
+def test_the_output_names_where_the_data_ends(db: Path, tmp_path: Path) -> None:
+    """as_of comes from the last bar, not from the requested window, so the
+    report shows both rather than letting the request stand in for the data.
+    The end date here (2020-01-01) is bar-exclusive, so the data stops the
+    session before it."""
+    out = tmp_path / "books"
+    result = _run(db, out)
+    assert result.exit_code == 0, result.stdout
+    text = _text(result)
+    assert "2015-01-01 -> 2020-01-01 requested" in text
+    assert "the data reaches 2019-12-31" in text
+    assert "the book will be as of 2019-12-31" in text
+
+    payload = json.loads(next(out.glob("*.json")).read_text(encoding="utf-8"))
+    assert payload["as_of"] == "2019-12-31"

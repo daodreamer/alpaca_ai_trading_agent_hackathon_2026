@@ -1457,11 +1457,26 @@ def target_book_cmd(
     strategy the registry knows, whose seal has been spent, and whose sealed run
     did not refute it. Producing one for an undeclared candidate would read the
     embargoed years for a rule that still has an unspent seal, which is the
-    loophole the whole pre-registration protocol exists to close.
+    loophole the whole pre-registration protocol exists to close. And because the
+    sealed run measured the spec's own timeframe, a ``--timeframe`` that diverges
+    from it is refused too: weights built on other bars are not what was
+    validated, whatever the artefact would have claimed.
     """
     with Registry(db) as reg:
         spec, record = _spec_for_handoff(reg, strategy)
         fingerprint = spec.fingerprint()
+
+        if timeframe != spec.universe.timeframe:
+            # The option picks which cache folder is loaded; the book is stamped
+            # with the spec's own timeframe. A divergent pair would stamp "1D"
+            # on weights built from other bars and still carry the sealed
+            # verdict, which was measured on the spec's timeframe only.
+            raise typer.BadParameter(
+                f"--timeframe {timeframe} but {record.name} [{fingerprint}] declares "
+                f"{spec.universe.timeframe}: the sealed run measured the spec's own "
+                "timeframe, so weights built on other bars are not what the seal "
+                "was spent on."
+            )
 
         sealed = reg.sealed_run(fingerprint)
         if sealed is None:
@@ -1524,10 +1539,20 @@ def target_book_cmd(
             universe=universe,
             tolerant=True,
         )
+        loaded_last = max(bars.timestamps[-1].date() for bars in data.values())
         console.print(
             f"{len(data)} of {len(spec.universe.symbols)} symbols, "
-            f"{first.date().isoformat()} -> {last.date().isoformat()}"
+            f"{first.date().isoformat()} -> {last.date().isoformat()} requested; "
+            f"the data reaches {loaded_last.isoformat()}"
         )
+        if loaded_last < last.date():
+            # as_of comes from the data, not the request -- name the session the
+            # book will actually carry rather than letting the requested window
+            # stand in for it.
+            console.print(
+                f"[yellow]the book will be as of {loaded_last.isoformat()}, the last "
+                "session the data holds, not the end that was requested[/yellow]"
+            )
 
         try:
             book = build_target_book(
