@@ -45,8 +45,13 @@ runs/control3/
 # *and* the sealed phase, and that `Bars.__post_init__` taints on sight. Those
 # hold whether or not the rows are in the repository.
 # ---------------------------------------------------------------------- #
-data-sp500/
-data-sp500-sealed/
+# Ignore the contents of the two cache roots but keep the directories
+# themselves in the repo via a tracked `.gitkeep`, so a fresh clone has the
+# layout the code expects and the bars stay only on the local disk.
+data-sp500/*
+data-sp500-sealed/*
+!data-sp500/.gitkeep
+!data-sp500-sealed/.gitkeep
 
 # Not committed: the quality-check rejects. `--keep-suspect` writes them here
 # when a series fails inspection, so they are a diagnostic byproduct rather than

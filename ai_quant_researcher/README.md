@@ -470,6 +470,22 @@ trading in between.
 
 ## Data you can research on
 
+**The bar caches are not in git.** `data-sp500/` and `data-sp500-sealed/`
+together are over a gigabyte, so they live outside the repository (local disk
+or cloud storage) and are listed in `.gitignore`. A fresh clone has the code
+and the universe file (`data-universes/sp500_pit.json`) but no bars. To rebuild
+them, point your Alpaca credentials at the repo (`.env.local`) and run the
+driver, which pulls 1h for both caches and resamples it into 4h:
+
+```
+uv run python ../scripts/pull_sp500_intraday.py --timeframe all
+```
+
+`data-sp500/` is truncated at the embargo (the search window);
+`data-sp500-sealed/` holds the full history (the sealed window). The two are
+kept disjoint — the research cache ends the session before the sealed cache
+begins — so a strategy is never tuned and validated on the same bar.
+
 A backtest is arithmetic performed on whatever you hand it, and it cannot tell
 the difference between a market and a hole in a file. So every pull is checked
 before it is cached, and the sources are checked against each other.
