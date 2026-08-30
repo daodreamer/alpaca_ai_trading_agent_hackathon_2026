@@ -506,9 +506,15 @@ cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
     --universe sp500_pit --csv-root data-sp500 --timeframes "1D,1h,4h"
 uv run aqr experiments                      # 试过什么，赢的和输的都在
-uv run aqr preregister FINGERPRINT          # 在读 sealed 数据之前先申报候选
+uv run aqr registry --status PAPER          # ACCEPT verdict 会落到这里，含 fingerprint
+uv run aqr preregister --rule "..." FINGERPRINT   # 在读 sealed 数据之前先申报候选
 uv run python -m aqr.cli_sealed run FINGERPRINT   # 花掉唯一那一次机会
+uv run aqr target-book FINGERPRINT          # 写出 handoff 文件
 ```
+
+`--rule` 文本是必填的，会随申报一起记录：它是你对“如何选中该候选”的陈述，
+属于多重比较 accounting 的一部分。`aqr preregistered` 列出已申报的候选以及
+它们的 seal 是否已被花掉。
 
 `--timeframes` 让每个假设自己选 bar 粒度——日线、小时线或 4 小时线；
 在 PowerShell 下要给值加引号，否则 `1D` 会被当成十进制数字字面量、

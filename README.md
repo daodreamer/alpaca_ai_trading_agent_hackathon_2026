@@ -554,9 +554,16 @@ cd ai_quant_researcher
 uv run aqr research --provider deepseek --iterations 40 --source csv \
     --universe sp500_pit --csv-root data-sp500 --timeframes "1D,1h,4h"
 uv run aqr experiments                      # what has been tried, winners and losers
-uv run aqr preregister FINGERPRINT          # declare a candidate before reading sealed data
+uv run aqr registry --status PAPER          # ACCEPT verdicts land here, with fingerprints
+uv run aqr preregister --rule "..." FINGERPRINT   # declare a candidate before reading sealed data
 uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
+uv run aqr target-book FINGERPRINT          # write the handoff file
 ```
+
+The `--rule` text is required and is recorded with the pre-registration: it is
+your statement of how the candidate was selected, which is part of the
+multiplicity accounting. `aqr preregistered` lists declared candidates and
+whether their seal has already been spent.
 
 `--timeframes` lets each hypothesis pick its own bar granularity — daily,
 hourly or 4-hour; quote the value on PowerShell, which otherwise reads `1D`

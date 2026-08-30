@@ -77,9 +77,15 @@ uv run aqr backtest examples/trend_pullback.yaml
 uv run aqr walkforward examples/trend_pullback.yaml
 uv run aqr evaluate examples/trend_pullback.yaml
 uv run aqr research --iterations 8           # the loop, offline, no API key
+uv run aqr research --iterations 40 --provider deepseek \
+    --source csv --universe sp500_pit --csv-root data-sp500 \
+    --timeframes "1D,1h,4h"                   # real bars; model picks a granularity
 uv run aqr experiments                       # what has been tried
+uv run aqr registry --status PAPER           # ACCEPT verdicts land here, with fingerprints
 uv run aqr seal-check                        # prove the research cache holds no embargoed bars
 uv run aqr costs --positions 110             # what one order costs, under each schedule
+uv run aqr preregister --rule "..." FINGERPRINT   # declare before reading sealed data
+uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
 uv run aqr target-book FINGERPRINT           # the handoff. Nothing here places it
 ```
 
@@ -975,6 +981,48 @@ The stored result carries the measurement, the seal certificate, the declaration
 and the ancestry report, so the run can be audited without trusting this
 paragraph.
 
+## How to validate your own ACCEPT strategy on sealed data
+
+A strategy that scored `ACCEPT` in the research loop is recorded in the registry
+with status `PAPER`. The sealed window is the out-of-sample test you have not
+yet run; spending the seal on it is the only way to turn an in-sample claim into
+a measurement that counts.
+
+```bash
+# 1. Find the candidate(s). The registry is the source of truth for fingerprints.
+uv run aqr registry --status PAPER --limit 20
+
+# 2. Make sure the sealed cache exists for the strategy's timeframe.
+#    This is the full-history cache; it is not the research cache.
+uv run python -m aqr.cli_sealed pull --timeframe 1D
+
+# 3. Pre-register the candidate. Do this in a separate command, before any
+#    sealed bar is read, so the declaration is recorded untainted.
+uv run aqr preregister --rule "highest Sharpe of the 40-hypothesis campaign" \
+    --db runs/research.sqlite \
+    FINGERPRINT
+
+# 4. Spend the seal. Run this in a separate process from the declaration.
+#    Use the same timeframe the strategy was researched on.
+uv run python -m aqr.cli_sealed run FINGERPRINT --timeframe 1D --db runs/research.sqlite
+
+# 5. If the sealed run does not refute it, write the target book.
+#    target-book refuses unless the seal has been spent and the sealed run passed.
+uv run aqr target-book FINGERPRINT --timeframe 1D --db runs/research.sqlite
+```
+
+Key rules:
+
+- A fingerprint can only be pre-registered once and its seal can only be spent
+  once. Re-running the same rule to get a better number is explicitly refused.
+- The sealed run and the target book must use the same timeframe as the strategy
+  spec (`1D`, `1h`, or `4h`). If the strategy was researched on `1h` bars, pull
+  and run sealed data with `--timeframe 1h`.
+- `aqr preregistered` lists every declared candidate and whether its seal has
+  already been spent.
+- If you want to retire or reject a candidate without spending the seal, use
+  `uv run aqr promote FINGERPRINT REJECTED --reason "..."`.
+
 ## What a trade costs depends on how many names you hold
 
 The cost model was calibrated for a three-position event-driven book. The
@@ -1125,9 +1173,9 @@ that are here.
 ## Development
 
 ```bash
-uv run pytest                    # 973 tests, all offline, all deterministic
-uv run ruff check .
-uv run mypy
+uv run pytest                    # 1021 tests, all offline, all deterministic
+uv run ruff check src tests
+uv run mypy src
 ```
 
 The suite is fast and hermetic by design. A test that reaches the network fails
