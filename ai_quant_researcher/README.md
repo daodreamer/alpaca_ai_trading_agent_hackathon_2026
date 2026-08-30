@@ -1018,6 +1018,22 @@ Key rules:
 - The sealed run and the target book must use the same timeframe as the strategy
   spec (`1D`, `1h`, or `4h`). If the strategy was researched on `1h` bars, pull
   and run sealed data with `--timeframe 1h`.
+- **Warm-up history must be in the sealed cache.** `measure_sealed_window`
+  expects `data-sp500-sealed/` to contain bars well before the embargo so
+  indicators like `ema(200)` are warm before the first sealed session. The
+  `cli_sealed run` output shows both the *requested* warm-up date and the
+  *actual* earliest bar in the cache; if it says "actual earliest bar
+  2024-08-28 (3 sessions before embargo)", your sealed cache is too short and
+  long-lookback features are cold-starting. Fix it by rebuilding with full
+  history:
+  ```bash
+  uv run python -m aqr.cli_sealed pull --timeframe 1D --start 2016-01-01 --force
+  ```
+  (`python scripts/pipeline.py refresh` does the same for the daily book path.)
+  `scripts/pull_sp500_intraday.py` deliberately pulls a shorter sealed window
+  (from 2024-06-01) to keep intraday downloads small; it is fine for short-
+  lookback intraday strategies but not for daily strategies with 200-bar
+  lookbacks.
 - `aqr preregistered` lists every declared candidate and whether its seal has
   already been spent.
 - If you want to retire or reject a candidate without spending the seal, use

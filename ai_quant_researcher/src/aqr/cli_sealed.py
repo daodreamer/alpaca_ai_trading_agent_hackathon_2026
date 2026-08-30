@@ -320,10 +320,25 @@ def run(
         )
         membership = load_point_in_time(universe) if is_point_in_time(universe) else None
         data = _load_sealed(spec, csv_root, timeframe, first, last)
+        actual_first_ts = min(int(bars.event_time[0]) for bars in data.values())
+        actual_first = datetime.fromtimestamp(actual_first_ts, tz=UTC)
+        primary = next(iter(data))
+        warmup_sessions = sum(
+            1 for t in data[primary].event_time if t < EMBARGO_START.timestamp()
+        )
         console.print(
             f"{len(data)} of {len(spec.universe.symbols)} symbols loaded from "
-            f"{csv_root}, warm-up from {first.date().isoformat()}"
+            f"{csv_root}, requested warm-up from {first.date().isoformat()}, "
+            f"actual earliest bar {actual_first.date().isoformat()} "
+            f"({warmup_sessions} sessions before embargo)"
         )
+        if actual_first > EMBARGO_START - timedelta(days=WARMUP_DAYS):
+            console.print(
+                f"[yellow]warning: sealed cache starts only "
+                f"{(EMBARGO_START - actual_first).days} days before the embargo; "
+                f"long-lookback features may be cold-started. "
+                f"Rebuild with `aqr-sealed pull --start 2016-01-01 --force`.[/yellow]"
+            )
 
         # This reading's ordinal, counted before it is recorded. One-shot is per
         # candidate, not per window: a new hypothesis is entitled to its own
