@@ -85,3 +85,15 @@ data-sp500-suspect/
 # non-corrections. It is source, not cache -- nothing regenerates it, and
 # without it `--universe sp500_pit` does not resolve.
 !data-universes/
+
+# Also NOT ignored: data-benchmark/ holds one file, SPY 1D. The other two cache
+# roots are excluded for their size -- 1.3 GB between them -- and this one is
+# 280 KB, so `scripts/report_benchmark.py` runs from a fresh clone rather than
+# needing a pull first.
+#
+# It does hold bars past the embargo, and that is fine for the same reason
+# stated above: the seal was never protection-by-obscurity. A strategy cannot
+# reach these rows by accident because no universe resolves to this root and
+# `SPY` is not a member of `sp500_pit`, and a strategy that named the root
+# explicitly would still be running under a `ResearchProvider` that clamps.
+!data-benchmark/

@@ -1,0 +1,30 @@
+{
+  "name": "benchmark_spy",
+  "source": {
+    "method": "hand-written; SPY is not a point-in-time membership question",
+    "note": "This is a reporting benchmark, not a research universe. Nothing is searched over it and no strategy may name it: it exists so `aqr-sealed pull` has a universe file to read, because the sealed entry point deliberately takes no --symbols. The cap-weighted index return is what a reader wants to compare against and it is not reconstructible from the constituent OHLCV in data-sp500/ -- there is no market-cap column anywhere in this project -- so the series has to be fetched as its own ticker."
+  },
+  "window": {
+    "start": "2016-01-01",
+    "end": "2026-08-31"
+  },
+  "counts": {
+    "members": 1
+  },
+  "corrections": [],
+  "not_corrected": [],
+  "unresolved": [],
+  "built_at": "2026-08-31T00:00:00+00:00",
+  "members": [
+    {
+      "ticker": "SPY",
+      "name": "SPDR S&P 500 ETF Trust",
+      "intervals": [
+        {
+          "from": "2016-01-01",
+          "to": null
+        }
+      ]
+    }
+  ]
+}

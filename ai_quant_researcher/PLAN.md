@@ -21,6 +21,14 @@ returned `t +2.22` and does not clear the bar it would face today; it is no
 longer the pinned strategy. Nothing about any of this upgrades the deflated
 Sharpe, which for `v5` is 0.74 after 411 trials.
 
+**Against SPY rather than against the universe**, the excess return is +9.8pp,
+not +22.9pp: SPY buy-and-hold returned +42.05% over the same 498 sessions where
+the equal-weight universe returned +29.02%. The gap between the two benchmarks is
+cap-weighting, and it is most of the headline. What survives the switch is the
+risk side -- maxDD -3.7% against -18.8%, Sharpe +2.22 against +1.16.
+`scripts/report_benchmark.py` prints all three rows; the SPY row is for reading
+and feeds no verdict.
+
 Phase 4 is done: `aqr target-book` writes a target book off the same
 `run_strategy` path the sealed run used, refuses to write one for a candidate
 whose seal is unspent or whose sealed run refuted it, and records it in the

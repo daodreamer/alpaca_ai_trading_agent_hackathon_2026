@@ -366,7 +366,30 @@ That window **was not refuted**, which is the strongest verdict 498 sessions can
 produce — `can_confirm` is `False` by construction, because the standard error
 on an annualised Sharpe there is about ±0.71. The sealed window has now been
 opened five times, so the significance bar it had to clear was raised to 2.576
-accordingly; `t +2.94` clears it. The researcher writes the weights
+accordingly; `t +2.94` clears it.
+
+**Against the index rather than against the universe.** The benchmark in that
+block is the equal-weight return of all 680 point-in-time names, which is the
+right thing to regress residual alpha against — it is the exposure the strategy
+actually ran. It is not what a reader means by "the market", and over this
+window the difference is large:
+
+```
+sealed window 2024-09-03 → 2026-08-27          return   sharpe    maxDD
+  low_vol_rs_carry_v5                          +51.88%    +2.22    -3.7%
+  the 680 names, equal weight                  +29.02%    +0.91
+  SPY, buy and hold                            +42.05%    +1.16   -18.8%
+```
+
+So the honest headline is **+9.8pp over buying the index**, not the +22.9pp the
+internal benchmark implies: 2024-09 through 2026-08 was led by the largest names
+and cap-weighting caught most of what equal-weighting missed. Where the strategy
+is not close is risk — half the drawdown at nearly twice the Sharpe.
+
+`python scripts/report_benchmark.py` prints that table. The third row is for
+reading only; `SealedMeasurement` keeps regressing against the equal-weight
+series, because swapping the benchmark would change what `alpha` and `beta` mean
+in every record already stored. The researcher writes the weights
 it holds to a file and stops. AlphaGate reads that file, prices it, gates every
 resulting order, and places what survives.
 

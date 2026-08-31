@@ -978,7 +978,38 @@ five times. The bar moved and the earlier result did not move with it.
 
 What this does **not** upgrade: the deflated Sharpe is 0.74 after 411 trials, and
 the search denominator is now 414 distinct hypotheses. A sealed window that
-cannot confirm cannot repair a search that was wide. And the seal proves the embargoed *data* was not read; it cannot prove the
+cannot confirm cannot repair a search that was wide.
+
+### The benchmark in that block is not the index
+
+`benchmark_returns()` is the equal-weight return of all 680 point-in-time names.
+That is the correct regressor for residual alpha — it is the exposure the rule
+actually ran, over the same universe, so `beta` means something. It is not the
+index, and over this window the two are far apart:
+
+```
+                                               return   sharpe    maxDD
+low_vol_rs_carry_v5                           +51.88%    +2.22    -3.7%
+the 680 names, equal weight                   +29.02%    +0.91
+SPY, buy and hold                             +42.05%    +1.16   -18.8%
+```
+
+2024-09 through 2026-08 was led by the largest names, so cap-weighting caught
+most of what equal-weighting missed. Reported against the index the excess return
+is **+9.8pp, not +22.9pp** — and the part that does not shrink is the risk: a
+-3.7% drawdown against -18.8%, at nearly twice the Sharpe.
+
+`python scripts/report_benchmark.py` prints it, reading SPY from
+`data-benchmark/` — a root of its own, pulled through `aqr-sealed pull` with the
+one-member universe file `data-universes/benchmark_spy.json`, because the sealed
+entry point takes no `--symbols` and the cap-weighted return is not
+reconstructible from constituent OHLCV. There is no market-cap column anywhere in
+this project.
+
+The third row feeds nothing. `SealedMeasurement` still regresses against the
+equal-weight series: swapping the benchmark would silently change what `alpha`
+and `beta` mean in every record already stored, and a comparison that rewrites
+history to look better is the failure this whole apparatus exists to prevent. And the seal proves the embargoed *data* was not read; it cannot prove the
 embargoed *period* did not inform a decision, since the researcher lived through
 it and every model in `aqr providers` has a training cutoff after it. The
 certificate records that exposure under `knowledge_exposure` rather than denying
