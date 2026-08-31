@@ -481,6 +481,13 @@ trading in between.
 
 ## Data you can research on
 
+**Option chains have their own document.** `aqr options-pull` caches free
+end-of-day chains, greeks and IV history from a public DoltHub database —
+neither Alpaca nor IBKR will serve them to this account, and the measured
+coverage, the gaps and the reasons are in
+[OPTIONS_DATA.md](OPTIONS_DATA.md). Everything below is about bars.
+
+
 **The bar caches are not in git.** `data-sp500/` and `data-sp500-sealed/`
 together are over a gigabyte, so they live outside the repository (local disk
 or cloud storage) and are listed in `.gitignore`. A fresh clone has the code

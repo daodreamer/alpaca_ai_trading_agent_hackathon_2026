@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -47,6 +48,17 @@ from aqr.data.ibkr import (
     probe_durations,
     probe_requests,
 )
+from aqr.data.option_embargo import (
+    audit_option_root,
+    split_at_embargo,
+    write_option_canary,
+)
+from aqr.data.options_chain import (
+    CHAIN_COLUMNS,
+    VOLATILITY_COLUMNS,
+    download_table,
+    split_table,
+)
 from aqr.data.providers import CsvProvider, Provider, SyntheticProvider, YFinanceProvider
 from aqr.data.quality import inspect as inspect_bars
 from aqr.data.universes import (
@@ -65,7 +77,7 @@ from aqr.features.regime import regime_series
 from aqr.features.registry import REGISTRY
 from aqr.pipeline import evaluate_candidate
 from aqr.registry.db import PreregistrationError, Registry, StrategyRecord
-from aqr.seal import EMBARGO_START
+from aqr.seal import CANARY_SYMBOL, EMBARGO_START
 from aqr.seal import current as current_seal
 from aqr.target_book import build_target_book, write_book
 from aqr.validation.holdout import run_holdout
@@ -172,6 +184,8 @@ def _dataset_version(provider: Provider, source: str, start: str, end: str, time
 
 
 DEFAULT_CSV_ROOT = "data-sp500"
+DEFAULT_OPTIONS_ROOT = "data-options"
+DEFAULT_OPTIONS_SEALED_ROOT = "data-options-sealed"
 
 
 def _csv_root_for(universe: str, csv_root: str) -> str:
@@ -474,10 +488,21 @@ def pull(
     feed: str = typer.Option(
         "sip", help="Alpaca feed. 'sip' is the consolidated tape; 'iex' is one sparse venue."
     ),
+    adjustment: str = typer.Option(
+        "all",
+        help="Alpaca price adjustment: all, split, dividend or raw. 'all' is right for "
+        "equity research, where an unadjusted split is a -75% return that never "
+        "happened. It is WRONG for an options underlying: strikes are set in raw "
+        "terms and do not move for an ordinary dividend, so an adjusted close "
+        "compared against a strike reports a moneyness the trade never had. Use "
+        "'raw' for anything that will be settled against an option contract.",
+    ),
     start: str = typer.Option(DEFAULT_START),
     end: str = typer.Option(DEFAULT_END),
     timeframe: str = typer.Option("1D", help="1m, 5m, 15m, 30m, 1h, 1D or 1W."),
-    csv_root: str = typer.Option(DEFAULT_CSV_ROOT, help="Cache root: <root>/<timeframe>/<symbol>.csv."),
+    csv_root: str = typer.Option(
+        DEFAULT_CSV_ROOT, help="Cache root: <root>/<timeframe>/<symbol>.csv."
+    ),
     force: bool = typer.Option(False, help="Refetch symbols already cached."),
     keep_suspect: bool = typer.Option(
         False, help="Cache series that failed the quality check anyway. Say why in the journal."
@@ -519,7 +544,7 @@ def pull(
     else:
         requested = _universe(universe, symbols, universe_limit)
     if source == "alpaca":
-        provider: Provider = AlpacaProvider(feed=feed)
+        provider: Provider = AlpacaProvider(feed=feed, adjustment=adjustment)
     else:
         provider = _provider(
             source,
@@ -1636,6 +1661,224 @@ def target_books_cmd(
             row["path"],
         )
     console.print(table)
+
+
+@app.command("options-pull")
+def options_pull(
+    universe_file: str = typer.Option(
+        "data-universes/sp500_pit.json",
+        help="Point-in-time universe JSON. Every ticker ever a member, which is "
+        "the point: a pull driven by today's members is missing exactly the "
+        "names whose absence created the survivorship bias.",
+    ),
+    symbols: str = typer.Option(
+        "SPY,QQQ,IWM",
+        help="Extra symbols to keep, on top of the universe file. Defaults to the "
+        "liquid index ETFs, which a membership file cannot contain and which are "
+        "the densest option chains listed.",
+    ),
+    root: str = typer.Option(DEFAULT_OPTIONS_ROOT, help="Cache root."),
+    table: str = typer.Option(
+        "both", help="option_chain, volatility_history, or both."
+    ),
+    skip_download: bool = typer.Option(
+        False,
+        help="Split a vendor file already on disk. The download is the hour; the "
+        "split is a minute, so a change to the splitting logic must not cost a "
+        "second transfer.",
+    ),
+) -> None:
+    """Cache free end-of-day option chains from DoltHub, filtered to the universe.
+
+    Two phases, because the CSV endpoint reports no size, refuses HEAD and
+    honours no Range header -- all three confirmed against the live service, so
+    a transfer that dies at minute fifty cannot be resumed. Phase one only moves
+    bytes, into ``<root>/_raw/<table>.csv.gz``. Phase two splits that local file
+    into ``<root>/<table>/<symbol>.csv`` and may be re-run freely.
+
+    This is a network command, like ``pull``, and for the same reason: every
+    later run reads the cache, so a research result is reproducible rather than
+    dependent on what the vendor is serving today.
+
+    The data is end-of-day only. There is no 1h or 4h option data here, and none
+    is available free anywhere -- ``aqr`` researches options on daily bars or
+    not at all.
+    """
+    extra = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    wanted = _symbols_from_universe_file(universe_file, extra)
+    if not wanted:
+        raise typer.BadParameter("the universe is empty; nothing would be kept")
+
+    tables: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("option_chain", CHAIN_COLUMNS),
+        ("volatility_history", VOLATILITY_COLUMNS),
+    )
+    if table != "both":
+        tables = tuple(t for t in tables if t[0] == table)
+        if not tables:
+            raise typer.BadParameter(
+                f"unknown table {table!r}: option_chain, volatility_history or both"
+            )
+
+    base = Path(root)
+    console.print(f"universe: [bold]{len(wanted)}[/bold] symbols from {universe_file}")
+
+    for name, required in tables:
+        raw = base / "_raw" / f"{name}.csv.gz"
+        console.print("")
+        console.print(f"[bold]{name}[/bold]")
+
+        if skip_download:
+            if not raw.exists():
+                raise typer.BadParameter(f"--skip-download but {raw} is not there")
+            console.print(f"  reusing {raw} ({raw.stat().st_size / 1e6:.0f} MB on disk)")
+        else:
+            console.print(f"  downloading -> {raw}  (no size is reported; this is the slow half)")
+
+            def progress(read: int, seconds: float) -> None:
+                console.print(
+                    f"    {read / 1e9:6.2f} GB in {seconds / 60:5.1f} min"
+                    f"  ({read / 1e6 / seconds:.1f} MB/s)"
+                )
+
+            got = download_table(name, raw, open_stream=_csv_stream, on_progress=progress)
+            console.print(
+                f"  downloaded {got.bytes_read / 1e9:.2f} GB in {got.seconds / 60:.1f} min"
+                f"  ({got.rate_mb_s:.1f} MB/s)"
+            )
+
+        out = base / name
+        console.print(f"  splitting -> {out}/<symbol>.csv")
+        result = split_table(raw, out, symbols=wanted, required_columns=required)
+        console.print(
+            f"  kept [bold]{result.rows_kept:,}[/bold] of {result.rows_read:,} rows"
+            f"  across [bold]{len(result.symbols)}[/bold] symbols"
+        )
+        console.print(f"  window {result.first_date} .. {result.last_date}")
+        if result.malformed_rows:
+            console.print(f"  [yellow]{result.malformed_rows} malformed rows skipped[/yellow]")
+        skipped = sorted(result.unknown_symbols)
+        console.print(
+            f"  {len(skipped)} symbols in the file the universe did not name"
+            + (f" (e.g. {', '.join(skipped[:6])})" if skipped else "")
+        )
+        missing = sorted(set(wanted) - result.symbols)
+        console.print(
+            f"  {len(missing)} universe symbols the vendor has no rows for"
+            + (f" (e.g. {', '.join(missing[:6])})" if missing else "")
+        )
+
+
+def _csv_stream(url: str) -> Any:
+    """The one place this command reaches a network. Streamed, never buffered.
+
+    Returns the context manager `httpx.stream` gives back rather than a typed
+    handle: what `download_table` needs from it is `iter_bytes`, which is the
+    whole of its `ByteStream` Protocol, and naming httpx's own response type
+    here would make the module import httpx to be type-checked.
+    """
+    import httpx
+
+    return httpx.stream("GET", url, timeout=120.0, follow_redirects=True)
+
+
+@app.command("options-embargo")
+def options_embargo(
+    symbols: str = typer.Option("SPY", help="Symbols to keep. Everything else is deleted."),
+    root: str = typer.Option(DEFAULT_OPTIONS_ROOT, help="Research cache root."),
+    sealed_root: str = typer.Option(
+        DEFAULT_OPTIONS_SEALED_ROOT, help="Sealed cache root: the full history."
+    ),
+    prune: bool = typer.Option(
+        True, help="Delete cached symbols outside --symbols. specs/07 D2 trades one name."
+    ),
+) -> None:
+    """Split the option cache at the embargo and arm the tripwires.
+
+    The research root is truncated on disk at ``EMBARGO_START``; the sealed root
+    keeps everything. That physical separation is the lock that survives being
+    called from somewhere nobody reviewed -- the rows are simply not there.
+
+    Re-runnable. It reads the sealed root when one exists, so the split can be
+    redone after a re-pull without another download.
+    """
+    keep = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not keep:
+        raise typer.BadParameter("keep at least one symbol")
+
+    research, sealed = Path(root), Path(sealed_root)
+    console.print(f"embargo: [bold]{EMBARGO_START.date()}[/bold]  keeping {', '.join(keep)}")
+
+    for table, _cols in (("option_chain", None), ("volatility_history", None)):
+        console.print(f"[bold]{table}[/bold]")
+        for symbol in keep:
+            # Prefer the sealed copy: it is the untruncated one, so a re-run
+            # after an earlier split does not truncate an already-truncated file.
+            source = sealed / table / f"{symbol}.csv"
+            if not source.exists():
+                source = research / table / f"{symbol}.csv"
+            if not source.exists():
+                console.print(f"  [yellow]{symbol}: no cache, skipped[/yellow]")
+                continue
+            result = split_at_embargo(
+                source,
+                symbol=symbol,
+                table=table,
+                research_root=research,
+                sealed_root=sealed,
+            )
+            console.print(
+                f"  {symbol}: research {result.research_rows:,} rows to {result.research_last}"
+                f"  |  sealed {result.sealed_rows:,} rows to {result.sealed_last}"
+            )
+        armed = write_option_canary(research, table)
+        console.print(f"  canary armed: {armed}")
+
+        if prune:
+            removed = 0
+            for path in sorted((research / table).glob("*.csv")):
+                if path.stem in keep or path.stem == CANARY_SYMBOL:
+                    continue
+                path.unlink()
+                removed += 1
+            for path in sorted((sealed / table).glob("*.csv")):
+                if path.stem in keep:
+                    continue
+                path.unlink()
+                removed += 1
+            if removed:
+                console.print(f"  pruned {removed} files outside the universe")
+
+    # The two roots are audited against opposite expectations, and saying so is
+    # the point. Past-embargo rows in the research root are contamination; in
+    # the sealed root they are the entire reason it exists, and reporting them
+    # under the same word would teach a reader to ignore the word.
+    for label, base, embargoed_rows_expected in (
+        ("research", research, False),
+        ("sealed", sealed, True),
+    ):
+        audit = audit_option_root(base)
+        if embargoed_rows_expected:
+            state = (
+                f"holds the reserved window ({', '.join(audit.offenders)})"
+                if audit.offenders
+                else "[yellow]EMPTY of reserved rows — the sealed window is not there[/yellow]"
+            )
+        else:
+            state = (
+                "clean"
+                if audit.clean
+                else f"[red]CONTAMINATED: {', '.join(audit.offenders)}[/red]"
+            )
+        console.print("")
+        console.print(f"{label:8} {base}")
+        console.print(
+            f"         {audit.files} files, {audit.rows:,} rows, latest {audit.latest}"
+        )
+        console.print(
+            f"         {state}"
+            + (f", canary in {', '.join(audit.canary_tables)}" if audit.canary_present else "")
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -115,3 +115,35 @@ data-sp500-suspect/
 # `SPY` is not a member of `sp500_pit`, and a strategy that named the root
 # explicitly would still be running under a `ResearchProvider` that clamps.
 !data-benchmark/
+
+# ---------------------------------------------------------------------- #
+# Option chains, from DoltHub's free post-no-preference/options.
+#
+#   data-options/_raw/               the vendor CSVs, gzipped, as downloaded
+#   data-options/option_chain/       per-symbol EOD chains, filtered to the universe
+#   data-options/volatility_history/ per-symbol iv/hv history -- where IV rank comes from
+#
+# Ignored for the same reason the bar caches are: `aqr options-pull` rebuilds
+# all of it from a public source, and the raw table alone is measured in
+# gigabytes. `.gitkeep` keeps the shape so the command has somewhere to land.
+# The canaries ARE tracked, exactly as `data-sp500/`'s are: a tripwire that a
+# fresh clone does not have is a tripwire that is not armed, and they are
+# synthetic (every price and greek 1) so nothing real is committed.
+data-options/*
+!data-options/*/
+data-options/*/*
+!data-options/*/__CANARY__.csv
+!data-options/.gitkeep
+data-options-sealed/*
+!data-options-sealed/.gitkeep
+
+# The underlying, for the options research window. Its own root on purpose:
+# `data-sp500/` is the point-in-time membership cache and SPY is not a member
+# of it, and `data-options/` is audited by `audit_option_root`, which reads a
+# `date` column that a bar file does not have. A third root keeps both of those
+# statements true. Ignored because one `aqr pull --symbols SPY` rebuilds it, and
+# it is clamped at the embargo by `ResearchProvider` like every other research
+# pull -- the sealed years live in `data-options-underlying-sealed/`, written by
+# the sealed entry point and never by this one.
+data-options-underlying/
+data-options-underlying-sealed/

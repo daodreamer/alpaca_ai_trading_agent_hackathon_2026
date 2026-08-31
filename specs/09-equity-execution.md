@@ -12,7 +12,11 @@ aqr research → walk-forward → pre-register → sealed run → target book (a
                                                 journal + status.json → dashboard
 ```
 
-Spec 08 stays reserved for the options backtest. This is the equity path, and it
+The options backtest is [10-options-research.md](10-options-research.md); it did
+not take number 08 because twenty docstrings under `backend/core/trend_engine/`
+already cite `specs/08-trend.md`, a spec that was never written, and a file at
+that number would resolve every one of them to the wrong document. This is the
+equity path, and it
 exists because [`ai_quant_researcher/`](../ai_quant_researcher/) produces a
 validated *equities* strategy and then stops — deliberately. Its
 `CONSUMER_MUST_SUPPLY` names six things it will not do, and every one of them is

@@ -29,7 +29,7 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "aqr"
 
-PURE_LAYERS = ("core", "features", "dsl", "backtest", "validation", "evaluator")
+PURE_LAYERS = ("core", "features", "dsl", "backtest", "validation", "evaluator", "options")
 
 LLM_MODULES = {"anthropic", "openai", "google", "cohere", "mistralai", "ollama", "litellm"}
 
