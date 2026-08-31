@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from aqr.options.chain import ChainIndex
+from aqr.options.engine import GREEK_CONSISTENCY_TOLERANCE
 from aqr.seal import EMBARGO_START
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -332,3 +334,56 @@ def test_the_chain_and_the_underlying_agree_on_what_spy_costs() -> None:
         "The two caches are in different price spaces -- most likely the underlying "
         "was pulled with a dividend adjustment. Re-pull with `--adjustment raw`."
     )
+
+
+# --------------------------------------------------------------------------- #
+# The greeks state their own spot too, and four sessions get it wrong (D2b)
+# --------------------------------------------------------------------------- #
+
+
+def test_exactly_four_sessions_have_greeks_computed_against_the_wrong_spot() -> None:
+    """D2a checked that the chain's *prices* agree with the bar close. Prices
+    passing does not mean the *greeks* are right -- delta, vol and the rest are
+    a separate computation the vendor could get wrong even with the quotes
+    intact, and on four sessions it did: 2021-11-12, -17, -19 and -22 have
+    every greek computed against an underlying about 10% below the real one.
+
+    The measurement: for each session, take the call nearest 0.50 delta in
+    each expiry, then the median of those strikes across the session's
+    expiries -- ``SessionChain.delta_implied_spot()``. Divided by the
+    reference close, 749 of 753 sessions land within 4% of 1.0 (p1 0.995, p99
+    1.002) and these four land at 0.898-0.901. Nothing else in the cache is
+    close to that gap, which is what makes a single threshold
+    (``GREEK_CONSISTENCY_TOLERANCE`` in ``options/engine.py``) a sound guard
+    rather than a guess: it must exclude exactly these four sessions and no
+    others, asserted here directly against the cache rather than against the
+    hand-built fixture in ``test_option_engine.py``.
+    """
+    if not UNDERLYING.exists():
+        pytest.skip("no underlying cache")
+    closes = {
+        datetime.fromisoformat(row["timestamp"]).date(): float(row["close"])
+        for row in _rows(UNDERLYING)
+    }
+    trading_days = sorted(closes)
+    index = ChainIndex.from_rows(_rows(CHAIN))
+
+    flagged = []
+    for session in index.sessions:
+        at = bisect_right(trading_days, session) - 1
+        if at < 0 or (session - trading_days[at]).days > 4:
+            continue
+        reference_close = closes[trading_days[at]]
+        implied = index[session].delta_implied_spot()
+        if implied is None:
+            continue
+        ratio = implied / reference_close
+        if abs(ratio - 1.0) > GREEK_CONSISTENCY_TOLERANCE:
+            flagged.append(session)
+
+    assert flagged == [
+        date(2021, 11, 12),
+        date(2021, 11, 17),
+        date(2021, 11, 19),
+        date(2021, 11, 22),
+    ]

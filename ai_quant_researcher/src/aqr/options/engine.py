@@ -37,6 +37,7 @@ curve the beta and the drawdown that cash accounting destroys.
 from __future__ import annotations
 
 from bisect import bisect_right
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -46,9 +47,9 @@ import numpy as np
 from aqr.backtest.engine import BacktestResult, Trade
 from aqr.data.bars import Bars
 from aqr.dsl.expr import evaluate
-from aqr.features.engine import FeatureFrame
-from aqr.options.chain import ChainIndex, NoSuchContract, Quote, Right, SessionChain
+from aqr.options.chain import ChainIndex, NoSuchContract, Quote, Right, SessionChain, SkipReason
 from aqr.options.costs import IBKR_OPTIONS, OptionCostModel
+from aqr.options.features import OptionFeatureFrame, VolatilityHistory
 from aqr.options.spec import OptionSpec, StructureSpec
 from aqr.options.structure import Leg, Side, Structure
 from aqr.seal import EMBARGO_START
@@ -58,6 +59,9 @@ __all__ = [
     "OptionBacktestConfig",
     "OptionBacktestResult",
     "OptionTrade",
+    "SkipCensus",
+    "SkippedEntry",
+    "affordability_bound_fraction",
     "build_structure",
     "run_option_backtest",
 ]
@@ -67,6 +71,27 @@ MULTIPLIER = 100.0
 
 DAYS_PER_YEAR = 365.0
 """Calendar days, for the mark's time-to-expiry. An option decays on weekends."""
+
+GREEK_CONSISTENCY_TOLERANCE = 0.05
+"""How far :meth:`~aqr.options.chain.SessionChain.delta_implied_spot` may
+disagree with the session's reference close before the session is refused —
+D2b.
+
+Four sessions in the research cache (2021-11-12, -11-17, -11-19, -11-22) have
+greeks the vendor computed against an underlying price about 10% below the
+real one: prices are correct (D2a's parity check passes on them), but a
+contract's delta, and therefore what selecting "16 delta" actually buys, is
+not. Measured across all 753 sessions, ``delta_implied_spot() / reference
+close`` has p1 0.995, p5 0.999, p50 1.000, p95 1.001, p99 1.002, max 1.040 —
+and the four bad sessions sit at 0.898-0.901. The separation is total, so any
+threshold between about 1% and 9% draws the same line; 5% is the middle of
+that band and leaves no margin for a session that is merely noisy to be
+mistaken for one that is wrong.
+
+This is silent by construction, same as the failure D2a catches: nothing
+raises, the backtest runs to completion, and a "16-delta" structure is priced
+and sized around a strike that was never 16 delta against the real spot.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +183,163 @@ class OptionTrade:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class SkippedEntry:
+    """One session the engine declined to enter, with why -- specs/10 D8a.
+
+    Carries the session date as a first-class field rather than leaving it
+    embedded only in ``reason``'s prose, because a consumer that wants to
+    bucket skips by calendar window (``options/walkforward.py``'s fold
+    slicing, the way it already buckets ``OptionTrade.entry_session``) needs
+    the date typed, not parsed back out of a formatted string.
+    """
+
+    session: date
+    category: SkipReason
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class SkipCensus:
+    """Why a run did not trade, counted rather than left to English -- D8a.
+
+    Measured on the real SPY cache, ``put_credit_spread`` / 28 DTE / anchor
+    0.16 / width_delta 0.06 / cadence 5 / ``max_concurrent`` 3, at two
+    sizings:
+
+    ```
+    risk_per_trade   trades   independent cycles   skipped   affordability
+          1%            31            21             598          578
+          5%           148            57              13            0
+    ```
+
+    At 1% of a $100,000 account (D5's own default), the risk budget is
+    $1,000 and this structure's median maximum loss is $892 per contract --
+    right at the edge, so most sessions cannot afford even one contract and
+    the entry is skipped for a reason that has nothing to do with whether the
+    rule is any good. **578 of 598 skips at 1% are affordability, not the
+    market.** The same pathology ``backtest/costs.py``'s module docstring
+    documents for the equity per-order floor: "cost retention ... decides
+    verdicts, and it decides them on ``BacktestConfig.initial_equity``, a
+    number nobody thinks of as a cost parameter." This census is what makes
+    that fact visible here instead of being rediscovered by hand every time a
+    rule's cycle count looks suspiciously low.
+
+    ``skipped_reasons`` on :class:`OptionBacktestResult` stays a flat list of
+    formatted strings -- unchanged, and still the thing to read for the
+    detail of one particular session. This is the thing to read for anything
+    that has to *reason* about why a run did not trade, without parsing
+    English to do it. Both are built from the same
+    :class:`SkippedEntry` list in :func:`run_option_backtest`, so the two
+    views cannot disagree about what happened on a given session.
+    """
+
+    affordability: int = 0
+    """``risk_per_trade`` of realised equity could not cover one contract at
+    the structure's own maximum loss. A property of the account and the
+    sizing rule, never of whether the structure was a good idea."""
+    no_leg_or_wing: int = 0
+    """The ladder that session did not offer a leg (or a sellable wing) at
+    the named delta -- ``NoSuchContract`` from ``chain.py``'s ``select``,
+    ``select_wing`` or ``select_wing_by_delta``, or a ``ValueError`` from
+    ``structure.py`` when the legs selected cannot form a valid structure.
+    Both mean the same thing from the rule's point of view: the day's ladder
+    did not have what was asked for."""
+    no_expiry_in_band: int = 0
+    """No listed expiry sat within ``dte.tolerance`` of ``dte.target`` --
+    ``NoSuchContract`` from ``chain.py``'s ``_expiry_for``. Distinct from
+    ``no_leg_or_wing`` because the two point at different fixes: a rule
+    starved by this one needs a wider DTE tolerance or a different target; a
+    rule starved by that one needs a wider delta tolerance."""
+    greek_consistency: int = 0
+    """D2b's guard: the session's greeks were computed against an
+    underlying price the delta-implied spot disagrees with by more than
+    :data:`GREEK_CONSISTENCY_TOLERANCE`. Four sessions in the research cache
+    (2021-11-12, -17, -19, -22) take this path; the guard exists so a
+    mislabelled "16 delta" is never traded rather than repaired."""
+    embargo_refusal: int = 0
+    """D3: the structure's expiry falls on or after the embargo boundary,
+    so filling it would settle against reserved data. 9 of 753 research
+    sessions at 28 DTE take this path.
+
+    Named ``embargo_refusal`` rather than the shorter ``embargo`` on
+    purpose: ``tests/test_seal.py``'s
+    ``test_the_embargo_is_a_constant_not_a_parameter_of_the_search`` scans
+    every call in this codebase for an ``embargo=`` keyword argument, on the
+    theory that the only reason to pass one is to override
+    ``EMBARGO_START`` -- exactly the loophole that guard exists to close. A
+    dataclass field is not that loophole, but its name is indistinguishable
+    from one to a scanner that only looks at keyword spelling, and
+    ``SkipCensus(embargo=...)`` would have tripped it on every call site
+    that builds this census. The false positive is cheaper to avoid by
+    renaming the field than by teaching the guard to special-case this
+    module."""
+    stale_underlying: int = 0
+    """No trading-day close within ``max_reference_staleness_days`` of the
+    session -- either the *entry* reference (82 of 753 sessions: 2019's
+    Saturday snapshots and market holidays, all within the bound) or the
+    *settlement* reference on the structure's own expiry (742 of 742
+    settleable expiries have one, so this branch is a defensive refusal
+    rather than a measured cost)."""
+
+    @property
+    def total(self) -> int:
+        return (
+            self.affordability
+            + self.no_leg_or_wing
+            + self.no_expiry_in_band
+            + self.greek_consistency
+            + self.embargo_refusal
+            + self.stale_underlying
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        return asdict(self) | {"total": self.total}
+
+    @classmethod
+    def from_entries(cls, entries: list[SkippedEntry]) -> SkipCensus:
+        counts = Counter(entry.category for entry in entries)
+        return cls(
+            affordability=counts.get("affordability", 0),
+            no_leg_or_wing=counts.get("no_leg_or_wing", 0),
+            no_expiry_in_band=counts.get("no_expiry_in_band", 0),
+            greek_consistency=counts.get("greek_consistency", 0),
+            embargo_refusal=counts.get("embargo_refusal", 0),
+            stale_underlying=counts.get("stale_underlying", 0),
+        )
+
+
+def affordability_bound_fraction(census: SkipCensus, num_trades: int) -> float:
+    """D8a's definition of "affordability-bound," the one place it is made.
+
+    Affordability skips as a fraction of the sessions where the engine got
+    far enough to *ask* whether a contract was affordable -- every session
+    that reached the sizing step, whether it went on to open a trade or was
+    turned away for being too small. That denominator is exactly
+    ``census.affordability + num_trades``: everything else in
+    :class:`SkipCensus` (no leg, no expiry, the greek guard, the embargo, a
+    stale reference) is refused *before* sizing is ever computed, so those
+    sessions never had an affordability opinion to contribute one way or the
+    other, and folding them into the denominator would dilute the fraction
+    with sessions that were never in play for this question.
+
+    Not "affordability skips over all skips": a rule that mostly gets no
+    contract because its DTE band is too narrow would report a small
+    fraction under that definition even though every session it *did* reach
+    sizing on was unaffordable, which is the opposite of what a reader needs
+    to know before trusting a cycle count. This definition asks only about
+    the sessions where the account, and nothing else, decided the outcome.
+
+    Measured on the real cache at ``risk_per_trade=0.01`` for
+    ``put_credit_spread`` / 28 DTE / 0.16 anchor / 0.06 width: 578
+    affordability skips against 31 trades is ``578 / (578 + 31) = 94.9%`` --
+    the run in :class:`SkipCensus`'s own docstring, and the reason
+    :data:`~aqr.evaluator.score.AFFORDABILITY_BOUND_THRESHOLD` exists.
+    """
+    reached_sizing = census.affordability + num_trades
+    return census.affordability / reached_sizing if reached_sizing else 0.0
+
+
 @dataclass(slots=True)
 class OptionBacktestResult(BacktestResult):
     """A :class:`BacktestResult`, so every downstream consumer needs no change.
@@ -173,6 +355,14 @@ class OptionBacktestResult(BacktestResult):
     """Why an entry did not happen, in order. A rule that never trades and a
     rule whose every selection was refused look identical in the metrics, and
     telling them apart is most of debugging a spec."""
+    skips: list[SkippedEntry] = field(default_factory=list)
+    """The structured form of ``skipped_reasons``, one :class:`SkippedEntry`
+    per line, in the same order. What ``skip_census`` is built from, and what
+    a fold-level report (``options/walkforward.py``) buckets by session the
+    same way it already buckets ``option_trades``."""
+    skip_census: SkipCensus = field(default_factory=SkipCensus)
+    """``SkipCensus.from_entries(skips)``, computed once here so every reader
+    of this result sees the same counts ``skips`` itself would produce."""
 
 
 # --------------------------------------------------------------------------- #
@@ -227,7 +417,8 @@ def build_structure(spec: StructureSpec, chain: SessionChain) -> Structure:
         other: Side = "buy" if side == "sell" else "sell"
         if other == "sell" and not wing.sellable:
             raise NoSuchContract(
-                f"{chain.session}: the {wing.strike:g} {right} wing has a zero bid"
+                f"{chain.session}: the {wing.strike:g} {right} wing has a zero bid",
+                category="no_leg_or_wing",
             )
         legs.append(Leg(quote=wing, side=other))
     return Structure(kind=spec.type, legs=tuple(legs))
@@ -296,8 +487,17 @@ def run_option_backtest(
     chain: ChainIndex,
     underlying: Bars,
     config: OptionBacktestConfig | None = None,
+    *,
+    volatility: VolatilityHistory | None = None,
 ) -> OptionBacktestResult:
-    """Simulate ``spec`` over ``chain``, settling against ``underlying``."""
+    """Simulate ``spec`` over ``chain``, settling against ``underlying``.
+
+    ``volatility`` is ``volatility_history``, already indexed (specs/10 D6).
+    Optional and keyword-only: an entry that never names an option feature --
+    every equity-shaped spec this engine ran before D6 existed -- needs none of
+    it, and every existing positional call site (``run_option_backtest(spec,
+    chain, bars, config)``) is unaffected by this parameter's addition.
+    """
     config = config or OptionBacktestConfig()
     days = [datetime.fromtimestamp(int(t), tz=UTC).date() for t in underlying.event_time]
     if not days:
@@ -305,13 +505,21 @@ def run_option_backtest(
     closes = np.asarray(underlying.close, dtype=np.float64)
     day_index = {day: i for i, day in enumerate(days)}
 
-    frame = FeatureFrame(underlying)
+    frame = OptionFeatureFrame(underlying, volatility=volatility, chain=chain)
     warmup = frame.warmup(spec.features())
     signal = np.asarray(evaluate(spec.entry_ast, frame), dtype=bool)
     signal[:warmup] = False
 
     opened: list[_Open] = []
-    skipped: list[str] = []
+    skipped: list[SkippedEntry] = []
+
+    def _skip(session: date, category: SkipReason, reason: str) -> None:
+        # The one place a skip enters the record, so ``skipped_reasons`` (the
+        # formatted detail) and ``skip_census`` (the count D8a gates on) are
+        # built from the same list and cannot drift apart -- every other skip
+        # in this loop calls this instead of appending to a bare string list.
+        skipped.append(SkippedEntry(session=session, category=category, reason=reason))
+
     realised = config.initial_equity
     last_entry_at: int | None = None
     settled_by_index: dict[int, float] = {}
@@ -319,8 +527,12 @@ def run_option_backtest(
     for position, session in enumerate(chain.sessions):
         reference = _reference_index(days, session, config.max_reference_staleness_days)
         if reference is None:
-            skipped.append(f"{session}: no underlying close within "
-                           f"{config.max_reference_staleness_days} days")
+            _skip(
+                session,
+                "stale_underlying",
+                f"{session}: no underlying close within "
+                f"{config.max_reference_staleness_days} days",
+            )
             continue
         if reference == 0:
             continue  # nothing closed before it; the decision bar would not exist
@@ -335,22 +547,52 @@ def run_option_backtest(
         if live >= spec.sizing.max_concurrent:
             continue
 
+        session_chain = chain[session]
+        implied_spot = session_chain.delta_implied_spot()
+        if implied_spot is not None:
+            reference_close = closes[reference]
+            ratio = implied_spot / reference_close
+            if abs(ratio - 1.0) > GREEK_CONSISTENCY_TOLERANCE:
+                _skip(
+                    session,
+                    "greek_consistency",
+                    f"{session}: refused, delta-implied ATM strike {implied_spot:g} is "
+                    f"{ratio:.1%} of the reference close {reference_close:,.2f} -- the "
+                    f"chain's greeks look computed against the wrong underlying price (D2b)",
+                )
+                continue
+
         try:
-            structure = build_structure(spec.structure, chain[session])
+            structure = build_structure(spec.structure, session_chain)
         except (NoSuchContract, ValueError) as exc:
-            skipped.append(f"{session}: {exc}")
+            # A plain ValueError (structure.py's own leg-count/strike
+            # invariants) carries no ``category`` attribute; it means the
+            # same thing a ``NoSuchContract`` defaults to -- the day's ladder
+            # did not yield a valid structure -- so it is categorised the
+            # same way rather than left uncounted.
+            category: SkipReason = getattr(exc, "category", "no_leg_or_wing")
+            _skip(session, category, f"{session}: {exc}")
             continue
 
         if structure.expiration >= config.boundary:
-            skipped.append(
+            _skip(
+                session,
+                "embargo_refusal",
                 f"{session}: refused, the structure expires {structure.expiration}, on or "
-                f"after {config.boundary} -- settling it would read the reserved window"
+                f"after {config.boundary} -- settling it would read the reserved window",
             )
             continue
         expiry_index = day_index.get(structure.expiration)
         if expiry_index is None:
-            skipped.append(
-                f"{session}: no underlying close on expiry {structure.expiration}"
+            # Same failure mode as the entry-reference staleness check above,
+            # at the other end of the position: no bar exists to settle
+            # against. specs/10 D0 measures this at 0 of 742 settleable
+            # expiries in the research cache, so it is a defensive refusal
+            # rather than a cost this census expects to see move.
+            _skip(
+                session,
+                "stale_underlying",
+                f"{session}: no underlying close on expiry {structure.expiration}",
             )
             continue
 
@@ -362,9 +604,11 @@ def run_option_backtest(
         risk_per_contract = structure.max_loss * MULTIPLIER
         contracts = int((realised * spec.sizing.risk_per_trade) // risk_per_contract)
         if contracts < 1:
-            skipped.append(
+            _skip(
+                session,
+                "affordability",
                 f"{session}: {spec.sizing.risk_per_trade:.1%} of {realised:,.0f} does not "
-                f"cover one contract at {risk_per_contract:,.0f} of risk"
+                f"cover one contract at {risk_per_contract:,.0f} of risk",
             )
             continue
 
@@ -396,7 +640,9 @@ def run_option_backtest(
         trades=trades,
         warmup_bars=warmup,
         option_trades=option_trades,
-        skipped_reasons=skipped,
+        skipped_reasons=[entry.reason for entry in skipped],
+        skips=skipped,
+        skip_census=SkipCensus.from_entries(skipped),
     )
 
 

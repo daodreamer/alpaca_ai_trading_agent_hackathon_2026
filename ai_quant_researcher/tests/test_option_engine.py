@@ -24,7 +24,12 @@ from aqr.backtest.engine import BacktestResult
 from aqr.backtest.metrics import compute_metrics
 from aqr.data.bars import Bars
 from aqr.options.chain import ChainIndex
-from aqr.options.engine import OptionBacktestConfig, run_option_backtest
+from aqr.options.engine import (
+    OptionBacktestConfig,
+    SkipCensus,
+    affordability_bound_fraction,
+    run_option_backtest,
+)
 from aqr.options.spec import Anchor, Cadence, DteTarget, OptionSizing, OptionSpec, StructureSpec
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +266,61 @@ def test_entries_before_the_boundary_are_untouched_by_it() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The greek-consistency guard (D2b)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_session_with_inconsistent_greeks_is_skipped_not_traded() -> None:
+    """Four real sessions (2021-11-12, -17, -19, -22) have greeks the vendor
+    computed against a spot about 10% below the real one; prices are correct
+    (D2a), so nothing about selection or settlement notices on its own. This
+    reproduces the shape by hand: an ATM call whose delta says the session's
+    spot is 360 when the reference close says 400. The engine must refuse the
+    whole session rather than build a structure priced and sized against a
+    spot that greeks alone got wrong, and it must trade the next, honest
+    session normally.
+    """
+    days = trading_days(80)
+    good, bad = days[5], days[7]
+    rows: list[dict[str, str]] = []
+    for session, atm_strike in ((good, 400.0), (bad, 360.0)):
+        expiry = session + timedelta(days=28)
+        while expiry.weekday() >= 5:
+            expiry += timedelta(days=1)
+        rows += [
+            chain_row(session, expiry, 390.0, "put", bid=1.50, ask=1.60, delta=-0.16),
+            chain_row(session, expiry, 380.0, "put", bid=0.45, ask=0.50, delta=-0.09),
+            chain_row(session, expiry, atm_strike, "call", bid=10.00, ask=10.10, delta=0.50),
+        ]
+    chain = ChainIndex.from_rows(rows)
+    bars = make_underlying({}, days)  # flat at SPOT=400 on every day
+    spec = credit_spread_spec(
+        cadence=Cadence(min_sessions_between_entries=1),
+        sizing=OptionSizing(risk_per_trade=0.01, max_concurrent=2),
+    )
+    result = run_option_backtest(spec, chain, bars)
+
+    entered = {t.entry_session for t in result.option_trades}
+    assert good in entered
+    assert bad not in entered
+    assert any(
+        str(bad) in reason and "D2b" in reason for reason in result.skipped_reasons
+    )
+
+
+def test_a_session_with_no_near_the_money_call_is_not_flagged() -> None:
+    """``delta_implied_spot()`` returns ``None`` when the ladder has nothing
+    near 0.50 delta -- build_world's default fixture, which only carries the
+    16- and 9-delta legs a credit spread needs. The guard must not turn a
+    thin call ladder into a false refusal on every existing engine test."""
+    days = trading_days(80)
+    chain, bars = build_world(sessions=days[5:6], days=days)
+    result = run_option_backtest(credit_spread_spec(), chain, bars)
+    assert len(result.option_trades) == 1
+    assert not any("D2b" in reason for reason in result.skipped_reasons)
+
+
+# --------------------------------------------------------------------------- #
 # Sizing, cadence, concurrency (D4, D5)
 # --------------------------------------------------------------------------- #
 
@@ -313,6 +373,165 @@ def test_concurrency_is_capped() -> None:
             if other.entry_session <= trade.entry_session < other.expiration
         )
         assert overlapping <= 2
+
+
+# --------------------------------------------------------------------------- #
+# The skip census (D8a)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_affordability_skip_is_categorised_and_the_reason_matches() -> None:
+    """The same fixture as ``test_a_risk_budget_too_small_for_one_contract_skips_the_entry``,
+    read through the census instead of the trade list: the risk budget (0.2%
+    of 100,000 is 200, against 900 of risk per contract) cannot cover one
+    contract, so this must be the *only* thing that skipped, and it must be
+    counted as ``affordability`` -- not left as a string only a human could
+    categorise by reading it.
+    """
+    days = trading_days(80)
+    chain, bars = build_world(sessions=days[5:6], days=days)
+    spec = credit_spread_spec(sizing=OptionSizing(risk_per_trade=0.002, max_concurrent=1))
+    result = run_option_backtest(spec, chain, bars)
+    assert result.option_trades == []
+    assert result.skip_census.affordability == 1
+    assert result.skip_census.total == 1
+    (entry,) = result.skips
+    assert entry.category == "affordability"
+    assert entry.reason == result.skipped_reasons[0]
+
+
+def test_the_embargo_skip_is_categorised_as_embargo() -> None:
+    days = trading_days(80)
+    session = days[5]
+    chain, bars = build_world(sessions=[session], days=days)
+    config = OptionBacktestConfig(settle_before=session + timedelta(days=1))
+    result = run_option_backtest(credit_spread_spec(), chain, bars, config)
+    assert result.option_trades == []
+    assert result.skip_census.embargo_refusal == 1
+    assert result.skip_census == result.skip_census.__class__(embargo_refusal=1)
+
+
+def test_the_greek_consistency_skip_is_categorised_separately_from_a_stale_reference() -> None:
+    """Reuses the D2b fixture: one good session, one whose greeks were
+    computed against a spot 10% off. The good session trades; the bad one is
+    counted under ``greek_consistency`` and nothing else."""
+    days = trading_days(80)
+    good, bad = days[5], days[7]
+    rows: list[dict[str, str]] = []
+    for session, atm_strike in ((good, 400.0), (bad, 360.0)):
+        expiry = session + timedelta(days=28)
+        while expiry.weekday() >= 5:
+            expiry += timedelta(days=1)
+        rows += [
+            chain_row(session, expiry, 390.0, "put", bid=1.50, ask=1.60, delta=-0.16),
+            chain_row(session, expiry, 380.0, "put", bid=0.45, ask=0.50, delta=-0.09),
+            chain_row(session, expiry, atm_strike, "call", bid=10.00, ask=10.10, delta=0.50),
+        ]
+    chain = ChainIndex.from_rows(rows)
+    bars = make_underlying({}, days)
+    spec = credit_spread_spec(
+        cadence=Cadence(min_sessions_between_entries=1),
+        sizing=OptionSizing(risk_per_trade=0.01, max_concurrent=2),
+    )
+    result = run_option_backtest(spec, chain, bars)
+    assert len(result.option_trades) == 1
+    assert result.skip_census.greek_consistency == 1
+    assert result.skip_census.stale_underlying == 0
+
+
+def test_a_stale_underlying_reference_is_categorised_as_stale_underlying() -> None:
+    days = trading_days(60)
+    stale = days[-1] + timedelta(days=30)
+    chain, bars = build_world(sessions=[stale], days=days)
+    result = run_option_backtest(credit_spread_spec(), chain, bars)
+    assert result.option_trades == []
+    assert result.skip_census.stale_underlying == 1
+    assert result.skip_census.total == 1
+
+
+def test_a_delta_the_ladder_never_offers_is_categorised_as_no_leg_or_wing() -> None:
+    """``build_world``'s fixture only ever quotes 16- and 9-delta legs.
+    Naming a 35-delta anchor at a 2% tolerance asks for a leg the ladder
+    never carries, which is a different failure from a missing expiry and
+    must be counted differently."""
+    days = trading_days(80)
+    chain, bars = build_world(sessions=days[5:6], days=days)
+    spec = credit_spread_spec(
+        structure=StructureSpec(
+            type="put_credit_spread",
+            dte=DteTarget(target=28, tolerance=10),
+            anchor=Anchor(delta=0.35, tolerance=0.02),
+            width_points=10.0,
+        )
+    )
+    result = run_option_backtest(spec, chain, bars)
+    assert result.option_trades == []
+    assert result.skip_census.no_leg_or_wing == 1
+    assert result.skip_census.no_expiry_in_band == 0
+
+
+def test_an_expiry_outside_the_dte_band_is_categorised_as_no_expiry_in_band() -> None:
+    """``build_world`` quotes one expiry, ~28 DTE out. Asking for ~90 DTE at
+    a 5-day tolerance means no listed expiry answers at all -- refused before
+    delta selection is ever attempted, and counted as the DTE-band failure
+    rather than the leg failure."""
+    days = trading_days(80)
+    chain, bars = build_world(sessions=days[5:6], days=days)
+    spec = credit_spread_spec(
+        structure=StructureSpec(
+            type="put_credit_spread",
+            dte=DteTarget(target=90, tolerance=5),
+            anchor=Anchor(delta=0.16, tolerance=0.06),
+            width_points=10.0,
+        )
+    )
+    result = run_option_backtest(spec, chain, bars)
+    assert result.option_trades == []
+    assert result.skip_census.no_expiry_in_band == 1
+    assert result.skip_census.no_leg_or_wing == 0
+
+
+def test_skipped_reasons_and_skips_never_disagree_on_order_or_count() -> None:
+    """A run that mixes several skip categories: the flat, formatted list
+    D8a keeps for backward compatibility must stay exactly what
+    ``skips`` would produce, session by session, so a caller reading either
+    view sees the same story."""
+    days = trading_days(200)
+    sessions = days[5:20]
+    chain, bars = build_world(sessions=sessions, days=days)
+    spec = credit_spread_spec(
+        cadence=Cadence(min_sessions_between_entries=1),
+        sizing=OptionSizing(risk_per_trade=0.002, max_concurrent=10),
+    )
+    result = run_option_backtest(spec, chain, bars)
+    assert result.skipped_reasons == [entry.reason for entry in result.skips]
+    assert result.skip_census.total == len(result.skips)
+    assert result.skip_census == SkipCensus.from_entries(result.skips)
+
+
+def test_affordability_bound_fraction_matches_the_spec_worked_example() -> None:
+    """specs/10 D8a's own measured table: 578 affordability skips against 31
+    trades is 94.9% -- the denominator is skips-plus-trades, not
+    skips-over-everything, because every other skip category never reached
+    the sizing step this fraction is asking about."""
+    census = SkipCensus(affordability=578, no_leg_or_wing=20, embargo_refusal=9)
+    assert affordability_bound_fraction(census, 31) == pytest.approx(578 / 609)
+
+
+def test_affordability_bound_fraction_ignores_skips_that_never_reached_sizing() -> None:
+    """A rule starved entirely by a narrow DTE band -- never by the account
+    -- must report 0%, not some fraction diluted by skips that were never in
+    play for an affordability question."""
+    census = SkipCensus(no_expiry_in_band=400, no_leg_or_wing=50)
+    assert affordability_bound_fraction(census, 10) == 0.0
+
+
+def test_affordability_bound_fraction_is_zero_when_nothing_reached_sizing() -> None:
+    """No trades and no affordability skips -- every session was refused
+    earlier -- must not raise a division by zero and must not read as
+    "fully affordability-bound," which would be the wrong direction to fail
+    in for a gate that decides whether a REJECT is trustworthy."""
+    assert affordability_bound_fraction(SkipCensus(), 0) == 0.0
 
 
 # --------------------------------------------------------------------------- #

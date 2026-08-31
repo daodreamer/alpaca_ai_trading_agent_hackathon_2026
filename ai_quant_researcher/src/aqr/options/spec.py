@@ -15,8 +15,12 @@ model will fill it in, and every number downstream will quietly describe a
 strategy nobody can trade.
 
 The entry expression is parsed by the *existing* DSL — same tokenizer, same
-whitelist, same ``feature_keys`` walk — so a rule can say ``close > sma(200)``
-today and ``iv_rank(252) > 50`` as soon as the option features are registered.
+whitelist, same ``feature_keys`` walk — against the combined table
+``options/features.py`` builds, so a rule can say
+``iv_rank() > 50 and close > sma(200)`` in one expression: ``close`` and
+``sma`` resolve through the unchanged bar registry, ``iv_rank`` through
+specs/10 D6's option feature table, and ``OptionSpec`` never has to know which
+is which.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from typing import Any
 
 from aqr.dsl.expr import Expr, feature_keys, parse, tokenize
 from aqr.features.engine import FeatureKey
+from aqr.options.features import resolve_entry_feature
 from aqr.options.structure import StructureKind
 
 __all__ = [
@@ -226,8 +231,14 @@ class OptionSpec:
                 "strategy.entry is required. A rule with no condition opens a position "
                 "every session it can, which is a schedule rather than a hypothesis."
             )
-        # Parse eagerly: a spec that cannot be compiled must not exist.
-        object.__setattr__(self, "_entry_ast", parse(self.entry))
+        # Parse eagerly: a spec that cannot be compiled must not exist. The
+        # combined resolver (bar registry + specs/10 D6's option table) is
+        # what lets `entry` say `iv_rank() > 50 and close > sma(200)` --
+        # dsl/expr.py's tokenizer, grammar and whitelist are otherwise
+        # untouched (options/features.py's module docstring).
+        object.__setattr__(
+            self, "_entry_ast", parse(self.entry, resolve_feature=resolve_entry_feature)
+        )
 
     @property
     def entry_ast(self) -> Expr:

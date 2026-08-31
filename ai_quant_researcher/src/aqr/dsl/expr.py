@@ -31,13 +31,14 @@ trading during its own warm-up.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
-from aqr.features.engine import FeatureFrame, FeatureKey
+from aqr.features.engine import FeatureKey
 from aqr.features.registry import resolve
 
 __all__ = [
@@ -45,6 +46,8 @@ __all__ = [
     "Call",
     "Compare",
     "Expr",
+    "FeatureLookup",
+    "FeatureSource",
     "Logic",
     "Not",
     "Number",
@@ -58,6 +61,33 @@ __all__ = [
 
 Values = NDArray[Any]
 """A float array (arithmetic) or a boolean mask (comparisons and logic)."""
+
+
+class FeatureLookup(Protocol):
+    """What `parse` needs from a feature-table entry: its arity, to reject too
+    many arguments before a backtest ever runs. `aqr.features.registry.FeatureSpec`
+    satisfies this structurally, and so does
+    `aqr.options.features.OptionFeatureSpec` -- neither module imports the other.
+
+    ``arity`` is a read-only property on this Protocol rather than a plain
+    attribute: a frozen dataclass field (both concrete implementations are
+    frozen) is get-only from the outside, and a Protocol declared with a plain
+    attribute demands a *settable* one, which would reject both of them.
+    """
+
+    @property
+    def arity(self) -> int: ...
+
+
+class FeatureSource(Protocol):
+    """What `evaluate` needs to read a feature: enough for a bar-only
+    `aqr.features.engine.FeatureFrame`, and enough for anything that layers more
+    vocabulary on top of one -- `aqr.options.features.OptionFeatureFrame` mixes
+    option features into the same entry expression this way (specs/10 D6).
+    Structural, not a base class, so this module stays ignorant of both."""
+
+    def __len__(self) -> int: ...
+    def get(self, key: FeatureKey) -> Values: ...
 
 
 class ParseError(ValueError):
@@ -201,10 +231,13 @@ _COMPARISONS = {"<", "<=", ">", ">=", "==", "!="}
 
 
 class _Parser:
-    def __init__(self, source: str) -> None:
+    def __init__(
+        self, source: str, *, resolve_feature: Callable[[str], FeatureLookup] = resolve
+    ) -> None:
         self.source = source
         self.tokens = tokenize(source)
         self.i = 0
+        self._resolve_feature = resolve_feature
 
     @property
     def current(self) -> Token:
@@ -315,7 +348,7 @@ class _Parser:
             self._expect("op", ")")
 
         try:
-            spec = resolve(name)
+            spec = self._resolve_feature(name)
         except KeyError as exc:
             raise ParseError(str(exc.args[0])) from exc
         if len(args) > spec.arity:
@@ -337,11 +370,20 @@ class _Parser:
         return -value if negative else value
 
 
-def parse(source: str) -> Expr:
-    """Parse one expression. Raises :class:`ParseError` with an LLM-readable message."""
+def parse(source: str, *, resolve_feature: Callable[[str], FeatureLookup] = resolve) -> Expr:
+    """Parse one expression. Raises :class:`ParseError` with an LLM-readable message.
+
+    ``resolve_feature`` is the feature table, and it is the *only* thing D5
+    means by "same tokenizer, same whitelist... only the feature table
+    changes": swapping it in for `aqr.options.features.resolve_entry_feature`
+    is what lets an `OptionSpec` write ``iv_rank() > 50 and close > sma(200)``
+    without this module, or any of its other callers, knowing an option
+    feature exists. The default is the unchanged equity registry, so every
+    existing caller parses exactly as it did before this parameter existed.
+    """
     if not source or not source.strip():
         raise ParseError("empty expression")
-    return _Parser(source).parse()
+    return _Parser(source, resolve_feature=resolve_feature).parse()
 
 
 # --------------------------------------------------------------------------- #
@@ -362,7 +404,7 @@ def feature_keys(node: Expr) -> set[FeatureKey]:
     raise TypeError(f"unhandled node {type(node).__name__}")
 
 
-def evaluate(node: Expr, frame: FeatureFrame) -> Values:
+def evaluate(node: Expr, frame: FeatureSource) -> Values:
     """Evaluate over every bar at once.
 
     Returns a float array for arithmetic nodes and a boolean array for

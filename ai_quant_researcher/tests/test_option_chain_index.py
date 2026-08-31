@@ -224,6 +224,75 @@ def test_the_wing_is_on_the_protective_side_of_the_short_strike() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The greek-consistency check (D2b): an independent spot estimate from the
+# calls' own delta, cross-checked against the reference close by the engine.
+# --------------------------------------------------------------------------- #
+
+
+def test_delta_implied_spot_is_the_strike_of_the_nearest_half_delta_call() -> None:
+    book = chain(
+        quote("2023-09-29", 425.0, "call", delta=0.42),
+        quote("2023-09-29", 433.0, "call", delta=0.51),
+        quote("2023-09-29", 441.0, "call", delta=0.61),
+    )
+    assert book.delta_implied_spot() == pytest.approx(433.0)
+
+
+def test_delta_implied_spot_is_the_median_across_expiries() -> None:
+    """One bad expiry must not swing the estimate -- the whole point of using
+    the median rather than, say, the ~28 DTE bucket alone."""
+    book = chain(
+        quote("2023-09-01", 420.0, "call", delta=0.51),  # ~14 DTE
+        quote("2023-09-29", 433.0, "call", delta=0.50),  # ~28 DTE
+        quote("2023-10-20", 500.0, "call", delta=0.49),  # ~49 DTE, wildly off
+    )
+    assert book.delta_implied_spot() == pytest.approx(433.0)
+
+
+def test_delta_implied_spot_averages_an_even_number_of_expiries() -> None:
+    book = chain(
+        quote("2023-09-01", 430.0, "call", delta=0.50),
+        quote("2023-09-29", 434.0, "call", delta=0.50),
+    )
+    assert book.delta_implied_spot() == pytest.approx(432.0)
+
+
+def test_delta_implied_spot_is_none_without_a_near_the_money_call() -> None:
+    """A chain sampled entirely away from the money cannot answer the
+    question, and returning a number computed from it would be worse than
+    admitting that -- the same refusal principle as :meth:`SessionChain.select`."""
+    book = chain(
+        quote("2023-09-29", 500.0, "call", delta=0.95),
+        quote("2023-09-29", 550.0, "call", delta=0.99),
+    )
+    assert book.delta_implied_spot() is None
+
+
+def test_delta_implied_spot_is_none_with_no_calls_at_all() -> None:
+    book = chain(quote("2023-09-29", 433.0, "put", delta=-0.16))
+    assert book.delta_implied_spot() is None
+
+
+def test_delta_implied_spot_flags_the_four_sessions_the_vendor_got_wrong() -> None:
+    """The regression fixture: SPY's real close on 2021-11-17 was 468.13, and
+    the vendor's greeks that day were computed against a spot about 10% low
+    (specs/10 D2b). A 375-strike call priced as if delta were 0.6355 is really
+    ~20% in the money -- its delta should read close to 0.98 -- so the nearest
+    call to 0.50 delta is one whose *strike* the vendor's own numbers put far
+    below the real underlying."""
+    book = chain(
+        quote("2021-11-17", 465.0, "call", delta=0.71),  # actually deep ITM
+        quote("2021-11-17", 421.0, "call", delta=0.51),  # the vendor's "half delta"
+        quote("2021-11-17", 440.0, "call", delta=0.63),
+        session=date(2021, 11, 17),
+    )
+    implied = book.delta_implied_spot()
+    assert implied == pytest.approx(421.0)
+    real_close = 468.13
+    assert implied / real_close < 0.95  # D2b's tolerance would refuse this session
+
+
+# --------------------------------------------------------------------------- #
 # Quote arithmetic
 # --------------------------------------------------------------------------- #
 
@@ -290,6 +359,58 @@ def test_sessions_on_or_after_a_boundary_can_be_excluded_at_index_time() -> None
     ]
     index = ChainIndex.from_rows(_as_dicts(rows), before=date(2024, 9, 1))
     assert index.sessions == (date(2023, 8, 30),)
+
+
+def test_slice_dates_keeps_only_the_half_open_window() -> None:
+    """specs/10 D8's walk-forward fold restricts entries by slicing the chain
+    itself, so the boundary here has to be exact and half-open: the stop date
+    is the first date this slice must not still offer."""
+    rows = [
+        ("2023-01-03", "2023-01-31", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-06-01", "2023-06-29", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-06-30", "2023-07-28", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-12-29", "2024-01-26", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+    ]
+    index = ChainIndex.from_rows(_as_dicts(rows))
+    sliced = index.slice_dates(date(2023, 6, 1), date(2023, 6, 30))
+    assert sliced.sessions == (date(2023, 6, 1),)
+
+
+def test_two_consecutive_slices_compose_without_overlap_or_gap() -> None:
+    rows = [
+        ("2023-06-01", "2023-06-29", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-06-30", "2023-07-28", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-07-01", "2023-07-29", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+    ]
+    index = ChainIndex.from_rows(_as_dicts(rows))
+    first = index.slice_dates(date(2023, 6, 1), date(2023, 6, 30))
+    second = index.slice_dates(date(2023, 6, 30), date(2023, 8, 1))
+    assert set(first.sessions) & set(second.sessions) == set()
+    assert set(first.sessions) | set(second.sessions) == set(index.sessions)
+
+
+def test_slice_dates_refuses_a_stop_before_start() -> None:
+    index = ChainIndex.from_rows(
+        _as_dicts([("2023-06-01", "2023-06-29", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16")])
+    )
+    with pytest.raises(ValueError):
+        index.slice_dates(date(2023, 6, 30), date(2023, 6, 1))
+
+
+def test_exclude_dates_is_the_complement_of_slice_dates() -> None:
+    rows = [
+        ("2023-01-03", "2023-01-31", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-06-01", "2023-06-29", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+        ("2023-12-29", "2024-01-26", "433.00", "Put", "1.00", "1.10", "0.15", "-0.16"),
+    ]
+    index = ChainIndex.from_rows(_as_dicts(rows))
+    start, stop = date(2023, 6, 1), date(2023, 6, 30)
+    kept = index.slice_dates(start, stop)
+    dropped = index.exclude_dates(start, stop)
+    assert set(kept.sessions) & set(dropped.sessions) == set()
+    assert set(kept.sessions) | set(dropped.sessions) == set(index.sessions)
+    assert date(2023, 1, 3) in dropped.sessions
+    assert date(2023, 6, 1) not in dropped.sessions
 
 
 def _as_dicts(rows: list[tuple[str, ...]]) -> list[dict[str, str]]:

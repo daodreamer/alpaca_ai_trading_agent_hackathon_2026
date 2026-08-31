@@ -201,6 +201,52 @@ Nothing raised, because nothing was wrong with the arithmetic — only with whic
 two numbers were being compared. A cross-check between two independently pulled
 caches is the only thing that could have noticed.
 
+### D2b — The chain also states its own spot through its greeks, and four sessions get it wrong
+
+D2a checks that the chain's *prices* agree with the bar close. That is not the
+same claim as "the greeks are right", and on four sessions it isn't: on
+2021-11-12, -11-17, -11-19 and -11-22, every delta, vol and other greek in the
+chain was computed against an underlying price about 10% below the real one.
+The quotes themselves are untouched — bid and ask still price the real market,
+which is exactly why D2a's parity check passes on all four sessions and never
+notices. On 2021-11-17, when SPY closed at 468.13, the row for the 375-strike
+call reads `delta 0.6355`; a 375 strike with SPY at 468 is 20% in the money and
+should carry a delta near 0.98, not 0.64.
+
+This matters more than four sessions out of 753 suggests, because selection is
+by delta (D5). A contract labelled "16 delta" on one of these sessions is
+something else entirely, so the engine builds the structure the mislabelled
+delta names, sizes it against a maximum loss computed from the wrong strike,
+and reports it as an ordinary trade. Nothing raises — the same silent-failure
+shape D2a exists to catch, one greek over from where D2a looks. Verified
+directly against the real cache: with the guard disabled and a spec built from
+D5's own worked example (16-delta anchor, 0.06 delta tolerance), `2021-11-12`
+and `2021-11-17` resolve to `put_credit_spread` structures at strikes `(360,
+375)` and `(375, 385)` — 90-100 points out of the money against an underlying
+near 467-468 — and, at an ordinary sizing budget, the engine opens them.
+
+**The measurement that makes it checkable.** For each session and expiry, the
+strike where a call's delta crosses 0.50 sits at roughly the underlying's spot
+— it is a second, independent estimate of what the session cost, computable
+from the same greeks that are wrong when anything is. Taking the median across
+a session's expiries (`SessionChain.delta_implied_spot()`, `options/chain.py`)
+so one thin expiry cannot swing it, and dividing by the session's reference
+close, gives a ratio measured across all 753 research sessions at:
+
+```
+p1 0.9948   p5 0.9986   p50 1.0000   p95 1.0013   p99 1.0021   max 1.0395
+the four bad sessions (in date order above):  0.901, 0.899, 0.900, 0.898
+```
+
+The separation is total — every honest session sits within 4% of 1.0, all four
+bad ones sit at roughly 0.90 — so any threshold between about 1% and 9% draws
+the same line. **`GREEK_CONSISTENCY_TOLERANCE = 0.05`** (`options/engine.py`),
+the middle of that band, is checked against the session's reference close
+before a structure is built: beyond it, the session is refused and a line
+naming both numbers is appended to `skipped_reasons` — not repaired, not
+warned about afterwards, the same treatment `NoSuchContract` and D3's embargo
+refusal already get.
+
 ---
 
 ## D3 — An entry whose expiry crosses the embargo is refused
@@ -256,7 +302,7 @@ name: iv_rank_put_credit_spread_v1
 hypothesis: when SPY's IV rank is high, a 28-day 16-delta put spread is paid a positive risk premium
 underlying: SPY
 
-entry: iv_rank(252) > 50 and close > sma(200)
+entry: iv_rank() > 50 and close > sma(200)
 
 structure:
   type: put_credit_spread
@@ -312,13 +358,46 @@ engine is broken.
 
 | Feature | Source | Note |
 | --- | --- | --- |
-| `iv_rank(n)` | volatility_history | `(iv_current − iv_year_low) / (iv_year_high − iv_year_low)`; the vendor supplies the year extremes |
+| `iv_rank()` | volatility_history | `(iv_current − iv_year_low) / (iv_year_high − iv_year_low) * 100`, 0..100 scale; the vendor supplies the year extremes |
 | `iv_hv_spread()` | volatility_history | `iv_current − hv_current` — the variance risk premium, directly |
-| `iv_change(n)` | volatility_history | `week_ago` / `month_ago` columns are in the table |
-| `atm_iv(dte)` | option_chain | interpolated within a DTE bucket |
-| `term_slope()` | option_chain | ~49 DTE ATM IV − ~14 DTE ATM IV |
+| `iv_current()`, `hv_current()` | volatility_history | the raw levels, for a rule that wants the number itself rather than its rank |
+| `iv_change(n)` | volatility_history | `week_ago` / `month_ago` columns are in the table; `n` must be 5 or 21, the only lookbacks the vendor carries |
+| `atm_iv(dte)` | option_chain | the IV of the call nearest 0.50 delta, in the expiry nearest `dte` days out |
+| `term_slope()` | option_chain | `atm_iv(49) − atm_iv(14)` |
 | `skew_25d()` | option_chain | 25-delta put IV − 25-delta call IV |
 | `close`, `sma`, `ema`, `rsi`, `atr`, `realized_vol`, … | SPY bars | **the existing registry, unchanged** |
+
+`iv_rank` is written `iv_rank(n)` above the fold in D5's worked example and
+was originally specified that way, on the equity side's model of `sma(n)`. It
+shipped as **`iv_rank()`, arity 0, instead**: `n` would have named a lookback
+over which to compute the rank, but the rank here is not computed over a
+lookback at all — `iv_year_high` / `iv_year_low` are columns the vendor already
+computed over its own trailing year, and recomputing a second, engine-side
+extreme over some `n` bars of bar-grid history would silently answer a
+different, uncalibrated question while looking like a parameter of the same
+feature. An arity-0 `iv_rank()` makes that impossible to ask by construction.
+`atm_iv(dte)`'s `dte` is a different kind of argument and keeps it: it selects
+*which* DTE bucket, it does not define the arithmetic.
+
+**`atm_iv`, `term_slope` and `skew_25d` select their strikes with a looser
+tolerance than a trade does, and on purpose.** `chain.py`'s selector — the one
+`OptionSpec.structure` builds a leg from — refuses rather than approximates,
+at a 0.06 delta tolerance and a hard DTE-tolerance band, because a leg an
+order is built from must be the contract the rule named or nothing. These
+three features use 0.10 and no DTE-tolerance refusal at all (`atm_iv(49)` on a
+session whose longest listed expiry is 66 days out still reports that expiry's
+number rather than nothing). The two rules read as inconsistent until the
+question each one answers is separated: **refuse rather than approximate
+governs what an order is built from, not what a condition is measured from.**
+A condition that silently used the wrong DTE bucket would misprice a decision,
+but a condition that went `NaN` because the exact tolerance a *different*
+consumer needs wasn't met would throw away information the feature can
+honestly report. The looser numbers are measured, not guessed: at 0.06, the
+near-the-money call is missing on **85 of 753** sessions in the ~49 DTE bucket
+alone, because that bucket's ladder is thinner than the ~28 DTE one the
+tolerance was tuned for; at 0.10, that drops to **1** miss across all three DTE
+targets combined. `atm_iv(dte)`'s default of 28 is the cache's own median DTE
+(D0), not an arbitrary round number.
 
 Intraday features from `data-options-underlying/1h` are derived into
 session-level values (prior-day range, close-to-close gap, last-hour momentum)
@@ -326,11 +405,13 @@ and read at `t−1` like everything else. They raise the information the decisio
 uses; they do not raise the trading frequency, which D0 caps at one entry per
 session.
 
-**Forward-fill is explicit and bounded.** The two grids do not align: 22 chain
-sessions have no same-day IV row, and 15 vendor rows have blank extremes. An IV
-value is carried forward at most **5 calendar days** and the feature is `NaN`
-beyond that. Without the bound, the 2019 weekly era would quietly evaluate
-rules on IV that is a fortnight old.
+**Forward-fill is explicit and bounded.** The two grids do not align: **7**
+chain sessions have no `volatility_history` row at all, and **15** more have a
+row whose `iv_year_high` / `iv_year_low` fields are blank — 22 unusable
+sessions in total, not one cause wearing two counts. An IV value is carried
+forward at most **5 calendar days** and the feature is `NaN` beyond that.
+Without the bound, the 2019 weekly era would quietly evaluate rules on IV that
+is a fortnight old.
 
 ---
 
@@ -394,6 +475,102 @@ computed against a denominator that mixes the two searches.
 about 25 independent 28-DTE cycles. It is entitled to say "this stopped
 working". It is not entitled to say "this works", and no artefact this system
 writes may word it that way.
+
+---
+
+## D8a — A low cycle count can be about the account, not the rule
+
+The independent-cycle gate is correct, and D8's numbers are real. But the
+count it gates on is confounded by something D8 does not name: **the cycle
+count is silenced by sizing before it is ever silenced by the market**, and
+nothing before this decision could tell the two apart.
+
+Measured on the real SPY cache, `put_credit_spread` / 28 DTE / anchor delta
+0.16 / `width_delta` 0.06 / `entry: close > 0` / cadence 5 /
+`max_concurrent` 3, at two sizings:
+
+```
+risk_per_trade   trades   independent cycles   skipped   of which "risk budget too small"
+      1%            31            21             598          578
+      2%           122            57             143          128
+      5%           148            57              13            0
+```
+
+1% of a $100,000 account (D5's own default) is $1,000, and this structure's
+median maximum loss is $892 per contract — right at the edge, so most
+sessions cannot afford a single contract and the entry is skipped. **578 of
+598 skips at 1% are affordability, not the market.** A search that wanted
+statistical significance more than it wanted the truth could buy it just by
+raising `risk_per_trade` — the cycle count nearly triples between 1% and 2%
+sizing with the rule itself untouched — and a report that only prints "21
+independent cycles: REJECT" invites exactly that, because it reads as a fact
+about the strategy when most of it was a fact about the account.
+
+**This is the same pathology `backtest/costs.py` documents for the equity
+per-order floor**, named there in its own module docstring: "cost retention
+is a fatal gate ... it decides verdicts, and it decides them on
+`BacktestConfig.initial_equity`, a number nobody thinks of as a cost
+parameter." The fix there was not to make the floor cheaper — a broker who
+charges a dollar an order really does cost 52bp on a $192 position, and
+hiding that would lie in the flattering direction. The fix was to name the
+model, measure what it does, and record it alongside the verdict. Same
+prescription here: the engine's refusal is correct and does not change —
+rounding up to one contract would breach the risk budget the spec
+authorised, per D4 — what changes is that a reader must be able to see
+*why* a sample was small before trusting what "small" is supposed to mean.
+
+**A structured skip census, not a paragraph of English.**
+`OptionBacktestResult.skip_census` (`options/engine.py`) is a `SkipCensus`
+counting six mutually exclusive reasons an entry did not happen:
+`affordability`, `no_leg_or_wing` (the ladder offered no leg, or no
+sellable wing, at the named delta — a `NoSuchContract` from `chain.py`'s
+`select`, `select_wing` or `select_wing_by_delta`, or a `ValueError` from
+`structure.py`'s own leg-count invariants), `no_expiry_in_band` (no listed
+expiry within `dte.tolerance` of `dte.target` — `chain.py`'s
+`_expiry_for`), `greek_consistency` (D2b's guard), `embargo_refusal` (D3),
+and `stale_underlying` (no trading-day close within
+`max_reference_staleness_days`, at either the entry reference or the
+settlement reference). `skipped_reasons` stays exactly what it was — a flat
+list of formatted strings, for reading one session's detail — and both are
+built from the same internal `SkippedEntry` list in `run_option_backtest`,
+so the two views cannot drift apart about what happened on a given session.
+`NoSuchContract` (`chain.py`) now carries its `category` at the raise site
+rather than leaving a consumer to infer it from the message text, which is
+what makes the two categories it can produce (`no_leg_or_wing`,
+`no_expiry_in_band`) trustworthy rather than a pattern match on English that
+a future rewording could silently break.
+
+**"Affordability-bound," defined once.** Affordability skips as a fraction
+of the sessions that reached the sizing step at all — `affordability /
+(affordability + trades)`. Every other category is refused *before* sizing
+is computed, so folding those sessions into the denominator would dilute the
+fraction with sessions that never had an affordability opinion to
+contribute. `affordability_bound_fraction` (`options/engine.py`) is the one
+place this is computed, the way `independent_cycles`
+(`validation/cycles.py`) is the one place a cycle is counted — a walk-forward
+report reads the identical function over its own pooled out-of-sample
+census (`OptionWalkForwardReport.oos_affordability_bound_fraction`,
+`options/walkforward.py`), bucketed per fold by session exactly the way
+`OptionTrade.entry_session` already is, so a fold's own number is never
+computed against a different run's equity trajectory. On the worked example
+above: `578 / (578 + 31) = 94.9%`.
+
+**The evaluator must say it, and the gate does not move.**
+`OptionEvaluationInput` carries `affordability_bound_fraction`, no default —
+a caller that has not measured it must say so at the call site rather than
+have it silently read as zero. `evaluate_option_strategy`
+(`evaluator/score.py`) reports the fraction in its first reason on every
+run, passing or failing, so a reader is never in the position of trusting a
+cycle count without it. When the independent-cycle gate is the reason for a
+`REJECT` *and* the fraction clears `AFFORDABILITY_BOUND_THRESHOLD` (0.5 —
+the midpoint of a count-based fraction with no data-driven place to set it
+more precisely), the reason names the account rather than the rule: this
+run has not tested the rule either way, and does not become evidence
+against it until it is re-run at a sizing the account can actually afford.
+**The `>= 25` gate is not loosened by any of this.** A REJECT stays a
+REJECT — an account-bound sample is still not evidence, in either
+direction — the only thing that changes is what the reason is allowed to
+claim it found.
 
 ---
 
