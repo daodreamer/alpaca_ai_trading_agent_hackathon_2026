@@ -13,6 +13,18 @@
 # So the evidence is committed and the volume is not. What stays ignored below
 # is the pre-Phase-3 backup and the control-campaign databases: those *are*
 # reproducible, and they are 23 MB of it.
+#
+# The database is committed *compressed*. It reached 51 MB -- past the 50 MB
+# GitHub warns at and on its way to the 100 MB it refuses -- and 47 MB of that
+# is one column, `experiments.robustness`, holding JSON. gzip takes the file to
+# 11 MB, and sqlite does not delta-compress between commits, so the uncompressed
+# form would add a fresh 51 MB blob to the pack every time it were committed.
+#
+# `runs/research.sqlite.gz` is the committed artefact; the live `.sqlite` is
+# ignored. Regenerate it from the repo root with `python scripts/pack_registry.py`
+# and restore a clone's working database with `--unpack`.
+runs/research.sqlite
+!runs/research.sqlite.gz
 # CSV bar caches. Git has no inline comments in .gitignore -- a trailing "#" is
 # part of the pattern, so these four spent their whole life matching nothing and
 # the caches were only ever untracked by luck. One pattern per line, comments
