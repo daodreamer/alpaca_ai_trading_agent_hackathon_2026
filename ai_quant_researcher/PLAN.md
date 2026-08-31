@@ -8,14 +8,18 @@ start; nothing depends on remembering a conversation.
 **Done and green (979 tests, ruff, mypy clean). All five phases complete.
 `aqr evaluate` on the full 680-name universe: 1m08s.**
 
-**The seal has been spent.** `rs_volatility_consistency_neutral_v1` was
-pre-registered on 2026-08-29 and run once against the embargoed years:
-alpha +16.72%/yr, beta 0.43, t +2.22, IR +1.58 over 498 sessions. It was **not
-refuted**, which is the only verdict a 498-session window is entitled to reach —
-the standard error on an annualised Sharpe here is ±0.71. Beta came back at 0.43
-against the 0.46 the search window predicted; that is the part that was
-falsifiable in advance. Nothing about this upgrades the deflated Sharpe of 0.10
-after 305 trials.
+**The seal has been opened five times.** The executed strategy is the fifth,
+`low_vol_rs_carry_v5` [`96cbc95ab6f09a60`], pre-registered 2026-08-30 and run
+against the embargoed years: alpha +16.27%/yr, beta 0.38, t +2.94, IR +2.09 over
+498 sessions, maxDD -3.7%. It was **not refuted**, which is the only verdict a
+498-session window is entitled to reach — the standard error on an annualised
+Sharpe here is ±0.71.
+
+Five looks raise the significance bar to 2.576, and `t +2.94` clears it. The
+first candidate through the window, `rs_volatility_consistency_neutral_v1`,
+returned `t +2.22` and does not clear the bar it would face today; it is no
+longer the pinned strategy. Nothing about any of this upgrades the deflated
+Sharpe, which for `v5` is 0.74 after 411 trials.
 
 Phase 4 is done: `aqr target-book` writes a target book off the same
 `run_strategy` path the sealed run used, refuses to write one for a candidate
@@ -757,9 +761,12 @@ Run above. 52 of the 680 universe symbols returned no sealed bars — every one 
 them delisted before the 2021-05-20 warm-up start, so this is the point-in-time
 universe working rather than a hole in the cache.
 
-`distinct_hypotheses()` reads **324**, not the 305 quoted at the top of this
-file: campaign 07 and the control campaigns added more. 324 is the honest
-denominator and is what the declaration records.
+`distinct_hypotheses()` read **324** at the time of this declaration, not the
+305 quoted earlier: campaign 07 and the control campaigns added more. 324 is the
+honest denominator for that look and is what the declaration records. It has
+since grown to **414** — later campaigns, and the four looks that followed this
+one. Each declaration records the denominator that applied to it; the numbers do
+not get retconned.
 
 The stored result carries the measurement, the seal certificate, the
 declaration, and the ancestry report, so the run can be audited without trusting

@@ -150,7 +150,7 @@ lines:
 ```
 ALPACA_API_KEY_ID=PK................
 ALPACA_API_SECRET_KEY=................
-ALPHAGATE_STRATEGY_FINGERPRINT=3f6e2c8a9309068b
+ALPHAGATE_STRATEGY_FINGERPRINT=96cbc95ab6f09a60
 ```
 
 The first two are your keys from Step 3. The third one names **which strategy
@@ -176,14 +176,14 @@ You should see a list like this:
 ```
 AlphaGate equity pre-flight — 2026-08-29T12:37:28+00:00
 
-[  ok  ] strategy pinned — 3f6e2c8a9309068b
-[  ok  ] a target book exists — .../rs_volatility_consistency_neutral_v1-3f6e2c8a9309068b-2026-08-27.json
-[  ok  ] the book may be executed — rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b] as of 2026-08-27
+[  ok  ] strategy pinned — 96cbc95ab6f09a60
+[  ok  ] a target book exists — .../low_vol_rs_carry_v5-96cbc95ab6f09a60-2026-08-27.json
+[  ok  ] the book may be executed — low_vol_rs_carry_v5 [96cbc95ab6f09a60] as of 2026-08-27
 [  ok  ] the book is fresh — 2d old, limit 7d
-[  ok  ] the sealed window did not refute it — alpha +16.72%/yr  beta 0.43  t +2.22  looks 1
+[  ok  ] the sealed window did not refute it — alpha +16.27%/yr  beta 0.38  t +2.94  looks 5
 [  ok  ] account readable — equity 100000.00
 [  ok  ] account not blocked
-[  ok  ] 0 equity positions held, 104 wanted
+[  ok  ] 0 equity positions held, 240 wanted
 [  ok  ] market closed — next open 2026-08-31 13:30 UTC
 
 Ready.
@@ -351,20 +351,22 @@ fixed-width put credit spreads whatever the trend says — and it has no backtes
 so nothing about it is a claim about edge yet.
 
 **The equity agent** executes a strategy that *has* been validated, and it
-executes only that one. `ai_quant_researcher/` searched 324 hypotheses, put the
-survivor through walk-forward, pre-registered it, and spent a one-shot sealed
-window on it:
+executes only that one. `ai_quant_researcher/` searched 414 hypotheses, put the
+survivor through walk-forward, pre-registered it, and spent a sealed window on
+it:
 
 ```
-rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b]
+low_vol_rs_carry_v5 [96cbc95ab6f09a60]
 sealed window 2024-09-03 → 2026-08-27   (498 sessions, never read during the search)
-  strategy   return +56.39%  sharpe +1.86  maxDD -10.4%  trades 561
-  residual   alpha +16.72%/yr  beta 0.43  t +2.22  IR +1.58
+  strategy   return +51.88%  sharpe +2.22  maxDD -3.7%   trades 722
+  residual   alpha +16.27%/yr  beta 0.38  t +2.94  IR +2.09
 ```
 
 That window **was not refuted**, which is the strongest verdict 498 sessions can
 produce — `can_confirm` is `False` by construction, because the standard error
-on an annualised Sharpe there is about ±0.71. The researcher writes the weights
+on an annualised Sharpe there is about ±0.71. The sealed window has now been
+opened five times, so the significance bar it had to clear was raised to 2.576
+accordingly; `t +2.94` clears it. The researcher writes the weights
 it holds to a file and stops. AlphaGate reads that file, prices it, gates every
 resulting order, and places what survives.
 
@@ -494,7 +496,7 @@ uv run --directory backend python -m alphagate equity-status
 **Pin the strategy before any of this works.** `.env.local` needs
 
 ```
-ALPHAGATE_STRATEGY_FINGERPRINT=3f6e2c8a9309068b
+ALPHAGATE_STRATEGY_FINGERPRINT=96cbc95ab6f09a60
 ```
 
 and a target book naming any other fingerprint is refused by name. There is

@@ -945,16 +945,23 @@ geometry and history requirements scale to whichever bar size was picked.
 
 ## The sealed run: what actually happened when the envelope was opened
 
-`rs_volatility_consistency_neutral_v1` was the sole ACCEPT of campaign 07. It was
-pre-registered on 2026-08-28 — selection rule recorded, seal digest recorded,
-before a single embargoed bar was read — and then run once, in a separate
-process, against 2024-09 through 2026-08.
+The window has been opened **five times**, and that count is not a footnote — it
+is the denominator. Each look raises the significance bar the next candidate has
+to clear, and `SealedMeasurement` computes the bar from `looks` rather than
+letting anyone quote a nominal t.
+
+The strategy this project executes is the fifth and last of them,
+`low_vol_rs_carry_v5`, pre-registered on 2026-08-30 — selection rule recorded,
+seal digest recorded, before a single embargoed bar was read — and then run in a
+separate process against 2024-09 through 2026-08.
 
 ```
-rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b]
+low_vol_rs_carry_v5 [96cbc95ab6f09a60]
 sealed window 2024-09-03 -> 2026-08-27   (498 sessions)
-  strategy   return +56.39%  sharpe +1.86  maxDD -20.4%  trades 300
-  residual   alpha +16.72%/yr  beta 0.43  t +2.22  IR +1.58
+  strategy   return +51.88%  sharpe +2.22  maxDD -3.7%  trades 722
+  benchmark  return +29.02%  sharpe +0.91
+  residual   alpha +16.27%/yr  beta 0.38  t +2.94  IR +2.09  R2 0.36
+  looks 5   significance bar 2.576   alpha_clears_bar True
 ```
 
 **It was not refuted.** That is the strongest verdict this window is capable of
@@ -963,15 +970,15 @@ returns `False` by construction. The standard error on an annualised Sharpe over
 498 sessions is ±0.71, which is larger than most of the Sharpe differences
 anybody argues about.
 
-The part that was genuinely falsifiable in advance is the beta. The search window
-predicted 0.46; the sealed window returned **0.43**. A rule that had been fitting
-noise had no reason to reproduce its market exposure two years later, and this
-one did.
+What makes this one worth executing rather than the earlier looks is that its
+`t +2.94` clears the **five-look** bar of 2.576. The first candidate through this
+window, `rs_volatility_consistency_neutral_v1`, returned `t +2.22`: enough as the
+sole candidate ever screened here, not enough once the window had been opened
+five times. The bar moved and the earlier result did not move with it.
 
-What this does **not** upgrade: the deflated Sharpe is still 0.10 after 324
-trials. A t of +2.22 clears the bar as the only candidate ever screened against
-this window and would not clear it as the seventh — see the multiplicity table
-above. And the seal proves the embargoed *data* was not read; it cannot prove the
+What this does **not** upgrade: the deflated Sharpe is 0.74 after 411 trials, and
+the search denominator is now 414 distinct hypotheses. A sealed window that
+cannot confirm cannot repair a search that was wide. And the seal proves the embargoed *data* was not read; it cannot prove the
 embargoed *period* did not inform a decision, since the researcher lived through
 it and every model in `aqr providers` has a training cutoff after it. The
 certificate records that exposure under `knowledge_exposure` rather than denying
@@ -1090,11 +1097,13 @@ aqr costs --equity 100000 --positions 110      # what one order actually costs
 | `zero` | $0.00 | $0.00 | 0.0bp | — |
 
 That table spreads the account evenly over 110 names — $909 each. The real book
-is not even: 10 core names at 8% and about 100 sleeve names at 0.19%, and it is
-the sleeve names, at $192, that reach 52bp. At $1M the same table reads 4.1bp for
-`ibkr_fixed`. `--costs alpaca` selects the
-commission-free schedule — the venue these bars come from and whose paper account
-the target book is built for. A named schedule wins outright rather than merging
+is not even, and the executed one is far less even than that: 12 core names at 4%
+and 240 sleeve names averaging 0.076%, which on $100k is **$76** a sleeve name.
+A fixed-fee schedule is a percentage of nothing at that size, so the sleeve is
+where the cost model bites hardest — and it is why `--costs alpaca`, the
+commission-free schedule of the venue these bars come from and whose paper
+account the book is built for, is the one that matches the deployment. At $1M the same table reads 4.1bp for
+`ibkr_fixed`. A named schedule wins outright rather than merging
 with the individual `--spread-bps` knobs: half a preset and half a set of
 overrides is a schedule no broker offers, and the record would name one that was
 not used.
@@ -1112,13 +1121,13 @@ A validated strategy has to become positions somewhere, and that somewhere is no
 here. `aqr target-book` writes one file and stops:
 
 ```bash
-aqr target-book 3f6e2c8a9309068b
-# 604 of 680 symbols, 2023-05-17 -> 2026-08-29
+aqr target-book 96cbc95ab6f09a60
+# 604 of 680 symbols, 2023-05-18 -> 2026-08-30
 #
-# rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b] as of 2026-08-27
-#   104 positions, gross 1.0000 (core 0.8000, sleeve 0.2000)
+# low_vol_rs_carry_v5 [96cbc95ab6f09a60] as of 2026-08-27
+#   240 positions, gross 0.6625 (core 0.4800, sleeve 0.1825)
 #
-# runs/target_books/rs_volatility_consistency_neutral_v1-...-2026-08-27.json
+# runs/target_books/low_vol_rs_carry_v5-...-2026-08-27.json
 ```
 
 There is no `--dry-run`, because there is nothing to be dry about: no code path

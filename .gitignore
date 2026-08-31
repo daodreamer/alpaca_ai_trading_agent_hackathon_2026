@@ -48,3 +48,8 @@ journal/equity-state.json
 node_modules/
 dist/
 backend/src/alphagate/interface/static/
+
+# A stray empty research DB: running `aqr` from the repo root instead of
+# `ai_quant_researcher/` creates one here by relative path. The subproject
+# .gitignore only reaches its own directory, so this has to be anchored here.
+/runs/
