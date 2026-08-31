@@ -85,13 +85,18 @@ __all__ = [
     "EquityCycleRecord",
     "EquityOrderRecord",
     "EquityStage",
+    "UnpinnedBook",
+    "already_decided",
     "archive_book",
+    "changed_pin_advice",
     "cycle_id_for",
+    "digest_of",
     "find_latest_book",
     "marks_from",
     "read_book",
     "run_equity_cycle",
     "today_totals",
+    "unpinned_books",
 ]
 
 BOOK_ARCHIVE: Final = "books"
@@ -117,6 +122,14 @@ class EquityStage(Enum):
     """No usable artefact. Either none was generated, or the one on disk was
     refused — a different strategy, an unspent seal, a refuted rule."""
     STALE_BOOK = "stale_book"
+    NO_MARKS = "no_marks"
+    """The pass could not read a single price it needed, so it decided nothing.
+
+    Non-terminal, and that is its whole reason to exist. It looks like
+    `NO_TRADES` — an empty plan, every symbol accounted for — but the account of
+    each one is "no usable quote" rather than "already held", and the remedy is
+    to look again in thirty seconds rather than to call the day done. See
+    `RebalancePlan.is_blind`."""
     NO_TRADES = "no_trades"
     PLANNED = "planned"
     """Gated and deliberately not sent. What `equity-plan` produces, and a
@@ -133,6 +146,27 @@ class EquityStage(Enum):
     @property
     def traded(self) -> bool:
         return self in {EquityStage.SUBMITTED, EquityStage.HALTED}
+
+    @property
+    def decided(self) -> bool:
+        """Whether this stage settles the book it was reached on.
+
+        See `DECIDED_STAGES`.
+        """
+        return self.value in DECIDED_STAGES
+
+
+DECIDED_STAGES: Final = frozenset(
+    {"submitted", "no_trades", "planned", "vetoed", "halted", "stale_book"}
+)
+"""The stages that settle a book. A session will not run a second pass on a book
+that already reached one of these today.
+
+An allowlist rather than a denylist, so a stage nobody has classified is quiet
+rather than terminal. Two are deliberately absent: `no_book`, where the artefact
+was missing or unreadable, and `no_marks`, where no price could be read for any
+symbol in it. Neither is an opinion about the book, and both are fixed by
+looking again a little later."""
 
 
 def cycle_id_for(as_of: datetime, sequence: int) -> str:
@@ -164,6 +198,141 @@ def find_latest_book(directory: Path, fingerprint: str) -> Path | None:
     return candidates[-1] if candidates else None
 
 
+@dataclass(frozen=True, slots=True)
+class UnpinnedBook:
+    """A book on disk that the pin does not admit. A report, never an instruction.
+
+    Deliberately *not* a `TargetBook`: nothing here has been validated and
+    nothing here may be executed. It carries the three fields an operator needs
+    to decide whether the pin is stale, and no weights at all — so there is no
+    version of this type that could be handed to a planner by accident.
+    """
+
+    path: Path
+    name: str
+    fingerprint: str
+    as_of: str
+    """The session as the file spells it, unparsed. A book we will not execute
+    does not get to fail on a malformed date."""
+
+
+def unpinned_books(directory: Path, pinned_fingerprint: str) -> tuple[UnpinnedBook, ...]:
+    """Books in the directory belonging to some strategy other than the pinned one.
+
+    This exists because the pin is invisible from the inside.
+    `find_latest_book` globs on the pinned fingerprint, so a book for a strategy
+    the pin does not name does not merely get refused — it is never looked at,
+    and the pass reports "no target book" while a perfectly good one sits in the
+    same directory. Refusing it is correct (specs/09 D1). Being silent about it
+    is what sends somebody to read source at 09:20.
+
+    Keyed on the file's **contents**, not its name, so a file named for the
+    pinned strategy whose `spec_fingerprint` says otherwise is reported here —
+    which is exactly the case `load_target_book` refuses, now with an
+    explanation attached.
+
+    Newest per strategy: `aqr` writes one book per session, and a month of them
+    is a wall of text in which the only candidate is the latest. Sorted newest
+    first with the fingerprint breaking ties, so the same directory gives the
+    same answer in the same order (CLAUDE.md rule 7).
+
+    Never raises. It runs on the failure path — a directory with a half-written
+    file in it is a directory we still report on.
+    """
+    if not directory.is_dir():
+        return ()
+    newest: dict[str, UnpinnedBook] = {}
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_bytes().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        fingerprint = str(payload.get("spec_fingerprint", ""))
+        if not fingerprint or fingerprint == pinned_fingerprint:
+            continue
+        found = UnpinnedBook(
+            path=path,
+            name=str(payload.get("spec_name", "")),
+            fingerprint=fingerprint,
+            as_of=str(payload.get("as_of", "")),
+        )
+        seen = newest.get(fingerprint)
+        if seen is None or found.as_of > seen.as_of:
+            newest[fingerprint] = found
+    return tuple(
+        sorted(newest.values(), key=lambda b: (_descending(b.as_of), b.fingerprint))
+    )
+
+
+def _descending(as_of: str) -> tuple[int, ...]:
+    """Sort key that puts the latest session first without reversing the tie-break."""
+    return tuple(-ord(character) for character in as_of)
+
+
+def changed_pin_advice(found: Sequence[UnpinnedBook]) -> str:
+    """What to tell the operator when the pin matched nothing on disk.
+
+    One question, asked at one moment: the pinned fingerprint found no book, so
+    is the directory empty, or is there a book here for a strategy the pin does
+    not name? Those are completely different problems and `find_latest_book`
+    reports them with the same silence — it globs on the fingerprint, so a book
+    for another strategy is not refused, it is never looked at.
+
+    Called only on that path. When the pin finds its book there is nothing to
+    say and nothing is said, even if the directory holds five other strategies —
+    that is what a research repository looks like on an ordinary day, and a
+    warning printed on a healthy morning teaches its reader to skim past the one
+    morning it is real.
+
+    It reports and stops. Nothing here changes the pin and nothing offers to:
+    the pin is the only checkable form of "this account executes the one
+    strategy the research validated" (specs/09 D1), and a system that changed it
+    on its own would have deleted the property it was reporting on.
+
+    Empty when there is nothing on disk either, so callers can print it
+    unconditionally and fall back to "run `aqr target-book`".
+    """
+    if not found:
+        return ""
+    return "\n".join(
+        [
+            "No book for the pinned strategy, but these are on disk:",
+            *(
+                f"  {book.name or '(unnamed)'} [{book.fingerprint}] "
+                f"as of {book.as_of or '?'}  — {book.path.name}"
+                for book in found
+            ),
+            "If this account should be executing one of them, change "
+            "ALPHAGATE_STRATEGY_FINGERPRINT in .env.local to that fingerprint "
+            "and restart. Until then the pin stands and these are ignored — "
+            "specs/09 D1.",
+        ]
+    )
+
+
+def digest_of(path: Path) -> str | None:
+    """The digest of a book on disk, without parsing or validating it.
+
+    The session guard runs every heartbeat and only needs to answer "is this the
+    same file I already acted on", so it must not pay for a full load — and must
+    not refuse a book for being unusable, which is the pass's job to journal.
+
+    `None` when the file is not readable. `aqr target-book` rewrites its output
+    in place, so a read landing inside that window is a *not yet* rather than a
+    failure: the next heartbeat is thirty seconds away.
+
+    Hashes the same bytes `read_book` does, and the tests hold the two together.
+    A guard that hashed a normalised copy would never match the journal and
+    would therefore start a pass on every beat.
+    """
+    try:
+        return sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def read_book(path: Path, *, pinned_fingerprint: str) -> tuple[TargetBook, str]:
     """Load one artefact and return it beside the bytes it came from.
 
@@ -193,13 +362,23 @@ def read_book(path: Path, *, pinned_fingerprint: str) -> tuple[TargetBook, str]:
 def archive_book(raw: str, book: TargetBook, *, directory: Path) -> Path:
     """Copy the executed book into the journal. Verbatim, never re-serialised.
 
-    Named by fingerprint and session, so re-running the same book overwrites an
-    identical file and a different book cannot land on top of one already
-    executed under a different digest.
+    Named by fingerprint, session **and digest**. The first two alone were a
+    hole: `aqr` names its output by session, so a book regenerated for the same
+    `as_of` with different weights landed on the same archive path and replaced
+    the evidence of the pass before it. That was survivable while a session held
+    one pass. It is not survivable now that a new book may be acted on the same
+    day — the journal line would name a digest no file on disk had.
+
+    Writing the digest into the name also keeps this idempotent for the reason
+    it always was: the same bytes archived twice is one file, because the same
+    bytes cannot have two digests.
     """
     archive = directory / BOOK_ARCHIVE
     archive.mkdir(parents=True, exist_ok=True)
-    path = archive / f"{book.fingerprint}-{book.as_of.isoformat()}.json"
+    path = (
+        archive
+        / f"{book.fingerprint}-{book.as_of.isoformat()}-{book.digest[:12]}.json"
+    )
     path.write_bytes(raw.encode("utf-8"))
     return path
 
@@ -388,17 +567,29 @@ def today_totals(journal: Journal, day: date) -> tuple[int, Decimal]:
     return orders, turnover
 
 
-def already_planned(journal: Journal, day: date, digest: str) -> bool:
-    """Whether this exact book has already been rebalanced today.
+def already_decided(journal: Journal, day: date, digest: str) -> bool:
+    """Whether this exact book has already been passed on today.
 
-    Keyed on the *digest*, not the fingerprint or the session: a book
+    Keyed on the *digest*, not on the fingerprint and not on the session: a book
     regenerated mid-morning with new weights is a different instruction and
     should be acted on, while the same bytes seen twice is a restart.
+
+    This is the whole of the idempotence rule. A day-keyed guard was simpler and
+    wrong in a way that matters to this system: research is the point, and a
+    strategy that improves at eleven o'clock should not have to wait for
+    tomorrow's open to be held. What must not happen is the *same* instruction
+    being executed twice, and the digest is exactly that instruction's identity.
+
+    Bounded by the Gate rather than by this function: `max_daily_orders` and
+    `max_daily_turnover_pct` count across the whole session, so a second pass
+    spends a budget the first one has already drawn on
+    ([09](../../../../specs/09-equity-execution.md) D5). That is where a runaway
+    regeneration loop stops, and it stops it by cost rather than by clock.
     """
     return any(
         record.get("kind") == CYCLE_KIND
         and str(record.get("strategy", {}).get("digest", "")) == digest
-        and str(record.get("stage", "")) in {"submitted", "no_trades", "halted"}
+        and str(record.get("stage", "")) in DECIDED_STAGES
         for record in journal.read(day)
         if isinstance(record.get("strategy"), Mapping)
     )
@@ -489,13 +680,19 @@ def run_equity_cycle(
 
     path = find_latest_book(context.books, context.pinned_fingerprint)
     if path is None:
+        # The directory is not necessarily empty — it may hold a book for a
+        # strategy the pin does not name, which globs right past us. Say so, or
+        # "no target book" is a true sentence that sends the reader nowhere.
+        advice = changed_pin_advice(
+            unpinned_books(context.books, context.pinned_fingerprint)
+        )
         return _empty(
             cycle_id,
             as_of,
             EquityStage.NO_BOOK,
             note=(
                 f"no target book for {context.pinned_fingerprint} in {context.books}; "
-                "run `aqr target-book` first"
+                + (advice.replace("\n", " ") if advice else "run `aqr target-book` first")
             ),
         )
     try:
@@ -570,7 +767,7 @@ def run_equity_cycle(
             cycle_id=cycle_id,
             kind=CYCLE_KIND,
             as_of=as_of,
-            stage=EquityStage.NO_TRADES,
+            stage=EquityStage.NO_MARKS if plan.is_blind else EquityStage.NO_TRADES,
             strategy=strategy_view(book),
             equity=account.equity,
             band_pct=plan.band_pct,

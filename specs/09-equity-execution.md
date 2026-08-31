@@ -63,6 +63,30 @@ name. This is the whole of "only the strategy `ai_quant_researcher` provides".
 machine, which refuses to skip a step. Reading it here means the lifecycle rule
 is enforced on the execution side too, rather than trusted.
 
+**The pin refuses silently, so it also has to report.** `find_latest_book` globs
+on the pinned fingerprint, which means a book for a strategy the pin does not
+name is not merely refused — it is never looked at. "No target book" and "your
+pin is stale" come out as the same sentence, and the second one sends the reader
+to source to find out which they got.
+
+So when **no** book matches the pin, `equity-preflight` and the `NO_BOOK` journal
+line list what *is* on disk under some other fingerprint — newest per strategy,
+name and `as_of` and file — and name the one line that would admit it:
+`ALPHAGATE_STRATEGY_FINGERPRINT` in `.env.local`.
+
+**When the pinned book is found, this is silent**, however many other strategies
+sit beside it. That is what a research repository looks like on an ordinary day.
+There is deliberately no cleverness about which book is *newer*: a target book
+stays in force for as long as the strategy does, so its `as_of` is the session
+the weights describe and not a freshness signal, and a rule built on comparing
+them would fire on healthy mornings — which teaches its reader to skim past the
+one morning it is real.
+
+It reports and stops there. Nothing changes the pin, nothing offers to, and
+`equity-preflight` does not fail on it. Changing which strategy this account
+executes is a person's decision, and a system that made it automatically would
+have deleted the only property the pin exists to provide.
+
 ## D2 — Weights become shares, and the executor owns every step
 
 The book carries weights. Turning one into an order needs four things it
@@ -202,17 +226,56 @@ day)`. A timeout is resolved by reading it back, never by resending —
 
 `equity-run` is a long-lived process:
 
-* **one rebalance pass per session**, at a configured offset after the open
-  (default 15 minutes — enough for the opening auction to settle, early enough
-  that the book is not a lunchtime book);
+* **one rebalance pass per book**, the first no earlier than a configured offset
+  after the open (default 15 minutes — enough for the opening auction to settle,
+  early enough that the book is not a lunchtime book);
 * **a heartbeat every 30 seconds** that re-reads account and positions, re-marks
   the book, and rewrites `equity-status.json`, so the dashboard is live even on
   the four days in five when the plan is empty;
 * **a reconcile pass** that reads back every order the session submitted and
   amends its journal line with the fill.
 
-The pass is idempotent by day: a restart at 14:00 finds the day's plan already
-journalled and does not replay it. Same discipline as the options runner.
+**The pass is idempotent by book, not by day.** The guard is the journal, keyed
+on the book's digest: a restart at 14:00 finds today's line for the book on disk
+and does not replay it, while a book *regenerated* at 14:00 with different
+weights is a different instruction and gets its own pass.
+
+Keying on the day was the first version and it was wrong for this project.
+Research is the point of the system, and a strategy that improves at eleven
+o'clock should not have to wait for tomorrow's open to be held. What must not
+happen is the same instruction being executed twice, and the digest is precisely
+that instruction's identity — the fingerprint is the *strategy*, the `as_of` is
+the *session*, and neither distinguishes two books that disagree.
+
+Nothing here is a rate limit, and it deliberately is not one. A second pass is
+bounded by the Gate: `max_daily_orders` and `max_daily_turnover_pct` count
+across the whole session (D5), so the second pass spends a budget the first has
+already drawn on. `max_daily_turnover_pct` is 1.20 for exactly this reason —
+one full build plus a rebalance, and a third pass runs out of room. A
+regeneration loop is stopped by cost, which is measurable, rather than by a
+clock, which is arbitrary.
+
+Whether a pass settles its book is decided by an allowlist of **deciding
+stages**, so a stage nobody has classified is quiet rather than terminal. Two
+are deliberately outside it: `NO_BOOK`, where the artefact was missing or
+unreadable, and `NO_MARKS`, where the pass could not read a usable price for any
+symbol in it. Neither is an opinion about the book, and both are fixed by looking
+again a little later. Every other stage settles it.
+
+`NO_MARKS` exists because without it a blind pass is indistinguishable from a
+quiet one. Both produce an empty plan with every symbol accounted for; the
+difference is whether the account of each symbol reads "already held" or "no
+usable quote", and only the first is an answer. On 2026-08-31 a pass ran four
+minutes before the open against a feed that does not tick pre-market, skipped
+all 87 names as `stale_mark`, recorded `NO_TRADES`, and closed the session. The
+book was never built.
+
+Blindness is total rather than proportional: a pass is blind only when *every*
+skip is `no_mark` or `stale_mark`. Names go stale one at a time all session and
+that is ordinary trading, so a single readable price is enough to make the pass
+a decision — no threshold, and nothing to tune. `not_tradeable` is not
+blindness: a halted symbol is a price we could read and a market we cannot
+reach, and waiting thirty seconds is not the remedy.
 
 ## D9 — What lands on disk
 
@@ -220,13 +283,22 @@ journalled and does not replay it. Same discipline as the options runner.
 | --- | --- |
 | `journal/YYYY-MM-DD.jsonl` | the same file. Equity cycles carry `kind: "equity"` |
 | `journal/equity-status.json` | the live equity book, rewritten every heartbeat |
-| `journal/books/<fingerprint>-<as_of>.json` | the book as loaded, copied verbatim |
+| `journal/books/<fingerprint>-<as_of>-<digest12>.json` | the book as loaded, copied verbatim |
 
 The book is copied rather than referenced. `aqr` regenerates
 `runs/target_books/` daily; a journal line pointing at a path whose contents
 have since changed is a record of nothing. The copy is hashed and the digest
 goes in the journal line, so a book on disk that no longer matches what was
 executed can be identified as such.
+
+The digest is in the archive's **filename** too, and it has to be. `aqr` names
+its output by session, so a book regenerated for the same `as_of` overwrites its
+own file upstream — and an archive that copied only fingerprint and session
+would overwrite the evidence of the pass that ran before it, leaving a journal
+line naming a digest no file on disk had. That was survivable while a session
+held one pass. Now that D8 admits a second, it is not. Two books, two files; the
+same book archived twice is still one file, because the same bytes cannot have
+two digests.
 
 A cycle line carries the plan, every intent, every intent's verdict with the
 full check tape, and the submission. `NO_TRADES` is journalled like any other

@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from enum import Enum
+from typing import Final
 
 from alphagate.core.errors import InvariantViolation
 from alphagate.core.identifiers import Ticker
@@ -239,6 +240,30 @@ class RebalancePlan:
         return not self.intents
 
     @property
+    def is_blind(self) -> bool:
+        """Whether this pass failed to read a single price it needed.
+
+        Distinct from `is_empty`, and the distinction is worth a session. An
+        empty plan normally means the book is already held — the honest
+        four-days-in-five answer. But a plan that skipped *every* symbol for
+        want of a usable quote decided nothing at all, and from the outside the
+        two look identical: on 2026-08-31 a pass ran at 13:26, four minutes
+        before the open, found all 87 names stale against the 90s limit,
+        recorded `no_trades`, and closed the day. The book was never built.
+
+        Total rather than proportional. Names go stale one at a time all
+        session and that is ordinary; only a pass that could see *nothing* has
+        failed to decide, and that is unambiguous enough to need no threshold.
+
+        `NOT_TRADEABLE` is deliberately not blindness. A halted symbol is a
+        price we could read and a market we cannot reach — waiting thirty
+        seconds is not the remedy, so it must not reopen the day.
+        """
+        return bool(self.skipped) and not self.intents and all(
+            skip.reason in _UNPRICED for skip in self.skipped
+        )
+
+    @property
     def buy_notional(self) -> Decimal:
         return sum(
             (i.notional for i in self.intents if i.side is EquitySide.BUY), Decimal(0)
@@ -259,6 +284,11 @@ class RebalancePlan:
         for skip in self.skipped:
             tally[skip.reason.value] = tally.get(skip.reason.value, 0) + 1
         return tally
+
+
+_UNPRICED: Final = frozenset({SkipReason.NO_MARK, SkipReason.STALE_MARK})
+"""The skips that mean *we never saw a price*, as opposed to *we saw one and
+chose not to act on it*. Read by `RebalancePlan.is_blind`."""
 
 
 # --------------------------------------------------------------------------- #

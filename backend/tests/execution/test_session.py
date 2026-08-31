@@ -13,11 +13,17 @@ the live session uses, rather than being handed to the tests pre-parsed.
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
 from alphagate.execution import MalformedToolOutput, RecordedSession, unwrap
 from alphagate.execution.session import ENVELOPE_KEY, UNTRUSTED, McpSession
+from alphagate.execution.stdio import (
+    FASTMCP_TOOLS_LOGGER,
+    UnstructuredOutputFilter,
+    quiet_unstructured_output,
+)
 from tests.execution.conftest import payload, payload_json
 
 
@@ -161,3 +167,67 @@ class TestNoSecretsInTheFixtures:
         data = payload_json("place_option_order")["data"]
         assert data["id"] != "REDACTED"
         assert data["client_order_id"].startswith("alphagate-")
+
+
+class TestTheStructuredContentNoise:
+    """The live client logs an ERROR per call for something that is not one.
+
+    `alpaca-mcp-server` declares an output schema of `dict[str, Any]` on several
+    tools and then answers with `structuredContent: null`. fastmcp's client
+    validates the one against the other, fails, and logs at ERROR — once per
+    call, so a 30-second heartbeat paints the terminal red all session while
+    everything works. We never read `result.data`; `_text_of` takes the content
+    block. The record is noise about a field we do not use.
+
+    Filtered rather than silenced: the predicate matches that exact failure, so
+    a server that returns structured content which is genuinely wrong still says
+    so.
+    """
+
+    def _record(self, message: str, level: int = logging.ERROR) -> logging.LogRecord:
+        return logging.LogRecord(
+            name=FASTMCP_TOOLS_LOGGER,
+            level=level,
+            pathname=__file__,
+            lineno=1,
+            msg=message,
+            args=(),
+            exc_info=None,
+        )
+
+    def test_the_null_structured_content_record_is_dropped(self) -> None:
+        noise = (
+            "[Client-d97b] Error parsing structured content: 1 validation error "
+            "for dict[str,any]\n  Input should be a valid dictionary "
+            "[type=dict_type, input_value=None, input_type=NoneType]"
+        )
+        assert not UnstructuredOutputFilter().filter(self._record(noise))
+
+    def test_a_real_validation_failure_still_speaks(self) -> None:
+        """Structured content that is present and wrong is a server bug we want
+        to hear about — the whole reason this is a filter and not a log level."""
+        real = (
+            "[Client-d97b] Error parsing structured content: 1 validation error "
+            "for dict[str,any]\n  Input should be a valid dictionary "
+            "[type=dict_type, input_value='oops', input_type=str]"
+        )
+        assert UnstructuredOutputFilter().filter(self._record(real))
+
+    def test_unrelated_errors_are_untouched(self) -> None:
+        assert UnstructuredOutputFilter().filter(
+            self._record("[Client-d97b] connection closed by peer")
+        )
+
+    def test_installing_it_twice_leaves_one_filter(self) -> None:
+        """`open()` runs per session and a session is opened per command."""
+        logger = logging.getLogger(FASTMCP_TOOLS_LOGGER)
+        before = list(logger.filters)
+        try:
+            quiet_unstructured_output()
+            quiet_unstructured_output()
+            installed = [
+                f for f in logger.filters if isinstance(f, UnstructuredOutputFilter)
+            ]
+            assert len(installed) == 1
+        finally:
+            logger.filters = before

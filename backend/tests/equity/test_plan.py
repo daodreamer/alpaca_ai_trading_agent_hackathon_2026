@@ -451,3 +451,104 @@ def _ddd() -> Ticker:
     from alphagate.core.identifiers import ticker
 
     return ticker("DDD")
+
+
+# --------------------------------------------------------------------- #
+# Blindness — an empty plan that decided nothing
+# --------------------------------------------------------------------- #
+
+
+def test_a_plan_that_priced_nothing_is_blind(
+    book: TargetBook,
+    holdings: list[Holding],
+    marks: dict[Ticker, Mark],
+    policy: EquityPolicy,
+) -> None:
+    """Every symbol stale is not "the book is already held" — it is "no idea".
+
+    The pre-open case, and the one that cost a session: the free feed does not
+    tick before 13:30, so a pass at 13:26 skips all of them and looks, from the
+    stage alone, exactly like a quiet day.
+    """
+    blind = {
+        symbol: replace(mark, age_seconds=policy.max_quote_age + 1)
+        for symbol, mark in marks.items()
+    }
+    result = plan(book, holdings, blind, policy)
+    assert result.is_empty
+    assert result.is_blind
+
+
+def test_a_plan_with_nothing_to_do_is_not_blind(
+    book: TargetBook,
+    holdings: list[Holding],
+    marks: dict[Ticker, Mark],
+    policy: EquityPolicy,
+) -> None:
+    """The common case. Empty, but it saw every price it needed to."""
+    result = plan(book, holdings, marks, policy)
+    assert result.is_empty
+    assert not result.is_blind
+
+
+def test_one_readable_price_is_enough_to_not_be_blind(
+    book: TargetBook,
+    holdings: list[Holding],
+    marks: dict[Ticker, Mark],
+    policy: EquityPolicy,
+) -> None:
+    """Blindness is total, not proportional.
+
+    A partly stale book is an ordinary session — names come and go stale all
+    day. Only a pass that could read *nothing* has failed to decide.
+    """
+    partly = {
+        **{
+            symbol: replace(mark, age_seconds=policy.max_quote_age + 1)
+            for symbol, mark in marks.items()
+        },
+        AAA: marks[AAA],
+    }
+    result = plan(book, holdings, partly, policy)
+    assert result.is_empty
+    assert not result.is_blind
+
+
+def test_a_missing_mark_counts_as_blindness_too(
+    book: TargetBook,
+    holdings: list[Holding],
+    policy: EquityPolicy,
+) -> None:
+    """`NO_MARK` and `STALE_MARK` are the same failure seen twice."""
+    result = plan(book, holdings, {}, policy)
+    assert result.is_empty
+    assert result.is_blind
+
+
+def test_a_plan_with_orders_is_never_blind(
+    book: TargetBook,
+    marks: dict[Ticker, Mark],
+    policy: EquityPolicy,
+) -> None:
+    result = plan(book, [], marks, policy)
+    assert not result.is_empty
+    assert not result.is_blind
+
+
+def test_an_untradeable_book_is_not_blind(
+    book: TargetBook,
+    holdings: list[Holding],
+    marks: dict[Ticker, Mark],
+    policy: EquityPolicy,
+) -> None:
+    """A halted symbol is a price we can read and a market we cannot reach.
+
+    Retrying it in thirty seconds is not the remedy, so it must not reopen the
+    day the way a stale quote does.
+    """
+    halted = {
+        symbol: replace(mark, tradeable=False) for symbol, mark in marks.items()
+    }
+    result = plan(book, holdings, halted, policy)
+    assert result.is_empty
+    assert not result.is_blind

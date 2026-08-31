@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import threading
 from collections.abc import Mapping, Sequence
@@ -36,7 +37,16 @@ from alphagate.execution.errors import (
 )
 from alphagate.execution.session import ToolArgument, ToolResult, unwrap
 
-__all__ = ["DEFAULT_TIMEOUT", "StdioSession"]
+__all__ = [
+    "DEFAULT_TIMEOUT",
+    "FASTMCP_TOOLS_LOGGER",
+    "StdioSession",
+    "UnstructuredOutputFilter",
+    "quiet_unstructured_output",
+]
+
+FASTMCP_TOOLS_LOGGER: Final = "fastmcp.client.mixins.tools"
+"""Where the client logs its post-call schema validation."""
 
 DEFAULT_TIMEOUT: Final = 30.0
 """Seconds to wait for one tool call. Generous: a cold `uvx` start is slow, and
@@ -81,6 +91,8 @@ class StdioSession:
     def open(self) -> None:
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
+
+        quiet_unstructured_output()
 
         loop = asyncio.new_event_loop()
         thread = threading.Thread(target=loop.run_forever, name="mcp-stdio", daemon=True)
@@ -142,6 +154,53 @@ class StdioSession:
             raise ToolTimeout(f"no answer within {timeout}s") from exc
         except Exception as exc:
             raise TransportFailure(f"{type(exc).__name__}: {exc}") from exc
+
+
+# ---------------------------------------------------------------------- #
+# One line of the server's output that is not ours to fix
+# ---------------------------------------------------------------------- #
+
+
+class UnstructuredOutputFilter(logging.Filter):
+    """Drops the client's complaint that `structuredContent` was null.
+
+    `alpaca-mcp-server` declares an output schema of `dict[str, Any]` on several
+    tools and then answers with `structuredContent: null`. fastmcp's client
+    validates the second against the first, fails, and logs at ERROR — once per
+    call. A thirty-second heartbeat therefore paints the terminal red all
+    session while every order goes through, which is worse than useless: it
+    teaches the operator that red means nothing on the one screen where red has
+    to mean something.
+
+    We never read the field it is complaining about. `_text_of` takes the
+    content block, which is present and correct and carries the trust envelope.
+
+    A filter and not a log level, and the predicate is narrow on purpose:
+    structured content that is *present and wrong* is a real server bug and
+    still gets through. Only `input_value=None` — the field was simply absent —
+    is dropped.
+    """
+
+    _MESSAGE: Final = "Error parsing structured content"
+    _ABSENT: Final = "input_value=None"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno < logging.ERROR:
+            return True
+        message = record.getMessage()
+        return not (self._MESSAGE in message and self._ABSENT in message)
+
+
+def quiet_unstructured_output() -> None:
+    """Install the filter once, idempotently.
+
+    Called from `open()` rather than at import: a logging side effect at import
+    time would reach any process that merely touched this module, and this is a
+    workaround for one server's behaviour, not a property of the package.
+    """
+    logger = logging.getLogger(FASTMCP_TOOLS_LOGGER)
+    if not any(isinstance(f, UnstructuredOutputFilter) for f in logger.filters):
+        logger.addFilter(UnstructuredOutputFilter())
 
 
 def _text_of(tool: str, result: Any) -> str:

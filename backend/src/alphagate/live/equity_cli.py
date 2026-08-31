@@ -45,12 +45,16 @@ from alphagate.live.equity import (
     EquityContext,
     EquityCycleRecord,
     EquityStage,
+    already_decided,
+    changed_pin_advice,
+    digest_of,
     find_latest_book,
     marks_from,
     read_book,
     run_equity_cycle,
     strategy_view,
     today_totals,
+    unpinned_books,
 )
 from alphagate.live.equity_status import (
     build_equity_status,
@@ -158,7 +162,12 @@ def cmd_equity_preflight(args: argparse.Namespace) -> int:
     path = find_latest_book(books, pinned)
     check("a target book exists", path is not None, str(path) if path else str(books))
     if path is None:
-        print("\nRun `aqr target-book <fingerprint>` in ai_quant_researcher first.")
+        # A stale pin and an empty directory are the same sentence from here
+        # — the glob is on the fingerprint — and completely different
+        # problems. Say which one it is.
+        advice = changed_pin_advice(unpinned_books(books, pinned))
+        fallback = "Run `aqr target-book <fingerprint>` in ai_quant_researcher first."
+        print("\n" + (advice or fallback))
         return 1
 
     try:
@@ -281,8 +290,10 @@ def cmd_equity_run(args: argparse.Namespace) -> int:
     account and re-marking the book every thirty seconds is what makes the
     dashboard say *running* honestly.
 
-    The pass itself is guarded by the journal rather than by a flag: a restart at
-    14:00 finds today's record and does not replay it.
+    The pass is guarded by the journal rather than by a flag, and keyed on the
+    *book* rather than on the day: a restart at 14:00 finds today's record for
+    the book on disk and does not replay it, while a book regenerated at 14:00
+    is a new instruction and gets its own pass. specs/09 D8.
     """
     now = datetime.now(UTC)
     open_at, close_at = _bounds(args, now)
@@ -307,14 +318,14 @@ def cmd_equity_run(args: argparse.Namespace) -> int:
             )
             return 0
         context, state = _context(args, mcp)
-        traded = _already_traded_today(context, now)
         while True:
             now = datetime.now(UTC)
             if now >= close_at:
                 print("Session over.")
                 break
 
-            if not traded and now >= pass_at:
+            pending = _book_awaiting_a_pass(context, now)
+            if pending and now >= pass_at:
                 record = run_equity_cycle(
                     context,
                     as_of=now,
@@ -323,31 +334,45 @@ def cmd_equity_run(args: argparse.Namespace) -> int:
                 )
                 context.journal.append(record)
                 _print_cycle(record)
-                traded = record.stage is not EquityStage.NO_BOOK
+                pending = not record.stage.decided
                 if record.stage is EquityStage.HALTED:
                     print("Halted. Reconcile by hand before resuming.")
                     _persist(context, state)
                     return 1
 
             sequence += 1
-            _heartbeat(context, as_of=now, next_pass=None if traded else pass_at, sequence=sequence)
+            _heartbeat(
+                context, as_of=now, next_pass=pass_at if pending else None, sequence=sequence
+            )
             _persist(context, state)
             time.sleep(min(HEARTBEAT_SECONDS, max(1.0, (close_at - now).total_seconds())))
     return 0
 
 
-def _already_traded_today(context: EquityContext, now: datetime) -> bool:
-    """Whether a pass has already reached a decision today.
+def _book_awaiting_a_pass(context: EquityContext, now: datetime) -> bool:
+    """Whether the newest book on disk still needs a pass today.
 
-    `NO_BOOK` does not count: it means the artefact was missing or refused, and
-    the right behaviour is to keep looking — `aqr target-book` may still be
-    running when the session opens.
+    Asked every beat rather than latched at the open, because the answer can
+    change during a session: `aqr target-book` writing a better book is a new
+    instruction, and the session should pick it up rather than sleep through it
+    (specs/09 D8).
+
+    Three cases, all of them "keep looking":
+
+    * no book on disk — the pass journals why, and `aqr` may still be running;
+    * the file cannot be read this instant — it is being rewritten;
+    * the newest book has not reached a deciding stage today.
+
+    The archive is what makes the middle case safe to retry: a pass that got
+    part-way records what it saw against the digest it saw it under.
     """
-    decided = {"submitted", "no_trades", "planned", "vetoed", "halted", "stale_book"}
-    return any(
-        record.get("kind") == "equity" and str(record.get("stage", "")) in decided
-        for record in context.journal.read(now.date())
-    )
+    path = find_latest_book(context.books, context.pinned_fingerprint)
+    if path is None:
+        return True
+    digest = digest_of(path)
+    if digest is None:
+        return True
+    return not already_decided(context.journal, now.date(), digest)
 
 
 # ------------------------------------------------------------------ #

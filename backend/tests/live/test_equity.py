@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -28,15 +30,20 @@ from alphagate.execution.equity import PLACE_STOCK_ORDER_TOOL
 from alphagate.journal import Journal
 from alphagate.live.equity import (
     BOOK_ARCHIVE,
+    DECIDED_STAGES,
     EquityContext,
     EquityStage,
+    already_decided,
     archive_book,
+    changed_pin_advice,
     cycle_id_for,
+    digest_of,
     find_latest_book,
     marks_from,
     read_book,
     run_equity_cycle,
     today_totals,
+    unpinned_books,
 )
 from alphagate.marketdata import StockSnapshot
 from tests.equity.conftest import AAA, BBB, CCC, FINGERPRINT
@@ -332,6 +339,65 @@ def test_a_book_already_held_produces_no_orders(context: EquityContext) -> None:
     assert context.mcp.calls_to(PLACE_STOCK_ORDER_TOOL) == []
 
 
+def test_a_pass_that_priced_nothing_is_not_a_no_trade_day(
+    tmp_path: Path, books: Path
+) -> None:
+    """The 2026-08-31 failure, in one test.
+
+    Before the open the free feed does not tick, so every quote is minutes old
+    and every symbol is skipped. That is not "the book is already held"; it is
+    "we could not look". Recording it as `NO_TRADES` closed the session and the
+    book was never built.
+    """
+    context = EquityContext(
+        data=StubMarketData(
+            {AAA: Decimal(100), BBB: Decimal(50), CCC: Decimal(25)},
+            age_seconds=DEFAULT_EQUITY_POLICY.max_quote_age + 1,
+        ),  # type: ignore[arg-type]
+        mcp=session(),
+        journal=Journal(directory=tmp_path / "journal"),
+        books=books,
+        pinned_fingerprint=FINGERPRINT,
+        policy=DEFAULT_EQUITY_POLICY,
+    )
+    record = run_equity_cycle(context, as_of=NOW, submit=True)
+    assert record.stage is EquityStage.NO_MARKS
+    assert record.orders == ()
+    assert "3 stale_mark" in record.note
+    assert context.mcp is not None
+    assert context.mcp.calls_to(PLACE_STOCK_ORDER_TOOL) == []  # type: ignore[union-attr]
+
+
+def test_a_blind_pass_is_still_journalled(tmp_path: Path, books: Path) -> None:
+    """Not deciding is a thing that happened and the journal must say so.
+
+    `NO_MARKS` differs from `NO_TRADES` only in whether the day stays open; both
+    are a line in the file, because "the process was up and saw nothing" is an
+    answer and silence is not.
+    """
+    journal = Journal(directory=tmp_path / "journal")
+    context = EquityContext(
+        data=StubMarketData(
+            {AAA: Decimal(100)},
+            age_seconds=DEFAULT_EQUITY_POLICY.max_quote_age + 1,
+        ),  # type: ignore[arg-type]
+        mcp=session(),
+        journal=journal,
+        books=books,
+        pinned_fingerprint=FINGERPRINT,
+        policy=DEFAULT_EQUITY_POLICY,
+    )
+    journal.append(run_equity_cycle(context, as_of=NOW, submit=True))
+    written = journal.read(NOW.date())
+    assert [row["stage"] for row in written] == ["no_marks"]
+
+
+def test_no_marks_does_not_count_as_having_traded() -> None:
+    """The stage is only useful if the session guard agrees with it."""
+    assert EquityStage.NO_MARKS.value not in DECIDED_STAGES
+    assert EquityStage.NO_TRADES.value in DECIDED_STAGES
+
+
 def test_a_dry_pass_gates_everything_and_sends_nothing(context: EquityContext) -> None:
     """A first-class outcome, not a flag threaded through the trading path — so
     the journal never has to be read as "submitted, but not really"."""
@@ -434,9 +500,15 @@ def test_the_record_carries_the_provenance_the_dashboard_renders(
 
 
 def test_the_book_is_archived_by_the_pass(context: EquityContext) -> None:
-    run_equity_cycle(context, as_of=NOW, submit=False)
+    """Named by fingerprint, session and digest, so a book regenerated for the
+    same session cannot land on top of the one that was executed."""
+    record = run_equity_cycle(context, as_of=NOW, submit=False)
     archive = context.journal.directory / BOOK_ARCHIVE
-    assert (archive / f"{FINGERPRINT}-2026-08-27.json").is_file()
+    copied = list(archive.iterdir())
+    assert len(copied) == 1
+    assert copied[0].name == (
+        f"{FINGERPRINT}-2026-08-27-{record.strategy['digest'][:12]}.json"
+    )
 
 
 def test_marks_are_requested_for_the_union_of_held_and_wanted(
@@ -486,3 +558,383 @@ def _row(symbol: str, qty: str) -> dict[str, Any]:
         "avg_entry_price": "1",
         "market_value": "1",
     }
+
+
+# --------------------------------------------------------------------- #
+# The session guard — one pass per book, not one per day
+# --------------------------------------------------------------------- #
+
+
+def journalled(
+    journal: Journal, digest: str, stage: EquityStage, *, sequence: int = 0
+) -> None:
+    """A minimal cycle line — only the fields the guard reads."""
+    journal.append(
+        {
+            "kind": "equity",
+            "cycle_id": cycle_id_for(NOW, sequence),
+            "as_of": NOW.isoformat(),
+            "stage": stage.value,
+            "strategy": {"fingerprint": FINGERPRINT, "digest": digest},
+        }
+    )
+
+
+def test_the_same_book_is_not_rebalanced_twice(tmp_path: Path) -> None:
+    """A restart at 14:00 must not replay the morning."""
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.SUBMITTED)
+    assert already_decided(journal, NOW.date(), "abc123")
+
+
+def test_a_regenerated_book_is_a_new_instruction(tmp_path: Path) -> None:
+    """The point of keying on the digest.
+
+    A book rebuilt mid-session with different weights is a different set of
+    orders, and the research having improved is not a reason to wait until
+    tomorrow to hold what it now says to hold.
+    """
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.SUBMITTED)
+    assert not already_decided(journal, NOW.date(), "def456")
+
+
+def test_a_blind_pass_does_not_settle_a_book(tmp_path: Path) -> None:
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.NO_MARKS)
+    assert not already_decided(journal, NOW.date(), "abc123")
+
+
+def test_a_quiet_pass_does_settle_a_book(tmp_path: Path) -> None:
+    """`NO_TRADES` about this book is an answer about this book."""
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.NO_TRADES)
+    assert already_decided(journal, NOW.date(), "abc123")
+
+
+def test_a_book_refused_as_stale_is_not_retried(tmp_path: Path) -> None:
+    """Re-reading the same too-old file cannot make it younger. A *new* file
+    gets a new digest and its own pass."""
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.STALE_BOOK)
+    assert already_decided(journal, NOW.date(), "abc123")
+
+
+def test_yesterdays_pass_does_not_settle_todays_book(tmp_path: Path) -> None:
+    """Same bytes, new session: the holdings drifted overnight."""
+    journal = Journal(directory=tmp_path)
+    journalled(journal, "abc123", EquityStage.SUBMITTED)
+    assert not already_decided(journal, NOW.date() + timedelta(days=1), "abc123")
+
+
+def test_an_options_cycle_is_not_an_equity_decision(tmp_path: Path) -> None:
+    """One journal, two agents — specs/06. The kind is load-bearing."""
+    journal = Journal(directory=tmp_path)
+    journal.append(
+        {
+            "kind": "option",
+            "cycle_id": "2026-08-28-SPY-001",
+            "as_of": NOW.isoformat(),
+            "stage": "submitted",
+            "strategy": {"digest": "abc123"},
+        }
+    )
+    assert not already_decided(journal, NOW.date(), "abc123")
+
+
+def test_a_line_without_a_strategy_is_stepped_over(tmp_path: Path) -> None:
+    """`NO_BOOK` carries no strategy at all, and a heartbeat carries no stage."""
+    journal = Journal(directory=tmp_path)
+    stub = {"cycle_id": cycle_id_for(NOW, 0), "as_of": NOW.isoformat()}
+    journal.append({**stub, "kind": "equity", "stage": "no_book"})
+    journal.append(
+        {**stub, "kind": "equity", "stage": "submitted", "strategy": None}
+    )
+    assert not already_decided(journal, NOW.date(), "abc123")
+
+
+# --------------------------------------------------------------------- #
+# The digest the guard keys on
+# --------------------------------------------------------------------- #
+
+
+def test_the_guards_digest_is_the_one_the_journal_records(books: Path) -> None:
+    """Two ways of hashing the same file is one way of hashing it wrong.
+
+    The guard cannot afford to parse and validate a book every thirty seconds,
+    so it hashes the bytes directly — and that hash has to be the number
+    `read_book` puts in the journal, or the guard compares against something
+    that is never there and every heartbeat starts a pass.
+    """
+    path = find_latest_book(books, FINGERPRINT)
+    assert path is not None
+    book, _ = read_book(path, pinned_fingerprint=FINGERPRINT)
+    assert digest_of(path) == book.digest
+
+
+def test_a_book_that_is_not_there_has_no_digest(tmp_path: Path) -> None:
+    """`aqr` rewrites its output in place. Reading during that window has to be
+    a "not yet", not a crash."""
+    assert digest_of(tmp_path / "gone.json") is None
+
+
+# --------------------------------------------------------------------- #
+# The archive, now that one session can hold two books
+# --------------------------------------------------------------------- #
+
+
+def test_two_books_for_the_same_session_do_not_overwrite_each_other(
+    tmp_path: Path, books: Path
+) -> None:
+    """The archive is the evidence of what was executed.
+
+    `aqr` names its output by session, and the archive used to copy that shape —
+    so a book regenerated for the same `as_of` silently replaced the record of
+    the pass before it. Now that a session can hold two passes, the digest has
+    to be in the name.
+    """
+    path = find_latest_book(books, FINGERPRINT)
+    assert path is not None
+    book, raw = read_book(path, pinned_fingerprint=FINGERPRINT)
+
+    revised_raw = raw + "\n"
+    revised = replace(book, digest=sha256(revised_raw.encode("utf-8")).hexdigest())
+
+    first = archive_book(raw, book, directory=tmp_path / "journal")
+    second = archive_book(revised_raw, revised, directory=tmp_path / "journal")
+
+    assert first != second
+    assert first.read_bytes().decode("utf-8") == raw
+    assert second.read_bytes().decode("utf-8") == revised_raw
+
+
+def test_the_same_book_archived_twice_is_one_file(tmp_path: Path, books: Path) -> None:
+    """Idempotent on a restart — the archive is a set of books, not a log of
+    passes."""
+    path = find_latest_book(books, FINGERPRINT)
+    assert path is not None
+    book, raw = read_book(path, pinned_fingerprint=FINGERPRINT)
+    first = archive_book(raw, book, directory=tmp_path / "journal")
+    second = archive_book(raw, book, directory=tmp_path / "journal")
+    assert first == second
+    assert len(list(first.parent.iterdir())) == 1
+
+
+# --------------------------------------------------------------------- #
+# The pin — what is on disk that we are not allowed to execute
+# --------------------------------------------------------------------- #
+
+
+OTHER = "96cbc95ab6f09a60"
+
+
+def write_book(
+    directory: Path,
+    payload: dict[str, Any],
+    *,
+    name: str,
+    fingerprint: str,
+    as_of: str,
+) -> Path:
+    """A book for some *other* strategy, named the way `aqr` names them."""
+    revised = {
+        **payload,
+        "spec_name": name,
+        "spec_fingerprint": fingerprint,
+        "as_of": as_of,
+    }
+    path = directory / f"{name}-{fingerprint}-{as_of}.json"
+    path.write_text(json.dumps(revised, indent=2), encoding="utf-8")
+    return path
+
+
+def test_a_directory_holding_only_the_pinned_book_is_quiet(books: Path) -> None:
+    """No advice is the common case and it must cost nothing to say."""
+    assert unpinned_books(books, FINGERPRINT) == ()
+
+
+def test_a_book_for_another_strategy_is_reported(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """The failure this exists for.
+
+    `find_latest_book` globs on the pinned fingerprint, so a book for a strategy
+    the pin does not name is *invisible* — the pass says "no target book" while
+    a perfectly good one sits in the same directory. The pin is right to refuse
+    it. Saying nothing about it is not.
+    """
+    write_book(
+        books, book_payload, name="low_vol_rs_carry_v5", fingerprint=OTHER,
+        as_of="2026-08-28",
+    )
+    found = unpinned_books(books, FINGERPRINT)
+    assert [(b.name, b.fingerprint, b.as_of) for b in found] == [
+        ("low_vol_rs_carry_v5", OTHER, "2026-08-28")
+    ]
+
+
+def test_the_pin_is_read_from_the_contents_not_the_filename(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """A file *named* for the pinned strategy whose contents say otherwise is
+    exactly the case `load_target_book` refuses, and the operator deserves to be
+    told why rather than left with a rejection."""
+    path = books / f"mislabelled-{FINGERPRINT}-2026-08-28.json"
+    path.write_text(
+        json.dumps({**book_payload, "spec_fingerprint": OTHER}), encoding="utf-8"
+    )
+    assert [b.fingerprint for b in unpinned_books(books, FINGERPRINT)] == [OTHER]
+
+
+def test_only_the_newest_book_per_strategy_is_reported(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """`aqr` writes one per session. A month of them is a wall of text, and the
+    only one that could possibly be meant is the latest."""
+    for as_of in ("2026-08-25", "2026-08-28", "2026-08-26"):
+        write_book(
+            books, book_payload, name="v5", fingerprint=OTHER, as_of=as_of
+        )
+    found = unpinned_books(books, FINGERPRINT)
+    assert [b.as_of for b in found] == ["2026-08-28"]
+
+
+def test_the_report_is_newest_first_and_deterministic(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """Same directory, same answer, same order — CLAUDE.md rule 7."""
+    write_book(books, book_payload, name="b", fingerprint="b" * 16, as_of="2026-08-26")
+    write_book(books, book_payload, name="a", fingerprint="a" * 16, as_of="2026-08-28")
+    write_book(books, book_payload, name="c", fingerprint="c" * 16, as_of="2026-08-26")
+    once = unpinned_books(books, FINGERPRINT)
+    assert [b.name for b in once] == ["a", "b", "c"]
+    assert unpinned_books(books, FINGERPRINT) == once
+
+
+def test_a_malformed_file_is_stepped_over(books: Path) -> None:
+    """This runs on the failure path. It must not have a failure path of its
+    own — a directory with junk in it is a directory we still report on."""
+    (books / "half-written.json").write_text("{not json", encoding="utf-8")
+    (books / "empty.json").write_text("", encoding="utf-8")
+    assert unpinned_books(books, FINGERPRINT) == ()
+
+
+def test_a_missing_directory_reports_nothing(tmp_path: Path) -> None:
+    assert unpinned_books(tmp_path / "nope", FINGERPRINT) == ()
+
+
+# --------------------------------------------------------------------- #
+# ...and what we tell the operator to do about it
+# --------------------------------------------------------------------- #
+
+
+def test_advice_names_the_variable_and_the_file(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """The whole value is being actionable. "Fingerprint mismatch" sends someone
+    reading source; this sends them to one line of one file."""
+    write_book(
+        books, book_payload, name="low_vol_rs_carry_v5", fingerprint=OTHER,
+        as_of="2026-08-28",
+    )
+    advice = changed_pin_advice(unpinned_books(books, FINGERPRINT))
+    assert "ALPHAGATE_STRATEGY_FINGERPRINT" in advice
+    assert ".env.local" in advice
+    assert OTHER in advice
+    assert "low_vol_rs_carry_v5" in advice
+
+
+def test_advice_is_empty_when_there_is_nothing_on_disk(books: Path) -> None:
+    """An empty directory is a different problem, and the caller says so
+    instead."""
+    assert changed_pin_advice(unpinned_books(books, FINGERPRINT)) == ""
+
+
+def test_advice_does_not_tell_anyone_it_switched(
+    books: Path, book_payload: dict[str, Any]
+) -> None:
+    """It reports and stops. Changing the pin is a person's decision — that is
+    the whole of what the pin is for (specs/09 D1), and advice that read like an
+    action taken would undo it."""
+    write_book(books, book_payload, name="v5", fingerprint=OTHER, as_of="2026-08-28")
+    advice = changed_pin_advice(unpinned_books(books, FINGERPRINT))
+    assert "change" in advice.lower()
+    assert "switched" not in advice.lower()
+
+
+# --------------------------------------------------------------------- #
+# ...and where the operator actually meets it
+# --------------------------------------------------------------------- #
+
+
+def test_a_pass_with_no_pinned_book_names_the_one_it_found(
+    tmp_path: Path, book_payload: dict[str, Any]
+) -> None:
+    """`equity-run` journals this, so the answer is in the file at 09:20 rather
+    than in whoever was watching the terminal."""
+    directory = tmp_path / "target_books"
+    directory.mkdir()
+    write_book(
+        directory, book_payload, name="low_vol_rs_carry_v5", fingerprint=OTHER,
+        as_of="2026-08-28",
+    )
+    context = EquityContext(
+        data=StubMarketData({}),  # type: ignore[arg-type]
+        mcp=session(),
+        journal=Journal(directory=tmp_path / "journal"),
+        books=directory,
+        pinned_fingerprint=FINGERPRINT,
+    )
+    record = run_equity_cycle(context, as_of=NOW, submit=False)
+    assert record.stage is EquityStage.NO_BOOK
+    assert OTHER in record.note
+    assert "ALPHAGATE_STRATEGY_FINGERPRINT" in record.note
+
+
+def test_a_pass_with_an_empty_directory_still_says_run_aqr(
+    tmp_path: Path
+) -> None:
+    """No book at all is a different problem, and must not be dressed up as a
+    pin that needs changing."""
+    directory = tmp_path / "target_books"
+    directory.mkdir()
+    context = EquityContext(
+        data=StubMarketData({}),  # type: ignore[arg-type]
+        mcp=session(),
+        journal=Journal(directory=tmp_path / "journal"),
+        books=directory,
+        pinned_fingerprint=FINGERPRINT,
+    )
+    record = run_equity_cycle(context, as_of=NOW, submit=False)
+    assert record.stage is EquityStage.NO_BOOK
+    assert "aqr target-book" in record.note
+    assert "ALPHAGATE_STRATEGY_FINGERPRINT" not in record.note
+
+
+def test_a_healthy_pass_never_mentions_the_pin(
+    tmp_path: Path, books: Path, book_payload: dict[str, Any]
+) -> None:
+    """The correction that matters.
+
+    The pin is right, the book is found, and another strategy happens to sit in
+    the same directory — which is what a research repository looks like on any
+    ordinary day, for as long as that book stays in force. A book's `as_of` is
+    not a freshness signal: the same file can be the one in force for weeks.
+    So there is no comparison to make and nothing to report; the guard speaks
+    only when the pin matched nothing at all.
+    """
+    write_book(books, book_payload, name="v5", fingerprint=OTHER, as_of="2026-09-30")
+    context = EquityContext(
+        data=StubMarketData(
+            {AAA: Decimal(100), BBB: Decimal(50), CCC: Decimal(25)}
+        ),  # type: ignore[arg-type]
+        mcp=session(),
+        journal=Journal(directory=tmp_path / "journal"),
+        books=books,
+        pinned_fingerprint=FINGERPRINT,
+        policy=DEFAULT_EQUITY_POLICY,
+    )
+    record = run_equity_cycle(context, as_of=NOW, submit=False)
+    assert record.stage is EquityStage.PLANNED
+    assert "ALPHAGATE_STRATEGY_FINGERPRINT" not in record.note
+    assert OTHER not in record.note
