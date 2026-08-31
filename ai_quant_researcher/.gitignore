@@ -86,10 +86,13 @@ data-sp500-suspect/
 # without it `--universe sp500_pit` does not resolve.
 !data-universes/
 
-# Also NOT ignored: data-benchmark/ holds one file, SPY 1D. The other two cache
-# roots are excluded for their size -- 1.3 GB between them -- and this one is
-# 280 KB, so `scripts/report_benchmark.py` runs from a fresh clone rather than
-# needing a pull first.
+# Also NOT ignored: data-benchmark/ holds SPY at 1D and 1h, one file each. The
+# other two cache roots are excluded for their size -- 1.3 GB between them --
+# and this one is 1.9 MB, so `scripts/report_benchmark.py` runs from a fresh
+# clone rather than needing a pull first. Both bar sizes are here because the
+# comparison is drawn at whatever timeframe the strategy was measured on, and
+# annualising two different sampling rates into one table would make numbers
+# that look comparable and are not.
 #
 # It does hold bars past the embargo, and that is fine for the same reason
 # stated above: the seal was never protection-by-obscurity. A strategy cannot

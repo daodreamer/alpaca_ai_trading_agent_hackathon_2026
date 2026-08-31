@@ -1006,6 +1006,15 @@ entry point takes no `--symbols` and the cap-weighted return is not
 reconstructible from constituent OHLCV. There is no market-cap column anywhere in
 this project.
 
+The root holds SPY at **1D and 1h**, and the comparison is drawn at whichever
+timeframe the strategy was measured on, read from its own most recent experiment
+rather than assumed. A 1h rule against a daily SPY would put two sampling rates
+in one table: both Sharpes are annualised, from different `periods_per_year`, so
+they would look comparable and would not be. `--timeframe` overrides it when a
+cross-rate look is what you actually want. Every sealed run so far is 1D; the 1h
+series is there so the first 1h candidate does not silently get compared against
+the wrong bar size.
+
 The third row feeds nothing. `SealedMeasurement` still regresses against the
 equal-weight series: swapping the benchmark would silently change what `alpha`
 and `beta` mean in every record already stored, and a comparison that rewrites

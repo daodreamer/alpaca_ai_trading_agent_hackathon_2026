@@ -21,14 +21,23 @@ and `aqr.cli_sealed` may, enforced over `src/` by
 `test_no_module_outside_the_embargo_layer_constructs_a_seal_token`, and a
 script that minted one would be a hole those tests do not scan for.
 
+**On the bar size.** The comparison is drawn at whatever timeframe the strategy
+was measured on, read from its own most recent experiment rather than assumed. A
+1h rule against a daily SPY would put two sampling rates in one table: both
+Sharpes are annualised, from different `periods_per_year`, so they would look
+comparable and would not be. `--timeframe` overrides it for a deliberate
+cross-rate look.
+
     python scripts/report_benchmark.py
     python scripts/report_benchmark.py --fingerprint 96cbc95ab6f09a60
+    python scripts/report_benchmark.py --timeframe 1h
 
-Fetch the series first, once:
+Fetch the series first, once per timeframe:
 
     cd ai_quant_researcher && uv run aqr-sealed pull \\
         --universe-file data-universes/benchmark_spy.json \\
-        --csv-root data-benchmark --start 2016-01-01 --end 2026-08-27
+        --csv-root data-benchmark --timeframe 1D \\
+        --start 2016-01-01 --end 2026-08-29
 """
 
 from __future__ import annotations
@@ -73,22 +82,44 @@ def _sealed_measurement(fingerprint: str | None) -> dict:
                 "SELECT name, fingerprint, sealed_result FROM strategies "
                 "WHERE sealed_result IS NOT NULL ORDER BY sealed_run_at DESC LIMIT 1"
             ).fetchone()
+        if row is None:
+            raise SystemExit(
+                f"no sealed run recorded for {fingerprint or '(any strategy)'}"
+            )
+        name, digest, blob = row
+        # The bar size the rule was measured on, taken from its own most recent
+        # experiment rather than assumed. A 1h rule compared against a daily SPY
+        # would be two different sampling rates in one table: the Sharpes are
+        # annualised from different `periods_per_year`, so the numbers would look
+        # comparable and would not be.
+        timeframe = conn.execute(
+            "SELECT timeframe FROM experiments WHERE fingerprint = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (digest,),
+        ).fetchone()
     finally:
         conn.close()
-    if row is None:
-        raise SystemExit(f"no sealed run recorded for {fingerprint or '(any strategy)'}")
-    name, digest, blob = row
     stored = json.loads(blob)
     stored["_name"] = name
     stored["_fingerprint"] = digest
+    stored["_timeframe"] = timeframe[0] if timeframe else "1D"
     return stored
 
 
-def _spy_over(first: datetime, last: datetime) -> tuple[object, int]:
-    bars = CsvProvider(BENCHMARK_ROOT).load(SYMBOL, first, last, "1D")
+def _spy_over(first: datetime, last: datetime, timeframe: str) -> tuple[object, int]:
+    series = BENCHMARK_ROOT / timeframe / f"{SYMBOL}.csv"
+    if not series.is_file():
+        raise SystemExit(
+            f"no {SYMBOL} {timeframe} bars at {series}\n"
+            "pull them with (from ai_quant_researcher/):\n"
+            "  uv run aqr-sealed pull --universe-file data-universes/benchmark_spy.json"
+            f" \\\n    --csv-root data-benchmark --timeframe {timeframe}"
+            " --start 2016-01-01 --end 2026-08-29"
+        )
+    bars = CsvProvider(BENCHMARK_ROOT).load(SYMBOL, first, last, timeframe)
     metrics = buy_and_hold({SYMBOL: bars})
     if metrics is None:
-        raise SystemExit(f"{SYMBOL} has too few bars between {first} and {last}")
+        raise SystemExit(f"{SYMBOL} has too few {timeframe} bars between {first} and {last}")
     return metrics, len(bars)
 
 
@@ -98,22 +129,24 @@ def main() -> int:
         "--fingerprint",
         help="which sealed run to report on (default: the most recent)",
     )
+    parser.add_argument(
+        "--timeframe",
+        help="override the bar size; defaults to the one the strategy was measured on",
+    )
     args = parser.parse_args()
 
-    if not (BENCHMARK_ROOT / "1D" / f"{SYMBOL}.csv").is_file():
-        raise SystemExit(
-            f"no {SYMBOL} bars under {BENCHMARK_ROOT}; see this file's docstring "
-            "for the one-time pull"
-        )
-
     stored = _sealed_measurement(args.fingerprint)
+    timeframe = args.timeframe or stored["_timeframe"]
     m = stored["measurement"]
     first = datetime.fromisoformat(m["first_session"]).astimezone(UTC)
     last = datetime.fromisoformat(m["last_session"]).astimezone(UTC)
 
-    spy, spy_bars = _spy_over(first, last)
+    spy, spy_bars = _spy_over(first, last, timeframe)
 
-    print(f"sealed window {first.date()} -> {last.date()}  ({m['observations']} sessions)")
+    print(
+        f"sealed window {first.date()} -> {last.date()}  "
+        f"({m['observations']} sessions, {timeframe} bars)"
+    )
     print(f"{stored['_name']} [{stored['_fingerprint']}]")
     print()
     print(f"{'':<26}{'return':>10}{'sharpe':>9}{'maxDD':>9}")
@@ -139,7 +172,7 @@ def main() -> int:
     # `Metrics`; both are printed with the same sign above, so say which is which
     # rather than leaving a reader to trust that they were reconciled.
     print(
-        f"SPY: {spy_bars} bars from {BENCHMARK_ROOT.name}/1D, "
+        f"SPY: {spy_bars} {timeframe} bars from {BENCHMARK_ROOT.name}/{timeframe}, "
         f"drawdown shown negated to match the row above it."
     )
     seal = current_seal().certificate()
