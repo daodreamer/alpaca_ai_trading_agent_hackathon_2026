@@ -478,7 +478,9 @@ absent unless asked for, and `oos_sharpe == stitched.sharpe != mean_fold_sharpe`
   a residual regression; the campaign log records the dead-rule and repair rates
   for comparison against the 15/40, 23/40, 24/40 series in the README.
 
-Run as campaign 07 into `runs/research.sqlite`, log in `runs/campaign-07.log`.
+Run as campaign 07 into `runs/research.sqlite`. 40 proposals over 680 symbols:
+1 ACCEPT, 3 REVIEW, 27 REJECT, 9 ERROR, summarised in `runs/README.md`. The
+console log it was originally cited from is in git history.
 
 **`--min-bars 0`, deliberately.** The default of 1500 drops 91 of the 681 cached
 names, and precisely the short-lived ones — ACE at 9 bars, BRCM and PCP at 19,

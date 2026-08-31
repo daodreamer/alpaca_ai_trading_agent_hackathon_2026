@@ -46,27 +46,19 @@ runs/control2/
 runs/control3/
 
 # ---------------------------------------------------------------------- #
-# Logs, split by whether anything else in the repository says the same thing.
+# No logs. `runs/` held seven of them, 254 KB of console scrollback across the
+# sixteen retried pull invocations it took to get past Alpaca's 429s, and a
+# reader opening the directory met that before anything worth reading.
 #
-# A campaign log is console scrollback. Every experiment it narrates is a row in
-# `experiments` with more detail than the log carries -- campaign-01's
-# `short_gap_fade_high_volume_v1: REJECT (22/100)` is `d8955c8aeca6503c`,
-# REJECT, 21.84, with its metrics, its robustness and its regression attached.
-# Six of them were committed and none was ever read.
+# The information was worth keeping and the format was not, so it is now in
+# `runs/README.md`: cache coverage per root and why the symbol counts differ,
+# all five sealed runs with the significance bar each had to clear, and campaign
+# 07's verdict split. That file is derived from the registry and from the files
+# on disk rather than retyped from the logs, so it can be regenerated and the
+# logs cannot go stale against it.
 #
-# A pull log is not. The two embargo roots are 1.3 GB and are not committed, and
-# Alpaca restates history, so a fresh clone cannot rebuild them byte for byte.
-# These logs are the only account in the repository of what those caches hold
-# and how they got there: `sealed-pull.log` fetched 605 symbols, `-2` found 77
-# that failed the quality check, `-3` refetched them, and each records its own
-# seal digest. That is also where the answer to "why 628 of 680?" lives -- the
-# rest were 429s and delistings, named one by one.
-#
-# So: pull logs are committed, campaign logs are not. `campaign-07.log` is the
-# exception, because PLAN.md cites it by name for the campaign that produced the
-# first sealed candidate.
-runs/campaign-*.log
-!runs/campaign-07.log
+# The raw logs are in git history for anyone who needs per-symbol detail.
+runs/*.log
 
 # ---------------------------------------------------------------------- #
 # The two embargo roots are NOT committed. They are large (~1.3 GB) and live
