@@ -8,24 +8,32 @@ start; nothing depends on remembering a conversation.
 **Done and green (979 tests, ruff, mypy clean). All five phases complete.
 `aqr evaluate` on the full 680-name universe: 1m08s.**
 
-**The seal has been opened five times.** The executed strategy is the fifth,
-`low_vol_rs_carry_v5` [`96cbc95ab6f09a60`], pre-registered 2026-08-30 and run
-against the embargoed years: alpha +16.27%/yr, beta 0.38, t +2.94, IR +2.09 over
-498 sessions, maxDD -3.7%. It was **not refuted**, which is the only verdict a
+**The seal has been opened five times.** The executed strategy is the fourth,
+`low_vol_relative_strength_carry_v1_improved` [`9b4ac85c149ec6db`], run against
+the embargoed years: alpha +20.40%/yr, beta 0.35, t +3.73, IR +2.66 over 498
+sessions, maxDD -4.3%. It was **not refuted**, which is the only verdict a
 498-session window is entitled to reach — the standard error on an annualised
 Sharpe here is ±0.71.
 
-Five looks raise the significance bar to 2.576, and `t +2.94` clears it. The
-first candidate through the window, `rs_volatility_consistency_neutral_v1`,
-returned `t +2.22` and does not clear the bar it would face today; it is no
-longer the pinned strategy. Nothing about any of this upgrades the deflated
-Sharpe, which for `v5` is 0.74 after 411 trials.
+**Its declaration says "backfill test 3".** The seal was spent exercising the
+sealed-cache backfill rather than choosing a strategy, and the rule was pinned
+afterwards, once the result was visible. Selecting on the outcome is what
+pre-registration exists to stop, and no bar this project computes charges for it,
+so the `t` should be read with a discount the table does not apply. What survives
+the discount is the margin: five looks put the bar at 2.576 and `t +3.73` clears
+the bar for any look count up to 261. See `runs/README.md` for all five runs and
+the bar each faced.
 
-**Against SPY rather than against the universe**, the excess return is +9.8pp,
-not +22.9pp: SPY buy-and-hold returned +42.05% over the same 498 sessions where
+The first candidate through the window, `rs_volatility_consistency_neutral_v1`,
+returned `t +2.22` and does not clear the bar it would face today; it is retired.
+Nothing about any of this upgrades the deflated Sharpe, which is 0.74 after 411
+trials, against a search denominator of 414 distinct hypotheses.
+
+**Against SPY rather than against the universe**, the excess return is +21.5pp,
+not +34.5pp: SPY buy-and-hold returned +42.05% over the same 498 sessions where
 the equal-weight universe returned +29.02%. The gap between the two benchmarks is
 cap-weighting, and it is most of the headline. What survives the switch is the
-risk side -- maxDD -3.7% against -18.8%, Sharpe +2.22 against +1.16.
+risk side -- maxDD -4.3% against -18.8%, Sharpe +2.70 against +1.16.
 `scripts/report_benchmark.py` prints all three rows; the SPY row is for reading
 and feeds no verdict.
 

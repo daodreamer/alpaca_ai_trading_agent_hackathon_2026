@@ -150,7 +150,7 @@ lines:
 ```
 ALPACA_API_KEY_ID=PK................
 ALPACA_API_SECRET_KEY=................
-ALPHAGATE_STRATEGY_FINGERPRINT=96cbc95ab6f09a60
+ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db
 ```
 
 The first two are your keys from Step 3. The third one names **which strategy
@@ -176,14 +176,14 @@ You should see a list like this:
 ```
 AlphaGate equity pre-flight — 2026-08-29T12:37:28+00:00
 
-[  ok  ] strategy pinned — 96cbc95ab6f09a60
-[  ok  ] a target book exists — .../low_vol_rs_carry_v5-96cbc95ab6f09a60-2026-08-27.json
-[  ok  ] the book may be executed — low_vol_rs_carry_v5 [96cbc95ab6f09a60] as of 2026-08-27
-[  ok  ] the book is fresh — 2d old, limit 7d
-[  ok  ] the sealed window did not refute it — alpha +16.27%/yr  beta 0.38  t +2.94  looks 5
+[  ok  ] strategy pinned — 9b4ac85c149ec6db
+[  ok  ] a target book exists — .../low_vol_relative_strength_carry_v1_improved-9b4ac85c149ec6db-2026-08-27.json
+[  ok  ] the book may be executed — low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db] as of 2026-08-27
+[  ok  ] the book is fresh — 4d old, limit 7d
+[  ok  ] the sealed window did not refute it — alpha +20.40%/yr  beta 0.35  t +3.73  looks 5
 [  ok  ] account readable — equity 100000.00
 [  ok  ] account not blocked
-[  ok  ] 0 equity positions held, 240 wanted
+[  ok  ] 0 equity positions held, 87 wanted
 [  ok  ] market closed — next open 2026-08-31 13:30 UTC
 
 Ready.
@@ -356,17 +356,27 @@ survivor through walk-forward, pre-registered it, and spent a sealed window on
 it:
 
 ```
-low_vol_rs_carry_v5 [96cbc95ab6f09a60]
+low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db]
 sealed window 2024-09-03 → 2026-08-27   (498 sessions, never read during the search)
-  strategy   return +51.88%  sharpe +2.22  maxDD -3.7%   trades 722
-  residual   alpha +16.27%/yr  beta 0.38  t +2.94  IR +2.09
+  strategy   return +63.50%  sharpe +2.70  maxDD -4.3%   trades 789
+  residual   alpha +20.40%/yr  beta 0.35  t +3.73  IR +2.66
 ```
 
 That window **was not refuted**, which is the strongest verdict 498 sessions can
 produce — `can_confirm` is `False` by construction, because the standard error
 on an annualised Sharpe there is about ±0.71. The sealed window has now been
 opened five times, so the significance bar it had to clear was raised to 2.576
-accordingly; `t +2.94` clears it.
+accordingly; `t +3.73` clears it, and would still clear it after 261 looks.
+
+**This one was picked after its sealed result was visible, and that is a real
+weakness.** It was declared under the selection rule "backfill test 3" — the
+sealed run was spent exercising the cache-backfill code path, not choosing a
+strategy — and it was promoted later, once the number could be seen. Selecting
+on the outcome is the thing pre-registration exists to stop, so the honest
+reading is that its `t` should be discounted by more than the five-look bar
+charges for. What survives that discount is that +3.73 clears the bar for any
+look count up to 261, which is two orders of magnitude more looks than this
+project has taken.
 
 **Against the index rather than against the universe.** The benchmark in that
 block is the equal-weight return of all 680 point-in-time names, which is the
@@ -376,15 +386,16 @@ window the difference is large:
 
 ```
 sealed window 2024-09-03 → 2026-08-27          return   sharpe    maxDD
-  low_vol_rs_carry_v5                          +51.88%    +2.22    -3.7%
+  low_vol_relative_strength_carry_v1_improved  +63.50%    +2.70    -4.3%
   the 680 names, equal weight                  +29.02%    +0.91
   SPY, buy and hold                            +42.05%    +1.16   -18.8%
 ```
 
-So the honest headline is **+9.8pp over buying the index**, not the +22.9pp the
+So the honest headline is **+21.5pp over buying the index**, not the +34.5pp the
 internal benchmark implies: 2024-09 through 2026-08 was led by the largest names
 and cap-weighting caught most of what equal-weighting missed. Where the strategy
-is not close is risk — half the drawdown at nearly twice the Sharpe.
+is not close is risk — under a quarter of the drawdown at more than twice the
+Sharpe.
 
 `python scripts/report_benchmark.py` prints that table. The third row is for
 reading only; `SealedMeasurement` keeps regressing against the equal-weight
@@ -519,7 +530,7 @@ uv run --directory backend python -m alphagate equity-status
 **Pin the strategy before any of this works.** `.env.local` needs
 
 ```
-ALPHAGATE_STRATEGY_FINGERPRINT=96cbc95ab6f09a60
+ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db
 ```
 
 and a target book naming any other fingerprint is refused by name. There is

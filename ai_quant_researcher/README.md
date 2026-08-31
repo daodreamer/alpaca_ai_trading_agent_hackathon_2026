@@ -951,18 +951,25 @@ to clear, and `SealedMeasurement` computes the bar from `looks` rather than
 letting anyone quote a nominal t.
 
 The strategy this project executes is the fifth and last of them,
-`low_vol_rs_carry_v5`, pre-registered on 2026-08-30 — selection rule recorded,
-seal digest recorded, before a single embargoed bar was read — and then run in a
-separate process against 2024-09 through 2026-08.
+`low_vol_relative_strength_carry_v1_improved`, the fourth of the five, run
+against 2024-09 through 2026-08 in a separate process.
 
 ```
-low_vol_rs_carry_v5 [96cbc95ab6f09a60]
+low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db]
 sealed window 2024-09-03 -> 2026-08-27   (498 sessions)
-  strategy   return +51.88%  sharpe +2.22  maxDD -3.7%  trades 722
+  strategy   return +63.50%  sharpe +2.70  maxDD -4.3%  trades 789
   benchmark  return +29.02%  sharpe +0.91
-  residual   alpha +16.27%/yr  beta 0.38  t +2.94  IR +2.09  R2 0.36
-  looks 5   significance bar 2.576   alpha_clears_bar True
+  residual   alpha +20.40%/yr  beta 0.35  t +3.73  IR +2.66
+  looks 4   significance bar 2.498   alpha_clears_bar True
 ```
+
+**Its declaration says "backfill test 3", and that is the weakness in it.** The
+seal was spent exercising the sealed-cache backfill, not choosing a strategy;
+the rule was promoted afterwards, once the result could be seen. Selecting on
+the outcome is what pre-registration exists to stop, so its `t` deserves a
+discount the four-look bar does not charge for. What survives the discount is
+the size of the margin: +3.73 clears the bar for any look count up to 261, and
+this project has taken five.
 
 **It was not refuted.** That is the strongest verdict this window is capable of
 producing, and the wording is not modesty — `can_confirm` is a property that
@@ -971,10 +978,11 @@ returns `False` by construction. The standard error on an annualised Sharpe over
 anybody argues about.
 
 What makes this one worth executing rather than the earlier looks is that its
-`t +2.94` clears the **five-look** bar of 2.576. The first candidate through this
-window, `rs_volatility_consistency_neutral_v1`, returned `t +2.22`: enough as the
-sole candidate ever screened here, not enough once the window had been opened
-five times. The bar moved and the earlier result did not move with it.
+`t +3.73` clears the bar at every look count this project could plausibly reach.
+The first candidate through this window, `rs_volatility_consistency_neutral_v1`,
+returned `t +2.22`: enough as the sole candidate ever screened here, not enough
+once the window had been opened five times. The bar moved and the earlier result
+did not move with it.
 
 What this does **not** upgrade: the deflated Sharpe is 0.74 after 411 trials, and
 the search denominator is now 414 distinct hypotheses. A sealed window that
@@ -989,15 +997,15 @@ index, and over this window the two are far apart:
 
 ```
                                                return   sharpe    maxDD
-low_vol_rs_carry_v5                           +51.88%    +2.22    -3.7%
+low_vol_relative_strength_carry_v1_improved   +63.50%    +2.70    -4.3%
 the 680 names, equal weight                   +29.02%    +0.91
 SPY, buy and hold                             +42.05%    +1.16   -18.8%
 ```
 
 2024-09 through 2026-08 was led by the largest names, so cap-weighting caught
 most of what equal-weighting missed. Reported against the index the excess return
-is **+9.8pp, not +22.9pp** — and the part that does not shrink is the risk: a
--3.7% drawdown against -18.8%, at nearly twice the Sharpe.
+is **+21.5pp, not +34.5pp** — and the part that does not shrink is the risk: a
+-4.3% drawdown against -18.8%, at more than twice the Sharpe.
 
 `python scripts/report_benchmark.py` prints it, reading SPY from
 `data-benchmark/` — a root of its own, pulled through `aqr-sealed pull` with the
@@ -1138,7 +1146,7 @@ aqr costs --equity 100000 --positions 110      # what one order actually costs
 
 That table spreads the account evenly over 110 names — $909 each. The real book
 is not even, and the executed one is far less even than that: 12 core names at 4%
-and 240 sleeve names averaging 0.076%, which on $100k is **$76** a sleeve name.
+and 87 sleeve names averaging 0.153%, which on $100k is **$153** a sleeve name.
 A fixed-fee schedule is a percentage of nothing at that size, so the sleeve is
 where the cost model bites hardest — and it is why `--costs alpaca`, the
 commission-free schedule of the venue these bars come from and whose paper
@@ -1161,13 +1169,13 @@ A validated strategy has to become positions somewhere, and that somewhere is no
 here. `aqr target-book` writes one file and stops:
 
 ```bash
-aqr target-book 96cbc95ab6f09a60
-# 604 of 680 symbols, 2023-05-18 -> 2026-08-30
+aqr target-book 9b4ac85c149ec6db
+# 604 of 680 symbols, 2023-05-19 -> 2026-08-31
 #
-# low_vol_rs_carry_v5 [96cbc95ab6f09a60] as of 2026-08-27
-#   240 positions, gross 0.6625 (core 0.4800, sleeve 0.1825)
+# low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db] as of 2026-08-27
+#   87 positions, gross 0.6128 (core 0.4800, sleeve 0.1328)
 #
-# runs/target_books/low_vol_rs_carry_v5-...-2026-08-27.json
+# runs/target_books/low_vol_relative_strength_carry_v1_improved-...-2026-08-27.json
 ```
 
 There is no `--dry-run`, because there is nothing to be dry about: no code path

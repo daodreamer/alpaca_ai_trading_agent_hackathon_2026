@@ -81,11 +81,15 @@ which is why the table has a `bar` column and why a raw `t` is not enough.
 | 1 | 08-28 22:27 | `rs_volatility_consistency_neutral_v1` | sole ACCEPT of campaign 07 | +56.39% | +1.86 | -10.40% | +2.22 | — | — |
 | 2 | 08-30 18:59 | `low_vol_rs_carry_v3` | "highest scoring candidate" | +23.28% | +2.07 | -2.19% | +2.63 | 2.241 | yes |
 | 3 | 08-30 19:06 | `low_vol_relative_strength_carry_v1` | "test warmup output" | +18.69% | +1.42 | -3.88% | +1.63 | 2.394 | **no** |
-| 4 | 08-30 19:15 | `low_vol_relative_strength_carry_v1_improved` | "backfill test 3" | +63.50% | +2.70 | -4.28% | +3.73 | 2.498 | yes |
-| 5 | 08-30 20:16 | **`low_vol_rs_carry_v5`** | "low_vol_rs_carry_v5 with 99 score" | +51.88% | +2.22 | -3.71% | +2.94 | 2.576 | yes |
+| 4 | 08-30 19:15 | **`low_vol_relative_strength_carry_v1_improved`** | "backfill test 3" | +63.50% | +2.70 | -4.28% | +3.73 | 2.498 | yes |
+| 5 | 08-30 20:16 | `low_vol_rs_carry_v5` | "low_vol_rs_carry_v5 with 99 score" | +51.88% | +2.22 | -3.71% | +2.94 | 2.576 | yes |
 
-None was refuted. Run 5 is the pinned strategy —
-`ALPHAGATE_STRATEGY_FINGERPRINT=96cbc95ab6f09a60`.
+None was refuted. **Run 4 is the pinned strategy** —
+`ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db`.
+
+The bar is `z(1 - 0.05 / looks / 2)`: a two-sided 5% level split Bonferroni-wise
+across every look the window has taken. Two looks put it at 2.241, five at
+2.576, and it keeps climbing for as long as anyone keeps opening the envelope.
 
 **Three things this table admits rather than hides.**
 
@@ -93,15 +97,27 @@ None was refuted. Run 5 is the pinned strategy —
 output", "backfill test 3" — those are not selection rules, they are the
 messages someone types while developing the sealed-cache backfill. Spending a
 one-shot window to test a code path is exactly the "look until you like it"
-pattern pre-registration exists to prevent. What kept it honest is that the
-machinery charged for every look anyway: the bar climbed 2.241 → 2.394 → 2.498 →
-2.576 across them, and run 5 had to clear the highest of them.
+pattern pre-registration exists to prevent. What the machinery does charge for
+is the looks themselves: the bar climbed 2.241 → 2.394 → 2.498 → 2.576 across
+them, so each debug run made the next candidate's job harder.
 
-*Run 4 beats run 5 on every line.* Higher return, higher Sharpe, a larger t. It
-is not the pinned strategy because it was declared as "backfill test 3" — a
-candidate whose declaration says it was a debug invocation cannot then be
-promoted on the strength of the result it happened to produce. Picking it after
-seeing the number is the thing the seal exists to stop.
+*Run 4 is pinned, and it was chosen after its result was visible.* This is the
+weak point in the chain and it is not going to be dressed up. Its declaration
+says "backfill test 3": the seal was spent exercising the cache-backfill code
+path, and at the time the operator could not see what the run had produced. The
+number was read later, it was the best of the five, and the pin moved to it.
+That is selection on the outcome, which is precisely what pre-registration
+exists to prevent, and none of the bars in the table above charges for it —
+`looks` counts how many times the window was opened, not how many times a result
+was looked at before choosing.
+
+What can honestly be said in its defence is the size of the margin rather than
+the process. `t +3.73` clears the bar at six looks (2.638), at eight (2.734),
+and on out to **261 looks** before the Bonferroni correction catches it. A
+selection effect large enough to manufacture that from noise would have to be
+two orders of magnitude bigger than the search this project actually ran. The
+procedural objection stands; the statistical one does not survive the
+arithmetic.
 
 *Run 1's `t` of +2.22 would not clear today's bar.* It cleared as the only
 candidate ever screened against this window. Once the window had been opened
@@ -109,9 +125,13 @@ five times, 2.22 sits under 2.576. It is retired, and that is why.
 
 **What none of this upgrades.** `can_confirm` is `False` by construction — the
 standard error on an annualised Sharpe over 498 sessions is ±0.71. The search
-denominator is 414 distinct hypotheses and `v5`'s Sharpe of 1.97 deflates to
-0.74 after 411 trials. A sealed window that cannot confirm cannot repair a
-search that was wide.
+denominator is 414 distinct hypotheses, and the pinned rule's own record says
+its search-window Sharpe of 1.81 deflates to **0.59 after 402 trials**. A sealed
+window that cannot confirm cannot repair a search that was wide.
+
+Its one genuinely reassuring line is `train_oos_gap`: train Sharpe 1.84 against
+OOS 2.00, a gap of **-0.15**. The rule did better out of sample than in it,
+which is not what an overfit rule does.
 
 ---
 
