@@ -503,16 +503,46 @@ def test_the_pipeline_driver_imports_neither_project() -> None:
     single `from aqr...` to reuse a constant, and the two projects share a
     process. Running them as subprocesses is the only coupling specs/09 D0
     permits, and this is what holds that line.
+
+    Scoped to the driver, not to all of `scripts/`. This used to sweep the whole
+    directory, which made a data-pull helper illegal for importing `aqr` — but
+    that helper belongs to the researcher, and reaching into `aqr.data` is its
+    job. Belonging to one project is fine. What specs/09 D0 forbids is one
+    process holding *both*, and the test below is what forbids it.
+    """
+    driver = SCRIPTS / "pipeline.py"
+    if not driver.is_file():  # pragma: no cover - the driver exists
+        pytest.skip("no scripts/pipeline.py")
+    offenders = [
+        f"pipeline.py imports {name}"
+        for name in _top_level_imports(driver)
+        if name in {"aqr", "alphagate"}
+    ]
+    assert not offenders, (
+        "the pipeline driver must run both CLIs, not import them:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_no_script_holds_both_projects() -> None:
+    """A helper may belong to one project. None may belong to two.
+
+    This is the half of guard 9 that applies outside `pipeline.py`. A script
+    importing `aqr` is a researcher tool and one importing `alphagate` is a
+    trading tool; a script importing both has merged the two projects into a
+    single process, and every invariant CLAUDE.md §2b keeps apart — `Decimal`,
+    the Risk Gate, the LLM boundary — is then shared by accident rather than by
+    design.
     """
     if not SCRIPTS.is_dir():  # pragma: no cover - the directory exists
         pytest.skip("no scripts/ directory")
     offenders: list[str] = []
     for path in _python_files(SCRIPTS):
-        for name in _top_level_imports(path):
-            if name in {"aqr", "alphagate"}:
-                offenders.append(f"{path.relative_to(SCRIPTS)} imports {name}")
+        held = {n for n in _top_level_imports(path) if n in {"aqr", "alphagate"}}
+        if len(held) > 1:
+            offenders.append(f"{path.relative_to(SCRIPTS)} imports {sorted(held)}")
     assert not offenders, (
-        "the pipeline driver must run both CLIs, not import them:\n"
+        "no script may hold both projects in one process (specs/09 D0):\n"
         + "\n".join(offenders)
     )
 
