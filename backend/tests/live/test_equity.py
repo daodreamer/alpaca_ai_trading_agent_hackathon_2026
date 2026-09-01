@@ -24,7 +24,11 @@ from typing import Any
 import pytest
 
 from alphagate.core.identifiers import Ticker, ticker
-from alphagate.equity import DEFAULT_EQUITY_POLICY, UnusableBook
+from alphagate.equity import (
+    DEFAULT_EQUITY_POLICY,
+    EQUITY_SLEEVE_ALLOCATION,
+    UnusableBook,
+)
 from alphagate.execution import RecordedSession, TransportFailure
 from alphagate.execution.equity import PLACE_STOCK_ORDER_TOOL
 from alphagate.journal import Journal
@@ -535,12 +539,15 @@ def test_todays_totals_are_read_off_the_journal(context: EquityContext) -> None:
     context.journal.append(record)
     orders, turnover = today_totals(context.journal, NOW.date())
     assert orders == 3
-    # $19,000, not $20,000: the book is sized against the equity *sleeve*
-    # (specs/03 D6), which is 95% of this fixture's $100,000 account. The
-    # remaining 5% is the options agent's allocation and this strategy may not
-    # spend it. Every target scales by the same 0.95, so the ratio is the whole
-    # of the change.
-    assert turnover == Decimal(19_000)
+    # $18,000, not $20,000: the book is sized against the equity *sleeve*
+    # (specs/03 D6), not against this fixture's $100,000 account. The rest is
+    # the options agent's allocation and this strategy may not spend it. Every
+    # target scales by the same ratio, so that ratio is the whole of the change
+    # -- which is why it is written as one here rather than as a literal. The
+    # split moved from 95/5 to 90/10 when the researched option rule turned out
+    # to need a $2,000 per-trade budget to fund a single contract.
+    scale = EQUITY_SLEEVE_ALLOCATION / Decimal(100_000)
+    assert turnover == Decimal(20_000) * scale
 
 
 def test_an_options_cycle_does_not_count_towards_the_equity_caps(

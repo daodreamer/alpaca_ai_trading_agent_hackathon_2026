@@ -141,23 +141,41 @@ the backtest and the existing tests are calibrated against it, and because
 """
 
 
-OPTIONS_SLEEVE_ALLOCATION: Final = Decimal(5000)
-"""The capital assigned to the options agent — 5% of a $100,000 account.
+OPTIONS_SLEEVE_ALLOCATION: Final = Decimal(10_000)
+"""The capital assigned to the options agent — 10% of a $100,000 account.
 
 A fixed figure, not a fraction of live equity, for the reason `risk.sleeve`
 gives: a fraction would let the equity book's overnight mark resize the options
 agent's budgets. The operator splits the account once and the split holds.
+
+**Raised from $5,000 once the researched rule was priced against a real chain.**
+specs/07 D1's rule sells a 0.16-delta SPY put against a 0.08-delta wing, and on
+2026-08-28 that is a 15-point spread: $1,389 of maximum loss per contract. At a
+$5,000 sleeve the per-trade budget was $1,000, `agent/sizing.py` floored the
+quantity to **zero**, and the rule could never have opened a position — which
+would have looked like a quiet market in the journal rather than like an account
+too small for its own strategy.
+
+$10,000 is not a round number chosen for comfort. At `max_trade_loss_pct` of
+0.20 it makes the per-trade budget $2,000, which is *exactly* the sizing the
+research ran at (2% of the $100,000 the backtest and the sealed run were sized
+against, specs/10 D8a). The sleeve is the smallest one that executes the
+measured rule rather than a cheaper approximation of it.
 """
 
 
 SLEEVE_LIMITS: Final = RiskLimits(
-    # $1,000 a trade. The same absolute figure as DEFAULT_LIMITS produced on a
-    # $100k account, deliberately: `agent/candidates.py` was tuned against live
-    # runs at this size, and changing the sleeve base *and* the per-trade budget
-    # in one step would make a menu that suddenly ranks differently impossible
-    # to attribute.
+    # $2,000 a trade on the $10,000 sleeve, and the fraction is unchanged from
+    # when the sleeve was $5,000 -- the budget moved because the base moved, not
+    # because this control was loosened.
+    #
+    # $2,000 is the number that matters: it is what specs/10 D8a's 2% of
+    # $100,000 came to, so the live per-trade size is the size the sealed run
+    # measured. It funds exactly one contract of the researched structure
+    # ($1,389 max loss on 2026-08-28) and refuses a second, which is the
+    # research's own cadence of one entry per session.
     max_trade_loss_pct=Decimal("0.20"),
-    # $4,000 of the $5,000 may be at risk at once. For defined-risk structures
+    # $8,000 of the $10,000 may be at risk at once. For defined-risk structures
     # maximum loss *is* the capital committed -- Alpaca holds exactly that as
     # buying power -- so this is the sleeve's deployment ceiling, not merely a
     # risk cap. 0.80 rather than 1.00 leaves room for the last trade to be
@@ -176,13 +194,13 @@ SLEEVE_LIMITS: Final = RiskLimits(
     # day a second underlying is added this check must already be present and
     # already correct rather than needing to be remembered.
     max_per_underlying_pct=Decimal("0.80"),
-    # +/- 6.0 net delta on a $5,000 sleeve. The account-scaled band was +/- 30,
-    # which on a sleeve this size is not a band at all -- 30 delta is $19,500 of
-    # SPY notional against $5,000 of capital.
+    # Quoted per $1k, so this is +/- 12.0 net delta on the $10,000 sleeve and was
+    # +/- 6.0 on the $5,000 one. Stating it as a rate rather than as an absolute
+    # is what lets the sleeve be resized without silently changing which greek
+    # binds -- the reason the vega band below is written the same way.
     #
-    # 6.0 is sized to admit one full book and refuse a second: a one-wide put
-    # credit spread nets roughly +0.10 to +0.15 delta a contract, so eight
-    # structures at five contracts each lands near +5.
+    # The account-scaled band was +/- 30, which on a sleeve this size is not a
+    # band at all: 30 delta is $19,500 of SPY notional.
     #
     # **This is the number most likely to need a live adjustment.** It is the
     # only limit here whose calibration comes from arithmetic rather than from
@@ -197,14 +215,14 @@ SLEEVE_LIMITS: Final = RiskLimits(
     vega_band=(-50.0, 50.0),
     max_spread_pct=Decimal("0.05"),
     dte_range=(3, 21),
-    # A fifth of the sleeve. Under the account-scaled 5% this switch measured
-    # the *account* and was therefore tripped by the equity book: an 8% market
-    # move against a $95,000 stock sleeve is a 5% account drawdown, and the
-    # options agent -- having lost nothing -- latched shut until a human cleared
-    # it. Measured against the sleeve, 5% would be $250, which one spread
-    # reaching its stop can produce; that is a trade going wrong, not a strategy
-    # failing. 20% is $1,000, which is four such trades in a row and a real
-    # signal that something is not working.
+    # A fifth of the sleeve -- $2,000. Under the account-scaled 5% this switch
+    # measured the *account* and was therefore tripped by the equity book: an 8%
+    # market move against a $90,000 stock sleeve is a 5% account drawdown, and
+    # the options agent -- having lost nothing -- latched shut until a human
+    # cleared it. Measured against the sleeve, 5% would be $500, which one
+    # spread reaching its stop can produce; that is a trade going wrong, not a
+    # strategy failing. 20% is four such trades in a row and a real signal that
+    # something is not working.
     max_drawdown_pct=Decimal("0.20"),
     max_daily_trades=15,
     max_quote_age=60.0,
@@ -212,7 +230,7 @@ SLEEVE_LIMITS: Final = RiskLimits(
 """The options sleeve's configuration — specs/03 D6.
 
 Read as a diff against `DEFAULT_LIMITS`: the base is `OPTIONS_SLEEVE_ALLOCATION`
-rather than account equity, so every fraction here is a fraction of $5,000. Two
+rather than account equity, so every fraction here is a fraction of $10,000. Two
 of the absolute figures are held where they were (per-trade, and the greek rate)
 and three are deliberately moved (heat, concentration, drawdown). Each comment
 above says which and why.

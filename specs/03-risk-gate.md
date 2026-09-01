@@ -158,7 +158,7 @@ switch watching `account.equity` is not either. Two failures follow from it
 directly:
 
 **The equity book latches the options kill switch.** D5 sets the options
-drawdown limit at 5%. A $95,000 stock sleeve falls 5% of the account on an 8%
+drawdown limit at 5%. A $90,000 stock sleeve falls 5% of the account on an 8%
 market move, so the options agent — having lost nothing and possibly holding
 nothing — trips and stays tripped until a human clears it. The switch fires for
 a reason that has nothing to do with the risk it watches.
@@ -202,8 +202,8 @@ strategy changes.
 
 | Sleeve | Allocation | Limits | Measured |
 | --- | --- | --- | --- |
-| Options agent | $5,000 | `SLEEVE_LIMITS` | bottom-up: allocation + its own P&L |
-| Equity book | $95,000 | `equity/policy.py` | residual: account − the options sleeve |
+| Options agent | $10,000 | `SLEEVE_LIMITS` | bottom-up: allocation + its own P&L |
+| Equity book | $90,000 | `equity/policy.py` | residual: account − the options sleeve |
 
 **One is measured bottom-up and the other as a residual, and the asymmetry is
 deliberate.** The options sleeve's P&L is separately identifiable — its
@@ -217,14 +217,14 @@ account_equity = equity_sleeve.equity + options_sleeve.equity
 ```
 
 which is what makes the isolation exact in both directions. An options loss of
-$1,000 lowers the account to $99,000 *and* the options sleeve to $4,000, so the
-residual is still $95,000 — the equity book does not absorb a drawdown it did
+$1,000 lowers the account to $99,000 *and* the options sleeve to $9,000, so the
+residual is still $90,000 — the equity book does not absorb a drawdown it did
 not take. An $8,000 fall in the stock book leaves the options sleeve at exactly
-$5,000.
+$10,000.
 
 ### The equity book's scale
 
-Its targets are 95% of the account, and moving to that scale **forces no
+Its targets are 90% of the account, and moving to that scale **forces no
 rebalance**: the no-trade band is 20% of the position with a $25 floor
 ([09](09-equity-execution.md) D3), and a 5% shift clears neither on any of the
 87 names in the current book. The positions converge at the next scheduled
@@ -236,9 +236,9 @@ base it is given. Taking the options sleeve out of the *base* rather than out of
 the reserve is what keeps that reserve proportionally intact; the alternative
 spends cash the strategy was relying on.
 
-The cost, stated rather than hidden: **the equity book runs at 95% of the scale
+The cost, stated rather than hidden: **the equity book runs at 90% of the scale
 `ai_quant_researcher` validated.** For a weight-based book that is linear —
-returns scale by 0.95, the character does not change — but it is a deviation
+returns scale by 0.90, the character does not change — but it is a deviation
 from the backtest and the submission says so.
 
 ### Migrating the high-water marks
@@ -259,10 +259,10 @@ absolute figures are held where they were and three are deliberately moved:
 | Limit | Was (5% of $100k account) | Now (fraction of $5k sleeve) | Why |
 | --- | --- | --- | --- |
 | per trade | $1,000 | $1,000 | held — `agent/candidates.py` was tuned live at this size |
-| book heat | $5,000 | $4,000 | for defined risk, heat *is* capital deployed; 0.80 leaves the last trade to be refused by a budget rather than by a broker |
+| book heat | $10,000 | $8,000 | for defined risk, heat *is* capital deployed; 0.80 leaves the last trade to be refused by a budget rather than by a broker |
 | per underlying | $2,000 | $4,000 | equal to heat: [07](07-strategy.md) D2 gives this strategy one underlying, so anything tighter is a second heat cap wearing a concentration limit's name, and it would cap the sleeve at a quarter of its allocation while `max_portfolio_loss_pct` read as the binding number. Set equal rather than removed, so the check is already correct the day a second name is added |
-| net delta | ±30 | ±6 | ±30 delta is $19,500 of SPY notional against $5,000 of capital |
-| kill switch | $5,000, of the account | $1,000, of the sleeve | 5% of the sleeve is $250, which one spread reaching its stop produces — that is a trade going wrong, not a strategy failing |
+| net delta | ±30 | ±12 | the band is quoted per $1k, so it tracks a re-split; ±30 delta is $19,500 of SPY notional against $10,000 of capital |
+| kill switch | $5,000, of the account | $2,000, of the sleeve | 5% of the sleeve is $500, which one spread reaching its stop produces — that is a trade going wrong, not a strategy failing |
 
 **±6 is the number most likely to need a live adjustment.** It is the only limit
 here calibrated by arithmetic rather than by an observed run, and the failure it

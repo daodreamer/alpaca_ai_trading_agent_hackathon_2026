@@ -159,10 +159,10 @@ class EquityPolicy:
         return self.max_daily_turnover_pct * equity
 
 
-EQUITY_SLEEVE_ALLOCATION: Final = Decimal(95000)
+EQUITY_SLEEVE_ALLOCATION: Final = Decimal(90_000)
 """The capital assigned to the equity book — specs/03 D6.
 
-95% of a $100,000 account; the other 5% is the options agent's
+90% of a $100,000 account; the other 10% is the options agent's
 `OPTIONS_SLEEVE_ALLOCATION`. The two must sum to no more than the account,
 because Alpaca holds one pool of buying power and has never heard of sleeves.
 
@@ -172,10 +172,28 @@ reserve is a fraction of whatever base it is given, and taking the options
 sleeve out of the base rather than out of the reserve is what keeps it
 proportionally intact — the alternative spends cash the strategy was relying on.
 
-The cost is stated plainly rather than hidden: the equity book therefore runs at
-95% of the scale `ai_quant_researcher` validated. For a weight-based book that is
-linear — returns scale by 0.95 and the strategy's character does not change —
-but it is a deviation from the backtest and the submission says so.
+So the idle cash an operator sees in the account is two different things added
+together, and reading it as one number is the mistake this note exists to
+prevent: roughly 39% of this sleeve is the equity strategy's own rebalancing
+reserve, and `OPTIONS_SLEEVE_ALLOCATION` on top of it is capital that was never
+the equity book's to spend.
+
+**Reduced from $95,000 when the options sleeve was doubled.** The options rule
+could not open a single position at $5,000 — one contract of specs/07 D1's
+structure risks $1,389, against a $1,000 per-trade budget — so the split moved
+to 90/10 to make the researched sizing executable. The equity book is a
+weight-based book, so the cost is exactly linear: it now runs at 90% rather than
+95% of the scale `ai_quant_researcher` validated, returns scale by 0.90, and the
+strategy's character does not change. It is still a deviation from the backtest
+and the submission still says so.
+
+**Changing this constant does not force a rebalance.** Every target is a weight
+times this number, so a 95,000 -> 90,000 move shrinks each one by about 5.3% —
+and the no-trade band is 20% of the position with a $25 floor (specs/09 D3),
+which a 5.3% drift does not clear on any of the 87 names in the current book.
+The positions converge at the next scheduled rebalance, when the weights are
+recomputed anyway. `equity-plan` prints what would be ordered without ordering
+it, which is the way to check that rather than assume it.
 """
 
 

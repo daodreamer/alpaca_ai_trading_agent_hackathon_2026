@@ -20,8 +20,10 @@ import pytest
 
 from alphagate.agent.book import contract_from, open_positions, read_book, structure_from
 from alphagate.core.errors import InvariantViolation
+from alphagate.equity.policy import EQUITY_SLEEVE_ALLOCATION
 from alphagate.execution import AccountRead, LegPosition
 from alphagate.options import OptionContract, Right, Side, StructureKind
+from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
 from tests.agent.conftest import EXPIRY, SPY
 
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
@@ -265,14 +267,22 @@ class TestDrawdown:
     """Measured against the sleeve, never against the account — specs/03 D6."""
 
     def test_it_is_measured_against_the_high_water_mark(self) -> None:
-        """$5,000 allocated, $250 lost on closed trades, peak $5,000."""
+        """The whole sleeve allocated, 5% of it lost on closed trades.
+
+        Written against `OPTIONS_SLEEVE_ALLOCATION` rather than against the
+        figure it happens to hold: the invariant is "drawdown is a fraction of
+        the sleeve", and a test that spelled the number out would fail on the
+        day the operator re-splits the account, which is a configuration change
+        and not a regression.
+        """
+        loss = OPTIONS_SLEEVE_ALLOCATION / 20
         book = read_book(
             account(),
             (),
-            [closed_for(Decimal("-250"))],
-            peak_equity=Decimal("5000"),
+            [closed_for(-loss)],
+            peak_equity=OPTIONS_SLEEVE_ALLOCATION,
         )
-        assert book.snapshot.equity == Decimal("4750")
+        assert book.snapshot.equity == OPTIONS_SLEEVE_ALLOCATION - loss
         assert book.snapshot.drawdown_pct == Decimal("0.05")
 
     def test_a_new_high_is_not_a_drawdown(self) -> None:
@@ -280,7 +290,7 @@ class TestDrawdown:
             account(),
             (),
             [closed_for(Decimal("250"))],
-            peak_equity=Decimal("5000"),
+            peak_equity=OPTIONS_SLEEVE_ALLOCATION,
         )
         assert book.snapshot.drawdown_pct == Decimal(0)
 
@@ -292,14 +302,41 @@ class TestDrawdown:
         a 5% drawdown against a 5% threshold, and the options agent latched shut
         having lost nothing. The options sleeve traded nothing, so it is flat.
         """
-        book = read_book(account("92000"), (), [], peak_equity=Decimal("5000"))
-        assert book.snapshot.equity == Decimal("5000")
+        book = read_book(
+            account("92000"), (), [], peak_equity=OPTIONS_SLEEVE_ALLOCATION
+        )
+        assert book.snapshot.equity == OPTIONS_SLEEVE_ALLOCATION
         assert book.snapshot.drawdown_pct == Decimal(0)
 
     def test_the_gate_budgets_against_the_sleeve_not_the_account(self) -> None:
         """A $100,000 account does not buy a $100,000 options budget."""
         book = read_book(account("100000"), (), [])
-        assert book.snapshot.equity == Decimal("5000")
+        assert book.snapshot.equity == OPTIONS_SLEEVE_ALLOCATION
+
+    def test_the_two_sleeves_sum_to_the_account_and_neither_may_grow_alone(
+        self,
+    ) -> None:
+        """Alpaca holds one pool of buying power and has never heard of sleeves,
+        so the split is only meaningful while it adds up. This is the check that
+        catches a re-split done on one side and forgotten on the other."""
+        assert Decimal(100_000) == EQUITY_SLEEVE_ALLOCATION + OPTIONS_SLEEVE_ALLOCATION
+
+    def test_the_options_sleeve_funds_a_contract_of_the_researched_rule(self) -> None:
+        """The arithmetic that forced the 90/10 split, kept as a test.
+
+        specs/07 D1's structure risked $1,389 a contract when it was priced
+        against the real chain on 2026-08-28, and `agent/sizing.py` floors the
+        quantity — so a per-trade budget under that figure buys nothing at all
+        and the rule looks like a market with no setups. At $5,000 the budget
+        was $1,000 and this failed silently every cycle.
+        """
+        budget = SLEEVE_LIMITS.max_trade_loss(OPTIONS_SLEEVE_ALLOCATION)
+        assert budget >= Decimal("1389"), (
+            f"per-trade budget {budget} cannot fund one contract of the rule this "
+            "sleeve exists to trade"
+        )
+        # And it is the size the sealed run measured: 2% of $100,000, specs/10 D8a.
+        assert budget == Decimal("2000")
 
     def test_no_history_means_no_drawdown_and_has_to_be_asked_for(self) -> None:
         """specs/03 D4's kill switch watches this number. A drawdown that resets
