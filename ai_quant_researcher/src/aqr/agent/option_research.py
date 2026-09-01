@@ -16,10 +16,21 @@ rejected because its 0.67 Sharpe deflated to **-0.28** once the search that
 found it was paid for. The deflation term did that, not the cap.
 
 So :data:`OPTION_SEARCH_BUDGET` is a guardrail against a runaway loop rather
-than a statistical control, and it is enforced against the registry's own count
-of option hypotheses — not against this run's ``iterations``, which a second
-invocation would reset. What keeps a wide search honest is that its width is
+than a statistical control. What keeps a wide search honest is that its width is
 priced into every verdict and recorded in every artefact.
+
+**The denominator is the campaign's, not the database's.** One search is one
+campaign, and a verdict is deflated against the trials *that search* took. The
+argument: deflation asks how many draws bought this maximum, and a sweep
+exploring iron condors in March did not buy the maximum of a sweep exploring
+calendar effects in January; charging the second for the first is naive
+Bonferroni applied across a research programme rather than across an experiment,
+and it ends with a programme unable to conclude anything. The argument against is
+real and is not hidden: somebody who runs ten campaigns and reports the best rule
+from the tenth has looked at all ten. Nothing here stops that and nothing here
+conceals it — ``aqr campaigns`` lists every search that has ever run, and every
+book carries the campaign count, the campaign's own denominator and the all-time
+figure side by side.
 
 The three properties ``research.py`` names hold here unchanged: the proposer
 never touches the verdict, a malformed proposal costs one iteration rather than
@@ -52,6 +63,7 @@ from aqr.options.features import OptionFeatureFrame, feature_span
 from aqr.options.run import OptionMarket
 from aqr.options.spec import OptionSpec, dumps_option_spec
 from aqr.registry.db import OPTION, ExperimentRecord, Registry
+from aqr.seal import current as current_seal
 
 __all__ = [
     "OPTION_SEARCH_BUDGET",
@@ -63,11 +75,7 @@ __all__ = [
 ]
 
 OPTION_SEARCH_BUDGET = 1000
-"""The ceiling on the option search, counted across the life of a registry.
-
-Not a per-run limit: the count that matters is how many *distinct option
-hypotheses this database has ever evaluated*, because the multiple-comparisons
-problem does not reset when a process exits.
+"""The ceiling on one campaign, in distinct hypotheses.
 
 **specs/10 D8 argues for 20, and this is 1000.** The divergence is deliberate
 and it is worth being precise about what it does and does not give up. D8's
@@ -83,9 +91,10 @@ hundred trials it prices it harder, and at a thousand harder still.
 
 So the cap is a guardrail against an accident (a loop left running, a script
 with a typo in its iteration count), not the statistical control. The control is
-that every verdict carries ``sharpe_inflation``, every book carries
-``distinct_option_hypotheses``, and neither number can be spent without being
-recorded. A wide search is allowed to be wide; it is not allowed to be quiet.
+that every verdict carries ``sharpe_inflation``, every book carries the
+campaign's denominator *and* the all-time count, and neither can be spent
+without being recorded. A wide search is allowed to be wide; it is not allowed
+to be quiet.
 
 The honest cost of raising it: a search this wide will find something that
 looks good, and the deflated number is then the only thing standing between
@@ -99,6 +108,33 @@ Not a gate and not a prompt -- a line of output. Past this many trials the
 deflation term is large enough that a reader who has not thought about it will
 misread a high score, and the cheapest place to make that hard is next to the
 score."""
+
+
+_DUPLICATE_RETRIES = 3
+"""How many times to ask again when a proposal repeats a rule already evaluated.
+
+Three, not one and not ten. A proposal is cheap next to a backtest, so retrying
+is nearly free; but a proposer that has offered the same rule four times is
+either exhausted (the offline library) or not reading its memory (a model), and
+neither is fixed by a fifth ask."""
+
+_ALREADY_TRIED = (
+    "That rule has already been evaluated in this database: {name}, a "
+    "{structure} with entry `{entry}`. Its result is already known and running "
+    "it again would produce the identical numbers. Propose something "
+    "different -- and prefer a different STRUCTURE, EXPIRY or ANCHOR DELTA "
+    "rather than another entry condition on the same structure, which is the "
+    "axis every campaign so far has over-explored."
+)
+
+_campaigns_started = 0
+
+
+def _next_campaign_id() -> str:
+    """``run-<seal>-<n>``, unique per loop and traceable to its process."""
+    global _campaigns_started
+    _campaigns_started += 1
+    return f"run-{current_seal().run_id[:8]}-{_campaigns_started}"
 
 
 def option_saved_filename(spec: OptionSpec) -> str:
@@ -143,6 +179,19 @@ class OptionResearchConfig:
     discovers anything."""
     dataset_version: str = "options-cache"
     save_accepted_to: str | None = "strategies/options"
+    campaign: str = ""
+    """The name this search is recorded and deflated under.
+
+    One search is one campaign, and the multiple-comparisons denominator is
+    counted within it: a search exploring iron condors today is not charged for
+    a search that explored calendar effects last month. Empty means "generate
+    one", which is what the CLI does.
+
+    Naming one explicitly is how a campaign gets *resumed*: pass the same name
+    twice and the second run continues the first's denominator instead of
+    starting a fresh one. That is the honest option when a run was interrupted,
+    and the dishonest one when it is used to launder a second look, which is why
+    ``aqr campaigns`` lists every search that has ever run."""
 
     def __post_init__(self) -> None:
         if self.iterations < 1:
@@ -194,6 +243,28 @@ class OptionResearchLoop:
     backtest_config: OptionBacktestConfig = field(default_factory=OptionBacktestConfig)
     steps: list[OptionResearchStep] = field(default_factory=list)
     _frame: OptionFeatureFrame | None = field(default=None, init=False, repr=False)
+    _campaign: str = field(default="", init=False, repr=False)
+
+    @property
+    def campaign(self) -> str:
+        """This search's identity, generated on first use and then fixed.
+
+        Read once and cached: a campaign that changed its name halfway through
+        would split its own denominator, which is the one failure this whole
+        mechanism cannot have.
+
+        The generated form is ``run-<seal>-<n>``: the process seal's ``run_id``
+        so a campaign can be traced to the process that ran it and lines up with
+        the ancestry-taint grouping, plus an ordinal because **one search is one
+        campaign and a process may run several**. Deriving it from the seal
+        alone was the first attempt and it was wrong -- a script running three
+        sweeps in one process would have deflated all three against one
+        denominator, which is exactly the merging this mechanism exists to
+        prevent, arriving from the other direction.
+        """
+        if not self._campaign:
+            self._campaign = self.config.campaign or _next_campaign_id()
+        return self._campaign
 
     def span(self, key: FeatureKey) -> tuple[float, float] | None:
         """What ``key`` actually ranges over on this campaign's own market.
@@ -235,7 +306,9 @@ class OptionResearchLoop:
         a reader of the log needs to be able to tell them apart.
         """
         for i in range(1, self.config.iterations + 1):
-            spent = self.registry.distinct_hypotheses(family=OPTION)
+            spent = self.registry.distinct_hypotheses(
+                family=OPTION, campaign=self.campaign
+            )
             if spent >= OPTION_SEARCH_BUDGET:
                 self.steps.append(
                     OptionResearchStep(
@@ -244,10 +317,11 @@ class OptionResearchLoop:
                             fields={"name": "budget_exhausted"}, source="budget"
                         ),
                         error=(
-                            f"the option search budget is spent: {spent} distinct "
-                            f"hypotheses have been evaluated against a window holding "
-                            f"about 71 independent cycles, and specs/10 D8 caps it at "
-                            f"{OPTION_SEARCH_BUDGET}. Nothing was proposed."
+                            f"this campaign has reached the ceiling: {spent} distinct "
+                            f"hypotheses in {self.campaign}, against a ceiling of "
+                            f"{OPTION_SEARCH_BUDGET}. That ceiling is a guardrail "
+                            "against a runaway loop, not a statistical control. "
+                            "Nothing was proposed."
                         ),
                     )
                 )
@@ -300,9 +374,25 @@ class OptionResearchLoop:
         step.spec = spec
 
         if self.registry.has_tried(spec.fingerprint()):
-            step.error = "identical rule already evaluated; skipping the backtest"
-            self._record_failure(step)
-            return step
+            resolved = self._ask_for_something_new(proposal, spec, parent, memory)
+            if resolved is None:
+                # Not recorded, and that is the point. Nothing was evaluated, so
+                # no draw was taken and this campaign's denominator must not
+                # grow. Recording it would inflate the count a deflation is
+                # computed against with rules the campaign never ran -- which is
+                # exactly the merging a per-campaign denominator exists to stop,
+                # arriving through the back door. The iteration is still spent
+                # and the step still says so; the ledger already holds the
+                # original evaluation, under the campaign that did run it.
+                step.error = (
+                    f"identical rule already evaluated ({spec.fingerprint()}); "
+                    f"the proposer offered nothing new in "
+                    f"{_DUPLICATE_RETRIES + 1} attempts, so this iteration is "
+                    "spent and no experiment is recorded"
+                )
+                return step
+            proposal, spec = resolved
+            step.proposal, step.spec = proposal, spec
 
         outcome = self._evaluate(spec, proposal)
 
@@ -324,6 +414,55 @@ class OptionResearchLoop:
             self._save(step.spec or spec)
         return step
 
+    def _ask_for_something_new(
+        self,
+        proposal: Proposal,
+        spec: OptionSpec,
+        parent: dict[str, Any] | None,
+        memory: list[dict[str, Any]],
+    ) -> tuple[Proposal, OptionSpec] | None:
+        """Ask again when a proposal repeats a rule the ledger already holds.
+
+        A duplicate is not a result -- the answer is already recorded, and
+        re-running it would produce the identical numbers. Before this, it cost
+        a whole iteration: a second campaign against the offline template
+        library spent five of six that way. Bounded retries are cheap (a
+        proposal, not a backtest) and turn most of those back into real work.
+
+        ``None`` when the proposer keeps offering the same thing, which for the
+        offline library means it is exhausted and for a model means the memory
+        it was shown is not steering it.
+        """
+        seen = {spec.fingerprint()}
+        for _ in range(_DUPLICATE_RETRIES):
+            try:
+                candidate = self.proposer.propose(
+                    underlying=self.config.underlying,
+                    memory=memory,
+                    parent=parent,
+                    instruction=_ALREADY_TRIED.format(
+                        name=spec.name, entry=spec.entry, structure=spec.structure.type
+                    ),
+                    budget=(
+                        self.registry.distinct_hypotheses(
+                            family=OPTION, campaign=self.campaign
+                        ),
+                        OPTION_SEARCH_BUDGET,
+                    ),
+                    span=self.span,
+                    spans=self._catalogue_spans(),
+                )
+                rebuilt = self._build(candidate, parent)
+            except Exception:
+                return None
+            fingerprint = rebuilt.fingerprint()
+            if fingerprint in seen:
+                return None
+            if not self.registry.has_tried(fingerprint):
+                return candidate, rebuilt
+            seen.add(fingerprint)
+        return None
+
     def _build(self, proposal: Proposal, parent: dict[str, Any] | None) -> OptionSpec:
         return build_option_spec(
             proposal,
@@ -342,6 +481,7 @@ class OptionResearchLoop:
             llm_model=proposal.model,
             prompt_hash=proposal.prompt_hash,
             dataset_version=self.config.dataset_version,
+            campaign=self.campaign,
         )
 
     def _repair(
@@ -427,6 +567,7 @@ class OptionResearchLoop:
                 data_end="",
                 dataset_version=self.config.dataset_version,
                 family=OPTION,
+                campaign=self.campaign,
                 verdict="ERROR",
                 backtests_run=0,
                 llm_model=step.proposal.model,

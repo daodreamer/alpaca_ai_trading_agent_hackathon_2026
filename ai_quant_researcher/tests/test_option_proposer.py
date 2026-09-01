@@ -110,13 +110,24 @@ def test_the_schema_has_no_exit_field_at_all() -> None:
     assert OPTION_PROPOSAL_SCHEMA["additionalProperties"] is False
 
 
-def test_the_system_prompt_states_the_four_facts_a_model_gets_wrong() -> None:
+def test_the_system_prompt_states_the_facts_a_model_gets_wrong() -> None:
     text = OPTION_SYSTEM_PROMPT.lower()
     assert "there is no exit" in text
     assert "delta, not by points" in text
-    assert "three expiries" in text
+    assert "11 to 66 days" in text
     assert "one underlying" in text
     assert "independent cycles" in text
+    # The units fact, added after a campaign lost seven of twenty slots to
+    # `term_slope() > 5` against a feature whose maximum is 0.052.
+    assert "decimal fractions, not percentage points" in text
+
+
+def test_the_system_prompt_asks_for_variation_beyond_the_entry_condition() -> None:
+    """The measured narrowness of the first campaign: fifteen hypotheses, and
+    fourteen of them wrote dte 28 / anchor 0.16 and varied only which features
+    the entry clauses named. The entry is one of five degrees of freedom."""
+    text = OPTION_SYSTEM_PROMPT.lower()
+    assert "vary the structure, not only the condition" in text
 
 
 def test_the_user_prompt_shows_the_remaining_budget() -> None:
@@ -160,14 +171,23 @@ def test_an_unknown_structure_is_rejected_by_name() -> None:
     assert any("naked_put" in p and "structure_type" in p for p in problems)
 
 
-@pytest.mark.parametrize("dte", [0, 1, 7, 30, 365])
-def test_only_the_three_listed_expiry_targets_are_accepted(dte: int) -> None:
-    """D0: the vendor samples three rolling targets. Anything else names a
-    contract this cache cannot price, and a rule that cannot be priced is a
-    wasted iteration out of twenty."""
+@pytest.mark.parametrize("dte", [0, 1, 7, 10, 67, 90, 365])
+def test_an_expiry_outside_the_listed_band_is_rejected(dte: int) -> None:
+    """D0 measured the cache as listing expiries 11 to 66 days out. Outside that
+    band there is no contract to price."""
     assert dte not in ALLOWED_DTE_TARGETS
     problems = check_option_proposal(fields(dte_target=dte))
     assert any("dte_target" in p for p in problems)
+
+
+@pytest.mark.parametrize("dte", [11, 14, 21, 28, 35, 42, 49, 56, 66])
+def test_any_expiry_inside_the_band_is_accepted(dte: int) -> None:
+    """The first version of this schema was an enum of exactly 14/28/49, which
+    narrowed the search for no reason: the cache lists 39 distinct DTEs across
+    11..66 and the engine's 10-day tolerance resolves a target anywhere in it.
+    The coverage is uneven and is published rather than enforced -- 42 resolves
+    on 44% of sessions, and choosing it should be a decision, not a refusal."""
+    assert check_option_proposal(fields(dte_target=dte)) == []
 
 
 def test_a_wing_at_or_above_its_anchor_is_rejected_with_both_numbers() -> None:

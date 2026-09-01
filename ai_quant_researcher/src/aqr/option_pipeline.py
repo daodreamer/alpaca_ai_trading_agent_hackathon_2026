@@ -59,7 +59,7 @@ from aqr.options.robustness import (
 from aqr.options.run import OptionMarket, run_option_strategy
 from aqr.options.spec import OptionSpec
 from aqr.options.walkforward import OptionWalkForwardReport, run_option_walk_forward
-from aqr.registry.db import ExperimentRecord, Registry
+from aqr.registry.db import OPTION, ExperimentRecord, Registry
 from aqr.seal import current as current_seal
 from aqr.validation.cycles import independent_cycles
 from aqr.validation.holdout import benchmark_returns, buy_and_hold
@@ -210,22 +210,47 @@ def evaluate_option_candidate(
     llm_model: str | None = None,
     prompt_hash: str | None = None,
     dataset_version: str = "options-cache",
+    campaign: str = "",
     run_robustness: bool = True,
 ) -> OptionResearchOutcome:
     """Put one option rule through the full gauntlet.
 
     ``registry`` is optional and strongly recommended: without it the overfitting
-    detector cannot see how many hypotheses preceded this one. The count it is
-    given is the **option** search's own (``distinct_hypotheses(family="option")``),
-    never the combined total — D8 is explicit that a multiplicity denominator
-    mixing the 414-hypothesis equity search with a 20-hypothesis option search
-    makes both bars wrong.
+    detector cannot see how many hypotheses preceded this one.
+
+    Two things narrow the count it is given, and both are deliberate. It is the
+    **option** search's own, never the combined total — D8 is explicit that a
+    denominator mixing the equity and option searches makes both bars wrong. And
+    it is **this campaign's**, not the database's all-time figure: deflation asks
+    how many draws bought this maximum, and a search run in March did not buy the
+    maximum of a search run in January. The all-time count is still recorded and
+    still travels in every artefact beside the campaign one, so a reader can see
+    which question was answered. ``campaign=""`` means "not tracked" and falls
+    back to the all-time family count, which is the conservative reading.
     """
     config = config or OptionBacktestConfig()
     outcome = OptionResearchOutcome(spec=spec)
 
     # --- the full-window run: cheap, and it is also the first gate --------- #
-    result = run_option_strategy(spec, market, config)
+    #
+    # A spec can name a feature this market cannot answer -- ``iv_rank()`` on a
+    # market loaded without a volatility history is the common case -- and the
+    # engine raises rather than returning an empty result, which is right for a
+    # direct caller and wrong here. The research loop's contract is that a bad
+    # proposal costs one iteration and not the run, so the refusal is caught,
+    # recorded as the rejection it is, and the campaign continues. Catching it
+    # here rather than in the loop keeps the *record* honest too: the experiment
+    # is written down with its reason, so the hypothesis still counts against
+    # the search that proposed it.
+    try:
+        result = run_option_strategy(spec, market, config)
+    except (ValueError, KeyError) as exc:
+        outcome.rejected_early = f"the rule could not be evaluated on this market: {exc}"
+        _record(
+            outcome, market, registry, llm_model, prompt_hash, dataset_version,
+            config.costs, campaign,
+        )
+        return outcome
     outcome.result = result
     outcome.in_sample = compute_metrics(result)
     outcome.backtests_run += 1
@@ -239,7 +264,10 @@ def evaluate_option_candidate(
             f"the rule opened no positions in {len(market.chain.sessions)} sessions: "
             f"{result.skip_census}"
         )
-        _record(outcome, market, registry, llm_model, prompt_hash, dataset_version, config.costs)
+        _record(
+            outcome, market, registry, llm_model, prompt_hash, dataset_version,
+            config.costs, campaign,
+        )
         return outcome
 
     zero_config = OptionBacktestConfig(
@@ -263,7 +291,10 @@ def evaluate_option_candidate(
             f"{first.isoformat()} -> {last.isoformat()} is not enough calendar time "
             f"for a {wf.train_months}+{wf.test_months}-month walk-forward"
         )
-        _record(outcome, market, registry, llm_model, prompt_hash, dataset_version, config.costs)
+        _record(
+            outcome, market, registry, llm_model, prompt_hash, dataset_version,
+            config.costs, campaign,
+        )
         return outcome
 
     oos = wf.stitched or _worst_fold(wf)
@@ -281,7 +312,11 @@ def evaluate_option_candidate(
         )
 
     # --- overfitting, informed by the option search's own history ---------- #
-    prior = registry.distinct_hypotheses(family="option") if registry else 0
+    prior = (
+        registry.distinct_hypotheses(family=OPTION, campaign=campaign or None)
+        if registry
+        else 0
+    )
     outcome.overfitting = detect_overfitting(
         spec,
         result,
@@ -326,7 +361,10 @@ def evaluate_option_candidate(
             ),
         )
     )
-    _record(outcome, market, registry, llm_model, prompt_hash, dataset_version, config.costs)
+    _record(
+        outcome, market, registry, llm_model, prompt_hash, dataset_version,
+        config.costs, campaign,
+    )
     return outcome
 
 
@@ -434,6 +472,7 @@ def _record(
     prompt_hash: str | None,
     dataset_version: str,
     costs: OptionCostModel,
+    campaign: str = "",
 ) -> None:
     """Write the experiment down -- successes and failures alike.
 
@@ -464,7 +503,8 @@ def _record(
             data_start=start,
             data_end=end,
             dataset_version=dataset_version,
-            family="option",
+            family=OPTION,
+            campaign=campaign,
             # Cost retention is a fatal gate here as on the equity side, so the
             # schedule is part of the verdict rather than context for it -- and
             # an option schedule and an equity one are not the same units

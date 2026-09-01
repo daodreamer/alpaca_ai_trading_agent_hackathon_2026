@@ -37,7 +37,7 @@ from contextlib import suppress
 from typing import Any, Protocol
 
 from aqr.agent.option_prompt import (
-    ALLOWED_DTE_TARGETS,
+    DTE_BAND,
     OPTION_PROPOSAL_SCHEMA,
     OPTION_SYSTEM_PROMPT,
     STRUCTURE_CATALOGUE,
@@ -254,10 +254,13 @@ def check_option_proposal(
         )
 
     dte = fields.get("dte_target")
-    if not isinstance(dte, int) or isinstance(dte, bool) or dte not in ALLOWED_DTE_TARGETS:
+    if not isinstance(dte, int) or isinstance(dte, bool):
+        problems.append(f"dte_target must be a whole number of days, got {dte!r}")
+    elif not DTE_BAND[0] <= dte <= DTE_BAND[1]:
         problems.append(
-            f"dte_target must be one of {list(ALLOWED_DTE_TARGETS)}, got {dte!r}; the "
-            "vendor carries three rolling expiry targets and nothing else can be priced"
+            f"dte_target must be between {DTE_BAND[0]} and {DTE_BAND[1]} days, got "
+            f"{dte}; that is the whole range of expiries the cache lists, and one "
+            "outside it names a contract that cannot be priced"
         )
 
     anchor = fields.get("anchor_delta")
@@ -1028,7 +1031,11 @@ class TemplateOptionProposer:
         fields = _complete(parent)
         knob = self._rng.choice(["anchor_delta", "dte_target", "min_sessions_between_entries"])
         if knob == "dte_target":
-            others = [d for d in ALLOWED_DTE_TARGETS if d != int(fields["dte_target"])]
+            current = int(fields["dte_target"])
+            # Move to a different *bucket* rather than to an adjacent day: 28 to
+            # 29 is not a variant anyone can distinguish, and the engine's
+            # ±10-day tolerance would resolve both to the same expiry.
+            others = [d for d in (14, 21, 28, 35, 49, 56) if abs(d - current) >= 7]
             fields["dte_target"] = self._rng.choice(others)
             change = f"DTE {parent.get('dte_target')} -> {fields['dte_target']}"
         elif knob == "anchor_delta":

@@ -1269,15 +1269,77 @@ rule — 97/100, every robustness component maxed, beating buy-and-hold on Sharp
 was rejected because its 0.67 Sharpe **deflated to −0.28** once the search that
 found it was paid for. The deflation term did that. The cap was never involved.
 
-So the ceiling is 1000, it is a guardrail against a runaway loop rather than a
-statistical control, and it is counted against the *registry's* distinct option
-hypotheses rather than one run's `iterations` — a ceiling enforced per run is not
-a ceiling, because the multiple-comparisons problem does not reset when a process
-exits. What keeps a wide search honest is that its width is charged to every
-verdict (`sharpe_inflation` in the overfitting report) and recorded in every
-artefact (`distinct_option_hypotheses` in the book). A wide search is allowed to
-be wide; it is not allowed to be quiet. Past 50 trials the command says so before
-it starts.
+So the ceiling is 1000 per campaign, it is a guardrail against a runaway loop
+rather than a statistical control, and what keeps a wide search honest is that
+its width is charged to every verdict (`sharpe_inflation` in the overfitting
+report) and recorded in every artefact. A wide search is allowed to be wide; it
+is not allowed to be quiet. Past 50 trials the command says so before it starts.
+
+**Each run is a campaign, and each campaign starts from a clean denominator.**
+A verdict is deflated against the trials *that search* took, not against every
+option hypothesis the database has ever held. The argument: deflation asks how
+many draws bought this maximum, and a sweep exploring iron condors in March did
+not buy the maximum of a sweep exploring calendar effects in January — charging
+the second for the first is naive Bonferroni applied across a research programme
+rather than across an experiment, and it ends with a programme unable to conclude
+anything at all.
+
+The argument against is real and is not hidden: somebody who runs ten campaigns
+and reports the best rule from the tenth has looked at all ten. Nothing here
+prevents that and nothing here conceals it.
+
+```bash
+uv run aqr campaigns                       # every search that has ever run
+# campaign        hypotheses  best score  started              finished
+# run-25180a08-1  5           96          2026-09-01T11:22:04  2026-09-01T11:22:07
+# run-7f5c6325-1  6           97          2026-09-01T11:21:58  2026-09-01T11:22:01
+#
+# 2 campaign(s), 11 distinct option hypotheses all time.
+```
+
+Every option book carries all three numbers — `campaign_hypotheses`,
+`distinct_option_hypotheses` and `option_campaigns_run` — because "the best of
+40" and "the best of 40, in the seventh of seven searches" are different claims
+and only the three together tell them apart. `--campaign NAME` resumes an
+existing campaign instead of starting a fresh one, which is right for a run that
+was interrupted and is the one way to use this dishonestly.
+
+### What is deliberately *not* restricted
+
+The gates that remain are the ones the data or the risk model forces. Everything
+else was widened after the first campaign showed it was narrowing the search for
+no reason:
+
+| | |
+|---|---|
+| **expiry** | any target in **11–66 days**, the whole band the cache lists. It was an enum of exactly 14/28/49, which refused 36 of the 39 DTEs the vendor actually samples. Coverage is uneven and is *published* rather than enforced — 42 days resolves on 44% of sessions — so a thin bucket is a choice, not a refusal |
+| **structure** | the seven defined-risk kinds, and this one does **not** move. A structure with unbounded loss must stay unrepresentable |
+| **anchor delta** | anything in (0, 1) |
+| **width** | any delta below the anchor's — the wing is further out of the money, which is structural rather than a policy |
+| **cadence** | one session or more |
+| **risk per trade** | run configuration, never the model's. specs/10 D8a: the same rule produced 21 independent cycles at 1% of equity and 57 at 2%, so a model that could set this could buy its own significance |
+| **entry condition** | any expression over the full feature vocabulary — with the one check that a threshold **no session can satisfy** is sent back before it costs a slot |
+
+The last row is worth its own sentence. The check flags only *impossible*, never
+*rare*: `skew_25d() > 0.12` fires on about 5% of sessions and passes untouched,
+because a small sample is what the independent-cycle gate is for, and flagging it
+here would put the proposer in the business of preferring rules that trade more.
+
+**The narrowness that actually mattered was not a gate.** Fifteen hypotheses in
+the first campaign, and fourteen of them wrote `dte 28` / `anchor 0.16` and varied
+only which features their entry clauses named. Nothing forbade anything else —
+the model simply explored one axis of five. So the prompt now asks for variation
+across the structure explicitly, and research memory shows the *knobs* every past
+attempt used, not just its claim:
+
+```
+[REVIEW] put_credit_spread_term_slope_v2 (OOS Sharpe 0.71, 70 trades, 44 independent cycles)
+    structure: put_credit_spread, 14 DTE, anchor delta 0.16, width delta 0.06, every 5 sessions
+    claim: An upward-sloping term structure says the market expects volatility to rise...
+    entry: term_slope() > 0.01
+```
+
+A model that can see `0.16` on every line has some chance of moving it.
 
 **The two searches are counted separately, everywhere a denominator appears.**
 `distinct_hypotheses(family=...)`, `total_backtests(family=...)`,
@@ -1315,15 +1377,20 @@ uv run --extra dev pytest tests/test_option_cache_claims.py -q
 
 # --- 1. Let the model explore ----------------------------------------------
 uv run aqr option-research --iterations 100 --provider deepseek
-# Offline (--provider offline) is seconds and costs nothing; it walks a
-# template library of the structures specs/07 and specs/10 were written about
-# and is the baseline the model has to beat -- 60 offline iterations against the
-# real cache take about a minute. With deepseek the wall time is almost entirely
-# API latency.
+uv run aqr option-research --iterations 100 --provider deepseek --mutate-every 0
+# Each invocation is its own campaign with its own clean denominator, so a
+# second sweep is not charged for the first. `aqr campaigns` lists them all and
+# every book carries both counts.
 #
-# The count is cumulative across the life of runs/research.sqlite and does not
-# reset when the process exits, so a second run of 100 leaves the search at 200
-# and every verdict is deflated against that. Read `sharpe_inflation`.
+# --mutate-every 0 turns off refinement entirely, which is the right choice for
+# a wide exploratory sweep; the default 6 spends every sixth iteration
+# improving the best rule so far.
+#
+# Offline (--provider offline) is seconds and costs nothing; it walks a template
+# library of the structures specs/07 and specs/10 were written about and is the
+# baseline the model has to beat -- 60 offline iterations against the real cache
+# take about a minute. With deepseek the wall time is almost entirely API
+# latency.
 
 # --- 2. Read the result ----------------------------------------------------
 uv run aqr experiments --family option         # cycles beside trades
@@ -1370,10 +1437,9 @@ nothing. Nothing about the Risk Gate changes; a researched rule is an input to
 the agent, never an exemption from the gate.
 
 One of those steps is a one-way door: **step 5** spends a seal that is per
-candidate and cannot be re-run. Step 1 is not a door but it is a ratchet —
-hypotheses accumulate in the registry and every future verdict is deflated
-against the total, so a campaign run twice is a campaign that has to clear a
-higher bar. Steps 0, 2, 4 and 6 are free and repeatable.
+candidate and cannot be re-run. Step 1 is repeatable — each run is its own
+campaign with its own denominator — but every run it takes is listed in
+`aqr campaigns` forever. Steps 0, 2, 4 and 6 are free.
 
 ### What a wide search actually costs
 
@@ -1385,7 +1451,7 @@ rather than forbid them. What changes as the count grows:
 | `sharpe_inflation` | the deflated Sharpe falls with `log(trials)`. At 20 trials a 0.67 became −0.28 |
 | `search_cost` | an overfitting signal in its own right, `log10(trials)/3` |
 | the reason line | every verdict names the trial count it was deflated against |
-| the book | `distinct_option_hypotheses` travels inside the artefact |
+| the book | the campaign's denominator, the all-time count and the number of campaigns, all three |
 
 The thing to read is never the score. A 97/100 that deflates negative is a rule
 the search manufactured; a 70/100 that survives deflation is a rule. The

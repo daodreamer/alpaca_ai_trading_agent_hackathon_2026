@@ -32,6 +32,7 @@ from aqr.options.spec import OptionSpec, dumps_option_spec
 __all__ = [
     "EQUITY",
     "FAMILIES",
+    "LEGACY_CAMPAIGN",
     "OPTION",
     "ExperimentRecord",
     "Preregistration",
@@ -167,6 +168,11 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("experiments", "family", "TEXT"),
     ("strategies", "family", "TEXT"),
     ("target_books", "family", "TEXT"),
+    # Which search this experiment belonged to. The multiple-comparisons
+    # denominator is counted within one, so that a campaign exploring iron
+    # condors in March is not deflated by a campaign exploring calendar effects
+    # in January. See ``distinct_hypotheses``.
+    ("experiments", "campaign", "TEXT"),
 )
 
 EQUITY = "equity"
@@ -192,6 +198,15 @@ def _family(value: object) -> str:
     """A stored family, defaulting rows older than the column to ``equity``."""
     text = str(value or EQUITY).strip().lower()
     return text if text in FAMILIES else EQUITY
+
+
+LEGACY_CAMPAIGN = "(before campaigns)"
+"""What a row written before the ``campaign`` column belongs to.
+
+Named rather than left as ``NULL`` so it appears in a campaign listing like any
+other: those experiments happened, and a report that silently omitted them would
+be the one dishonest thing this column could do.
+"""
 
 
 class PreregistrationError(RuntimeError):
@@ -244,6 +259,16 @@ class ExperimentRecord:
     Defaulted rather than required so every existing caller is unchanged and
     still records an equity experiment. The option pipeline passes it
     explicitly, which is the only way a row gets the other value."""
+    campaign: str = ""
+    """Which search this experiment belonged to. Empty means "not tracked".
+
+    The unit the multiple-comparisons denominator is counted over. One
+    ``aqr option-research`` invocation is one campaign, so a search that
+    explores iron condors today is not charged for a search that explored
+    calendar effects last month. The record of *both* is permanent and the
+    all-time count is always available; what resets is the denominator a
+    deflation is computed against, and every artefact carries both numbers so a
+    reader can see which is which."""
     train_metrics: dict[str, Any] | None = None
     oos_metrics: dict[str, Any] | None = None
     robustness: dict[str, Any] | None = None
@@ -823,11 +848,12 @@ class Registry:
         with self._tx() as conn:
             cursor = conn.execute(
                 "INSERT INTO experiments (fingerprint, strategy_name, hypothesis, symbols, "
-                "timeframe, data_start, data_end, dataset_version, family, train_metrics, "
-                "oos_metrics, robustness, overfitting, evaluation, verdict, score, "
-                "backtests_run, llm_model, prompt_hash, code_hash, error, seal, costs, "
-                "created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "timeframe, data_start, data_end, dataset_version, family, campaign, "
+                "train_metrics, oos_metrics, robustness, overfitting, evaluation, verdict, "
+                "score, backtests_run, llm_model, prompt_hash, code_hash, error, seal, "
+                "costs, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?)",
                 (
                     record.fingerprint,
                     record.strategy_name,
@@ -838,6 +864,7 @@ class Registry:
                     record.data_end,
                     record.dataset_version,
                     _family(record.family),
+                    record.campaign,
                     _json(record.train_metrics),
                     _json(record.oos_metrics),
                     _json(record.robustness),
@@ -862,6 +889,7 @@ class Registry:
         limit: int = 50,
         fingerprint: str | None = None,
         family: str | None = None,
+        campaign: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -871,6 +899,9 @@ class Registry:
         if family:
             clauses.append("COALESCE(family, ?) = ?")
             params += [EQUITY, _family(family)]
+        if campaign:
+            clauses.append("COALESCE(campaign, ?) = ?")
+            params += [LEGACY_CAMPAIGN, campaign]
         where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -898,7 +929,9 @@ class Registry:
             ).fetchone()
         return int(row["total"])
 
-    def distinct_hypotheses(self, family: str | None = None) -> int:
+    def distinct_hypotheses(
+        self, family: str | None = None, campaign: str | None = None
+    ) -> int:
         """Distinct rules ever evaluated: the multiple-comparisons denominator.
 
         Not :meth:`total_backtests`. One hypothesis costs around 57 backtests
@@ -913,24 +946,67 @@ class Registry:
         was. Re-evaluating one rule does not count twice -- rediscovering your
         own last idea is not a fresh place to have got lucky.
 
-        ``family`` is what specs/10 D8 requires: the option search is capped at
-        20 hypotheses against 71 independent cycles and the equity search spent
-        414 against a 600-name universe. A denominator mixing the two makes both
-        multiplicity bars wrong -- far too strict for the option side, far too
-        loose for the equity side -- so every *counting* caller passes one.
-        ``None`` is the combined figure and is for display only.
+        ``family`` is what specs/10 D8 requires: the option search explores a
+        different space against a different sample size than the equity one. A
+        denominator mixing the two makes both multiplicity bars wrong -- far too
+        strict for the option side, far too loose for the equity side -- so every
+        *counting* caller passes one. ``None`` is the combined figure and is for
+        display only.
+
+        ``campaign`` narrows it further, to one search. The argument for
+        resetting: deflation asks "how many draws bought this maximum", and two
+        campaigns exploring different mechanisms months apart are not draws from
+        one distribution -- charging the second for the first makes a long-running
+        research programme progressively unable to conclude anything, which is
+        the well-known failure of naive Bonferroni applied across a career rather
+        than across an experiment. The argument against, which is real: somebody
+        who runs ten campaigns and reports the best rule from the tenth has
+        looked at all ten. Nothing here prevents that, and nothing here hides
+        it -- the all-time count is one call away, :meth:`campaigns` lists every
+        search that has run, and both numbers travel inside every artefact. The
+        reset is a choice about which question the deflation answers, made
+        explicit rather than assumed.
         """
-        if family is None:
-            row = self._conn.execute(
-                "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments"
-            ).fetchone()
-        else:
-            row = self._conn.execute(
-                "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments "
-                "WHERE COALESCE(family, ?) = ?",
-                (EQUITY, _family(family)),
-            ).fetchone()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if family is not None:
+            clauses.append("COALESCE(family, ?) = ?")
+            params += [EQUITY, _family(family)]
+        if campaign is not None:
+            clauses.append("COALESCE(campaign, ?) = ?")
+            params += [LEGACY_CAMPAIGN, campaign]
+        where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
+        row = self._conn.execute(
+            "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments " + where,
+            tuple(params),
+        ).fetchone()
         return int(row["total"])
+
+    def campaigns(self, family: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Every search that has run, newest first, with what it cost.
+
+        The counterweight to :meth:`distinct_hypotheses`' campaign reset. A
+        per-campaign denominator is defensible exactly as long as the campaigns
+        themselves are visible: "the best of 40, in the seventh of seven
+        searches" is a different claim from "the best of 40", and this is the
+        table that tells them apart.
+        """
+        clauses = ["1 = 1"]
+        params: list[Any] = []
+        if family is not None:
+            clauses.append("COALESCE(family, ?) = ?")
+            params += [EQUITY, _family(family)]
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT COALESCE(campaign, ?) AS campaign, "
+            "COUNT(DISTINCT fingerprint) AS hypotheses, "
+            "MIN(created_at) AS started, MAX(created_at) AS finished, "
+            "MAX(COALESCE(score, -1)) AS best_score "
+            "FROM experiments WHERE " + " AND ".join(clauses) + " "
+            "GROUP BY COALESCE(campaign, ?) ORDER BY started DESC LIMIT ?",
+            (LEGACY_CAMPAIGN, *params[:-1], LEGACY_CAMPAIGN, params[-1]),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def has_tried(self, fingerprint: str) -> bool:
         """Whether this exact rule has been evaluated before.
@@ -942,6 +1018,15 @@ class Registry:
             "SELECT 1 FROM experiments WHERE fingerprint = ? LIMIT 1", (fingerprint,)
         ).fetchone()
         return row is not None
+
+    def _knobs(self, fingerprint: str) -> dict[str, str]:
+        row = self._conn.execute(
+            "SELECT spec_yaml, family FROM strategies WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone()
+        if row is None or _family(row["family"]) != OPTION:
+            return {}
+        return _describe_option_knobs(row["spec_yaml"])
 
     def memory(self, limit: int = 20, family: str | None = None) -> list[dict[str, Any]]:
         """Compact history for the LLM prompt (architecture section 28).
@@ -958,15 +1043,15 @@ class Registry:
         """
         if family is None:
             rows = self._conn.execute(
-                "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, "
-                "overfitting, robustness, timeframe, family, error "
+                "SELECT fingerprint, strategy_name, hypothesis, verdict, score, "
+                "oos_metrics, overfitting, robustness, timeframe, family, error "
                 "FROM experiments ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, "
-                "overfitting, robustness, timeframe, family, error "
+                "SELECT fingerprint, strategy_name, hypothesis, verdict, score, "
+                "oos_metrics, overfitting, robustness, timeframe, family, error "
                 "FROM experiments WHERE COALESCE(family, ?) = ? ORDER BY id DESC LIMIT ?",
                 (EQUITY, _family(family), limit),
             ).fetchall()
@@ -993,9 +1078,44 @@ class Registry:
                     "oos_cycles": robust.get("independent_cycles"),
                     "overfitting": over.get("verdict"),
                     "error": row["error"],
+                    # The knobs a rule used, for a prompt that needs to show what
+                    # has been *pinned* rather than only what has been claimed.
+                    # Read from the stored spec rather than duplicated into a
+                    # column: two spellings of one fact drift.
+                    **self._knobs(row["fingerprint"]),
                 }
             )
         return out
+
+
+def _describe_option_knobs(spec_yaml: str) -> dict[str, str]:
+    """The structure a stored option rule used, as one line.
+
+    Empty for an equity rule or an unreadable spec: the prompt renders whatever
+    is there, so an absent line is better than a wrong one.
+    """
+    from aqr.options.spec import loads_option_spec
+
+    try:
+        spec = loads_option_spec(spec_yaml)
+    except (ValueError, KeyError, TypeError):
+        return {}
+    structure = spec.structure
+    width = (
+        f"width delta {structure.width_delta}"
+        if structure.width_delta is not None
+        else f"width {structure.width_points} points"
+        if structure.width_points is not None
+        else "one leg"
+    )
+    return {
+        "structure": (
+            f"{structure.type}, {structure.dte.target} DTE, anchor delta "
+            f"{structure.anchor.delta}, {width}, every "
+            f"{spec.cadence.min_sessions_between_entries} sessions"
+        ),
+        "entry": spec.entry,
+    }
 
 
 def _certificate(blob: str | None) -> dict[str, Any] | None:

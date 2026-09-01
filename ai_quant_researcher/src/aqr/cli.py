@@ -2061,6 +2061,21 @@ def option_research(
         "offline", help="Who proposes: offline | deepseek | anthropic."
     ),
     model: str = typer.Option("", help="Model id. Defaults to the provider's usual one."),
+    campaign: str = typer.Option(
+        "",
+        help="Name this search. Default: a fresh one per invocation, so each run "
+        "is deflated against its own trials rather than against every option "
+        "hypothesis this database has ever seen. Passing a name that already "
+        "exists RESUMES that campaign and continues its denominator -- right for "
+        "a run that was interrupted, and a way to launder a second look if used "
+        "for anything else. `aqr campaigns` lists them all.",
+    ),
+    mutate_every: int = typer.Option(
+        6,
+        help="Every Nth iteration refines the best rule so far instead of "
+        "proposing a new mechanism. 0 turns refinement off entirely, which is "
+        "the right choice for a wide exploratory sweep.",
+    ),
     save_to: str = typer.Option(
         "strategies/options", help="Where surviving rules are written."
     ),
@@ -2100,16 +2115,28 @@ def option_research(
             max_concurrent=max_concurrent,
             dataset_version=version,
             save_accepted_to=save_to,
+            campaign=campaign,
+            mutate_best_every=mutate_every,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
     with Registry(db) as registry:
-        spent = registry.distinct_hypotheses(family=OPTION)
+        loop = OptionResearchLoop(
+            market=market,
+            registry=registry,
+            config=config,
+            proposer=_option_proposer(provider, model),
+            backtest_config=OptionBacktestConfig(initial_equity=equity, costs=schedule),
+        )
+        spent = registry.distinct_hypotheses(family=OPTION, campaign=loop.campaign)
+        all_time = registry.distinct_hypotheses(family=OPTION)
         console.print(
-            f"option hypotheses already recorded: {spent} of {OPTION_SEARCH_BUDGET} "
-            f"(the equity search's {registry.distinct_hypotheses(family=EQUITY)} are "
-            "counted separately and do not raise this bar)"
+            f"campaign [bold]{loop.campaign}[/bold]: {spent} hypotheses so far. "
+            f"This database has evaluated {all_time} option hypotheses across "
+            f"{len(registry.campaigns(family=OPTION))} campaign(s), and "
+            f"{registry.distinct_hypotheses(family=EQUITY)} equity ones — neither "
+            "count deflates this run."
         )
         projected = spent + iterations
         if projected >= WIDE_SEARCH_WARNING_AT:
@@ -2119,19 +2146,12 @@ def option_research(
             # high score -- the first real campaign produced a 97/100 rule whose
             # Sharpe deflated to -0.28 at twenty trials.
             console.print(
-                f"[yellow]this campaign will take the option search to about "
-                f"{projected} distinct hypotheses[/yellow] — the deflation term "
-                "scales with that count, so read `sharpe_inflation` in the "
-                "overfitting report before believing any score this run produces. "
-                "The window holds about 71 independent cycles (specs/10 D8)."
+                f"[yellow]this campaign will reach about {projected} distinct "
+                f"hypotheses[/yellow] — the deflation term scales with that count, "
+                "so read `sharpe_inflation` in the overfitting report before "
+                "believing any score this run produces. The window holds about 71 "
+                "independent cycles (specs/10 D8)."
             )
-        loop = OptionResearchLoop(
-            market=market,
-            registry=registry,
-            config=config,
-            proposer=_option_proposer(provider, model),
-            backtest_config=OptionBacktestConfig(initial_equity=equity, costs=schedule),
-        )
         for step in loop.run():
             colour = {"ACCEPT": "green", "PAPER": "cyan", "REVIEW": "yellow"}.get(
                 step.verdict, "red"
@@ -2142,8 +2162,11 @@ def option_research(
         if best and best.outcome:
             console.print(best.outcome.summary())
         console.print(
-            f"\noption hypotheses in this database: "
-            f"{registry.distinct_hypotheses(family=OPTION)} of {OPTION_SEARCH_BUDGET}"
+            f"\ncampaign {loop.campaign}: "
+            f"{registry.distinct_hypotheses(family=OPTION, campaign=loop.campaign)} "
+            f"hypotheses. All time: {registry.distinct_hypotheses(family=OPTION)} "
+            f"across {len(registry.campaigns(family=OPTION))} campaign(s) — "
+            "`aqr campaigns` lists them."
         )
 
 
@@ -2217,10 +2240,18 @@ def option_book_cmd(
             "status": record.status,
             "score": record.score,
             "hypothesis": record.hypothesis,
-            # The option search's own denominators, never the combined ones
-            # (specs/10 D8). A book that carried the equity campaign's 414 would
-            # overstate what this rule survived by a factor of twenty.
+            # Three denominators, and a reader needs all three. The campaign's
+            # is what the verdict was deflated against; the all-time count is
+            # what the database has looked at; the campaign count says how many
+            # separate searches produced the all-time figure. "The best of 40"
+            # and "the best of 40, in the seventh of seven searches" are
+            # different claims and only these numbers together tell them apart.
+            "campaign": _campaign_of(reg, strategy),
+            "campaign_hypotheses": reg.distinct_hypotheses(
+                family=OPTION, campaign=_campaign_of(reg, strategy)
+            ),
             "distinct_option_hypotheses": reg.distinct_hypotheses(family=OPTION),
+            "option_campaigns_run": len(reg.campaigns(family=OPTION)),
             "sealed_look": reg.sealed_look(strategy),
             "sealed_looks_total": reg.sealed_looks(family=OPTION),
             "sealed_run_at": sealed["sealed_run_at"],
@@ -2279,6 +2310,56 @@ def option_book_cmd(
         "chain, sizing, an options risk gate, a kill switch and a fill journal "
         "belong to whatever executes this.[/dim]"
     )
+
+
+@app.command("campaigns")
+def campaigns_cmd(
+    db: Path = typer.Option(Path("runs/research.sqlite")),
+    family: str = typer.Option(OPTION, help=f"{EQUITY} or {OPTION}."),
+    limit: int = typer.Option(20),
+) -> None:
+    """Every search that has run, newest first.
+
+    This table is the counterweight to the per-campaign denominator. A verdict
+    is deflated against the campaign that produced it, which is defensible
+    exactly as long as the campaigns themselves are visible: "the best of 40, in
+    the seventh of seven searches" is a weaker claim than "the best of 40", and
+    the only way to tell them apart is to be able to count the searches.
+    """
+    with Registry(db) as reg:
+        rows = reg.campaigns(family=family or None, limit=limit)
+        all_time = reg.distinct_hypotheses(family=family or None)
+    if not rows:
+        console.print("no campaigns recorded yet")
+        return
+    table = Table("campaign", "hypotheses", "best score", "started", "finished")
+    for row in rows:
+        best = float(row["best_score"] or -1)
+        table.add_row(
+            str(row["campaign"]),
+            str(row["hypotheses"]),
+            f"{best:.0f}" if best >= 0 else "-",
+            str(row["started"])[:19],
+            str(row["finished"])[:19],
+        )
+    console.print(table)
+    console.print(
+        f"\n{len(rows)} campaign(s), {all_time} distinct {family} hypotheses all "
+        "time. A verdict is deflated against its own campaign's count, not this "
+        "one — both travel inside every book."
+    )
+
+
+def _campaign_of(reg: Registry, fingerprint: str) -> str:
+    """Which search first evaluated this rule.
+
+    The earliest row wins: a rule re-proposed by a later campaign was still
+    *found* by the first one, and deflating it against the later campaign's
+    count would credit it with a search it did not come out of.
+    """
+    rows = reg.experiments(200, fingerprint=fingerprint, family=OPTION)
+    campaigns = [str(r.get("campaign") or "") for r in rows if r.get("campaign")]
+    return campaigns[-1] if campaigns else ""
 
 
 @app.command("option-books")

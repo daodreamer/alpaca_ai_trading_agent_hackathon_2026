@@ -131,7 +131,7 @@ def _option_spec(i: int) -> OptionSpec:
     )
 
 
-def _record_option(reg: Registry, count: int) -> None:
+def _record_option(reg: Registry, count: int, campaign: str = "") -> None:
     for i in range(count):
         spec = _option_spec(i)
         reg.upsert_option_strategy(spec)
@@ -145,6 +145,7 @@ def _record_option(reg: Registry, count: int) -> None:
                 data_end="",
                 dataset_version="options-cache",
                 family=OPTION,
+                campaign=campaign,
                 verdict="REJECT",
             )
         )
@@ -267,37 +268,41 @@ def test_the_budget_counts_the_registry_not_this_run(
     The real ceiling is a thousand; patched down here because what is under test
     is where the count is read from, not how big it is."""
     monkeypatch.setattr(option_research, "OPTION_SEARCH_BUDGET", 6)
-    _record_option(registry, 6)
+    _record_option(registry, 6, campaign="resumed")
     loop = OptionResearchLoop(
         market=market,
         registry=registry,
-        config=OptionResearchConfig(iterations=3, save_accepted_to=None),
+        config=OptionResearchConfig(
+            iterations=3, save_accepted_to=None, campaign="resumed"
+        ),
     )
     steps = loop.run()
 
     assert len(steps) == 1
     assert steps[0].verdict == "ERROR"
-    assert "budget is spent" in (steps[0].error or "")
+    assert "reached the ceiling" in (steps[0].error or "")
     # Nothing was proposed, so nothing was recorded: a refused campaign must not
     # itself inflate the denominator it refused over.
-    assert registry.distinct_hypotheses(family=OPTION) == 6
+    assert registry.distinct_hypotheses(family=OPTION, campaign="resumed") == 6
 
 
 def test_a_campaign_stops_at_the_budget_mid_run(
     registry: Registry, market: OptionMarket, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(option_research, "OPTION_SEARCH_BUDGET", 6)
-    _record_option(registry, 5)
+    _record_option(registry, 5, campaign="resumed")
     loop = OptionResearchLoop(
         market=market,
         registry=registry,
-        config=OptionResearchConfig(iterations=4, save_accepted_to=None),
+        config=OptionResearchConfig(
+            iterations=4, save_accepted_to=None, campaign="resumed"
+        ),
         backtest_config=OptionBacktestConfig(initial_equity=1_000_000.0),
     )
     steps = loop.run()
 
     assert len(steps) == 2
-    assert "budget is spent" in (steps[-1].error or "")
+    assert "reached the ceiling" in (steps[-1].error or "")
 
 
 # --------------------------------------------------------------------------- #
@@ -446,3 +451,109 @@ def test_the_proposer_is_handed_the_span_resolver(
 
     assert callable(seen["span"])
     assert seen["spans"] is not None
+
+
+
+# --------------------------------------------------------------------------- #
+# Each campaign is deflated against its own trials
+# --------------------------------------------------------------------------- #
+
+
+def test_a_fresh_run_starts_from_a_clean_denominator(
+    registry: Registry, market: OptionMarket
+) -> None:
+    """The decision this mechanism implements: deflation asks how many draws
+    bought *this* maximum, and a search run today did not buy the maximum of a
+    search run last month. What resets is the denominator; what does not reset
+    is the record."""
+    _record_option(registry, 12, campaign="january")
+
+    loop = OptionResearchLoop(
+        market=market,
+        registry=registry,
+        config=OptionResearchConfig(iterations=1, save_accepted_to=None),
+        backtest_config=OptionBacktestConfig(initial_equity=1_000_000.0),
+    )
+    loop.run()
+
+    assert registry.distinct_hypotheses(family=OPTION, campaign=loop.campaign) == 1
+    assert registry.distinct_hypotheses(family=OPTION, campaign="january") == 12
+    # The all-time count is untouched and still available: the reset is about
+    # which question the deflation answers, not about forgetting anything.
+    assert registry.distinct_hypotheses(family=OPTION) == 13
+
+
+def test_two_runs_get_two_campaigns_unless_one_is_named(
+    registry: Registry, market: OptionMarket
+) -> None:
+    config = OptionResearchConfig(iterations=1, save_accepted_to=None)
+    left = OptionResearchLoop(market=market, registry=registry, config=config)
+    right = OptionResearchLoop(market=market, registry=registry, config=config)
+    assert left.campaign != right.campaign
+
+    named = OptionResearchConfig(
+        iterations=1, save_accepted_to=None, campaign="condor-sweep"
+    )
+    a = OptionResearchLoop(market=market, registry=registry, config=named)
+    b = OptionResearchLoop(market=market, registry=registry, config=named)
+    assert a.campaign == b.campaign == "condor-sweep"
+
+
+def test_every_campaign_that_ever_ran_stays_listed(
+    registry: Registry, market: OptionMarket
+) -> None:
+    """The counterweight to the reset. A per-campaign denominator is defensible
+    exactly as long as the campaigns are visible: "the best of 40, in the
+    seventh of seven searches" is a weaker claim than "the best of 40"."""
+    _record_option(registry, 3, campaign="january")
+    _record_option(registry, 4, campaign="february")
+
+    listed = {row["campaign"]: row["hypotheses"] for row in registry.campaigns(family=OPTION)}
+    assert listed["january"] == 3
+    assert listed["february"] == 4
+
+
+def test_the_overfitting_denominator_is_this_campaigns_own(
+    registry: Registry, market: OptionMarket
+) -> None:
+    """The whole point, at the place it takes effect."""
+    _record_option(registry, 30, campaign="january")
+
+    loop = OptionResearchLoop(
+        market=market,
+        registry=registry,
+        config=OptionResearchConfig(iterations=1, save_accepted_to=None),
+        backtest_config=OptionBacktestConfig(initial_equity=1_000_000.0),
+    )
+    step = loop.run()[0]
+
+    assert step.outcome is not None
+    assert step.outcome.overfitting is not None
+    cost = next(s for s in step.outcome.overfitting.signals if s.name == "search_cost")
+    assert "1 backtest" in cost.reason
+
+
+def test_a_rule_this_market_cannot_evaluate_costs_one_iteration_not_the_run(
+    registry: Registry, market: OptionMarket
+) -> None:
+    """``iv_rank()`` on a market with no volatility history: the engine refuses,
+    and before this was caught the refusal took the whole campaign with it. The
+    loop's contract is that a bad proposal costs one iteration."""
+    loop = OptionResearchLoop(
+        market=market,
+        registry=registry,
+        config=OptionResearchConfig(iterations=4, save_accepted_to=None),
+        backtest_config=OptionBacktestConfig(initial_equity=1_000_000.0),
+    )
+    steps = loop.run()
+
+    assert len(steps) == 4
+    refused = [
+        s
+        for s in steps
+        if s.outcome and "could not be evaluated" in (s.outcome.rejected_early or "")
+    ]
+    assert refused, "the fixture market has no volatility history; iv_rank must refuse"
+    # Recorded rather than swallowed: the hypothesis still counts against the
+    # search that proposed it.
+    assert registry.distinct_hypotheses(family=OPTION, campaign=loop.campaign) == 4

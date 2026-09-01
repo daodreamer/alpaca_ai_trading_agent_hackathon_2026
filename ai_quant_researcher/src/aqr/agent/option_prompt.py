@@ -50,9 +50,45 @@ __all__ = [
     "structure_catalogue",
 ]
 
-ALLOWED_DTE_TARGETS = (14, 28, 49)
-"""D0: the vendor carries three rolling expiry targets and nothing else. Not a
-policy — a fact about the cache, so a proposal outside it cannot be priced."""
+DTE_BAND = (11, 66)
+"""Every days-to-expiry the cache actually lists, measured rather than assumed.
+
+specs/10 D0 describes the vendor as carrying "three rolling targets at ~14 / ~28
+/ ~49", and the first version of this schema turned that into an enum of exactly
+those three. That was over-restrictive and it narrowed the search for no reason:
+the sampled expiries run 11 to 66 days out across 39 distinct values, and with
+the engine's ±10-day tolerance a target anywhere in the band resolves. Measured
+on the 753 research sessions:
+
+    target 11/14/21/28   753 of 753 sessions resolve
+    target 35            751
+    target 49            582
+    target 56            711
+    target 42 / 63 / 66  334 / 419 / 326
+
+So the band is open and the coverage is published, which is the honest
+arrangement: a model choosing 42 is choosing a target that resolves on 44% of
+sessions, and it should be able to make that trade deliberately rather than
+being refused for choosing a number that is not one of three."""
+
+DTE_COVERAGE: tuple[tuple[int, int], ...] = (
+    (11, 753),
+    (14, 753),
+    (21, 753),
+    (28, 753),
+    (35, 751),
+    (42, 334),
+    (49, 582),
+    (56, 711),
+    (63, 419),
+    (66, 326),
+)
+"""How many of the 753 research sessions resolve an expiry within 10 days of a
+target. Shown to the model so a thin bucket is a choice rather than a surprise;
+asserted against the cache by ``tests/test_option_cache_claims.py``."""
+
+ALLOWED_DTE_TARGETS = tuple(range(DTE_BAND[0], DTE_BAND[1] + 1))
+"""Kept as a name because callers validate against it; now the whole band."""
 
 STRUCTURE_CATALOGUE: tuple[tuple[str, str], ...] = (
     (
@@ -120,9 +156,13 @@ delta-selected wing resolves on 98% of sessions; an exact 10-point wing on \
 SMALLER than `anchor_delta` because the protective leg is further out of the \
 money.
 
-3. THERE ARE THREE EXPIRIES, at rolling targets near 14, 28 and 49 days. No \
-0DTE, no weeklies, no LEAPS, and no fixed calendar dates -- the expiries move \
-with the observation date.
+3. EXPIRIES RUN 11 TO 66 DAYS OUT and no further. No 0DTE, no weeklies, no \
+LEAPS, and no fixed calendar dates -- the expiries roll with the observation \
+date. Any target in that band is allowed and the engine takes the nearest \
+listed expiry within 10 days, but the buckets are not equally dense: 11-35 \
+resolves on essentially every session, 49 on 77%, 42 on 44%. The catalogue \
+below prints the coverage. A thin bucket is a legitimate choice; it is not a \
+legitimate accident.
 
 4. THERE IS ONE UNDERLYING: SPY. There is no cross-section to rank, no \
 relative-strength claim to make, and no portfolio mode.
@@ -153,6 +193,17 @@ the DTE target, the anchor delta, the width and the cadence, is a degree of \
 freedom the overfitting detector charges you for.
 - It is different in kind from what has already been tried. Nudging a threshold \
 on a rejected hypothesis is not research.
+- VARY THE STRUCTURE, NOT ONLY THE CONDITION. This is the failure mode of every \
+campaign so far: fifteen hypotheses that all wrote `dte_target: 28`, \
+`anchor_delta: 0.16` and a three-clause `and` in the entry, differing only in \
+which features the clauses named. The entry condition is one of five degrees of \
+freedom you have. The structure, the expiry, how far out of the money the anchor \
+sits, how wide the wing is and how often you are allowed to enter are the other \
+four, and they change the payoff far more than a threshold does. A 0.30-delta \
+spread at 14 days and a 0.08-delta spread at 56 days are different strategies; \
+two entry conditions on a 0.16-delta 28-day spread are usually the same strategy \
+asked twice. The memory below lists the knobs every past attempt used -- look at \
+what has been pinned and move it.
 
 Direction is expressed by the STRUCTURE, not by a field. A put credit spread is \
 a bullish, short-volatility position; a call credit spread is bearish and short \
@@ -222,6 +273,14 @@ def option_feature_catalogue(
         "keywords and / or / not. Feature arguments must be plain numbers. "
         "Example: iv_rank() > 40 and close > sma(200)"
     )
+    lines.append("")
+    lines.append(
+        "Expiry coverage -- of 753 research sessions, how many resolve an expiry "
+        "within 10 days of each target:"
+    )
+    lines.append(
+        "  " + "  ".join(f"{target}d:{count}" for target, count in DTE_COVERAGE)
+    )
     lines.append(
         "An option feature is NaN when the vendor row is missing or more than 5 "
         "calendar days stale, and NaN compares false in every direction -- so a "
@@ -263,10 +322,13 @@ OPTION_PROPOSAL_SCHEMA: dict[str, Any] = {
         },
         "dte_target": {
             "type": "integer",
-            "enum": list(ALLOWED_DTE_TARGETS),
+            "minimum": DTE_BAND[0],
+            "maximum": DTE_BAND[1],
             "description": (
-                "Days to expiry, at one of the three rolling targets the cache "
-                "carries. Nothing else can be priced."
+                "Days to expiry, anywhere in 11..66 -- the whole band the cache "
+                "lists. The engine takes the nearest listed expiry within 10 days. "
+                "Coverage is uneven and is printed in the catalogue: 11-35 resolve "
+                "on every session, 42 on only 44% of them."
             ),
         },
         "anchor_delta": {
@@ -363,9 +425,19 @@ def _render_memory(memory: list[dict[str, Any]]) -> str:
             detail.append(f"failed: {item['error']}")
         suffix = f" ({', '.join(detail)})" if detail else ""
         lines.append(f"  [{verdict}] {item.get('name')}{suffix}")
+        # The knobs, not just the claim. Fifteen hypotheses in the first
+        # campaign wrote dte 28 / delta 0.16 and varied only the entry
+        # condition; a memory that showed the claim alone gave the model no way
+        # to notice it was exploring one corner of a five-dimensional space.
+        knobs = (item.get("structure") or "").strip()
+        if knobs:
+            lines.append(f"      structure: {knobs}")
         hypothesis = (item.get("hypothesis") or "").strip()
         if hypothesis:
             lines.append(f"      claim: {hypothesis}")
+        entry = (item.get("entry") or "").strip()
+        if entry:
+            lines.append(f"      entry: {entry}")
     return "\n".join(lines)
 
 

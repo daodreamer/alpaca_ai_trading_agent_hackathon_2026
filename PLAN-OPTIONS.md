@@ -162,12 +162,25 @@ all. That is fixed (the docs state units, the catalogue carries measured ranges,
 and `unreachable_thresholds` sends a threshold nothing can satisfy back to the
 model before it costs a slot).
 
-**The cap is now 1000, and it is a guardrail rather than a statistical
-control.** D8's premise — 71 independent cycles, so a wide search finds noise —
-is correct; its conclusion that a *cap* is the defence is not, and the campaign
-above is the evidence: the deflation term rejected a 97/100 rule with the cap
-never involved. What keeps a wide search honest is that its width is charged to
-every verdict and recorded in every artefact.
+**The cap is now 1000 per campaign, and it is a guardrail rather than a
+statistical control.** D8's premise — 71 independent cycles, so a wide search
+finds noise — is correct; its conclusion that a *cap* is the defence is not, and
+the campaign above is the evidence: the deflation term rejected a 97/100 rule
+with the cap never involved.
+
+**Each run is its own campaign with its own denominator.** A verdict is deflated
+against the trials that search took, not the database's all-time count — a sweep
+in March did not buy the maximum of a sweep in January. Every campaign that ever
+ran stays listed in `aqr campaigns`, and every book carries all three numbers
+(campaign denominator, all-time count, campaigns run), because "the best of 40"
+and "the best of 40 in the seventh of seven searches" are different claims.
+
+Also widened, after the first campaign showed these were narrowing the search for
+no reason: `dte_target` is now the whole 11–66 band the cache lists rather than
+an enum of three; the prompt asks for variation across the structure (14 of 15
+hypotheses had pinned `dte 28` / `anchor 0.16`); memory shows each past
+attempt's knobs, not just its claim; and a duplicate proposal is retried rather
+than costing an iteration *and* a slot.
 
 ```bash
 uv run aqr option-research --iterations 20 --provider deepseek
