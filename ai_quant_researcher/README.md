@@ -1287,6 +1287,83 @@ the rule, and specs/10 D8a measured the same rule producing 21 cycles at 1% of
 equity and 57 at 2% with nothing about the rule changed. The default
 `risk_per_trade` here is therefore 2%, stated rather than hidden.
 
+
+### The whole chain, end to end
+
+Seven steps. Steps 1-6 run today; step 7 is the one that does not exist yet, and
+it is called out below rather than implied.
+
+```bash
+cd ai_quant_researcher
+
+# --- 0. Is the data still what the spec was written about? -----------------
+uv run aqr option-features                     # the vocabulary a rule may name
+uv run --extra dev pytest tests/test_option_cache_claims.py -q
+# 11 passed, 1 skipped. The skip is the sealed-underlying parity check, which
+# has nothing to check until step 4. If any of the other 11 FAIL, the cache
+# moved under the spec and nothing below is worth running until that is
+# resolved -- that is what those tests are for.
+
+# --- 1. Let the model explore. THIS SPENDS THE BUDGET ----------------------
+uv run aqr option-research --iterations 20 --provider deepseek
+# Offline (--provider offline) is seconds and costs nothing; it walks a
+# template library of the structures specs/07 and specs/10 were written about
+# and is the baseline the model has to beat. With deepseek the wall time is
+# almost entirely API latency.
+#
+# Twenty is the whole budget, for the life of runs/research.sqlite. The loop
+# refuses to go past it and does not reset when the process exits. Run it once,
+# with the provider you actually want.
+
+# --- 2. Read the result ----------------------------------------------------
+uv run aqr experiments --family option         # cycles beside trades
+uv run aqr registry --family option            # fingerprints, scores, status
+
+# --- 3. Declare ONE candidate, before any sealed session is read -----------
+uv run aqr preregister <FINGERPRINT> \
+    --rule "the highest-scoring of 20 option hypotheses"
+# Only for something that earned it out of sample. If nothing did, stop here
+# and record that the search promoted nothing -- that is a result, and on this
+# evidence it is the one to expect. Spending the shot anyway converts a clean
+# "we did not find one" into a screened, multiplicity-taxed "we did not find
+# one", which is strictly worse.
+
+# --- 4. Build the sealed underlying (once; needs network + an Alpaca key) ---
+uv run python -m aqr.cli_sealed pull --symbols SPY --adjustment raw \
+    --csv-root data-options-underlying-sealed --timeframe 1D
+uv run --extra dev pytest tests/test_option_cache_claims.py -q -k sealed
+# The parity check stops skipping and must pass. If it fails, the cache was
+# pulled adjusted and every settlement in step 5 would be compared against a
+# price up to ten percent wrong -- silently.
+
+# --- 5. Spend the one shot -------------------------------------------------
+uv run python -m aqr.cli_sealed option-run <FINGERPRINT>
+# Exit code 1 means REFUTED: negative alpha, significant in the wrong
+# direction. That is a real answer and the chain stops there.
+
+# --- 6. Write the handoff artefact -----------------------------------------
+uv run aqr option-book <FINGERPRINT>
+# -> runs/option_books/<name>-<fingerprint>-<as_of>.json
+uv run aqr option-books                        # everything handed off, newest first
+```
+
+**Step 7 — the backend reading that file — is not built.** The seam is written
+on one side only: this project produces a valid option book and nothing consumes
+it. What AlphaGate's options agent trades today is the hand-written rule in
+specs/07, gated and journalled as it always was, and it will keep trading that
+whatever appears in `runs/option_books/`. Making it read a researched rule is
+[PLAN-OPTIONS.md](../PLAN-OPTIONS.md) Phase O7: a pure loader on the backend
+side, an `ALPHAGATE_OPTION_FINGERPRINT` pinned in `.env.local` with no default,
+the screen's constants coming from the book instead of from specs/07, and the
+fallback that keeps the hand-written rule running when the research promoted
+nothing. Nothing about the Risk Gate changes; a researched rule is an input to
+the agent, never an exemption from the gate.
+
+Two of those steps are one-way doors and it is worth being blunt about which:
+**step 1** spends search budget that does not come back, and **step 5** spends a
+seal that is per candidate and cannot be re-run. Steps 0, 2, 4 and 6 are free
+and repeatable.
+
 ### The handoff is a rule, not a book of legs
 
 `aqr option-book` writes the same shape of artefact `target-book` does and

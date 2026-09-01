@@ -345,3 +345,34 @@ def test_preregistering_an_option_rule_points_at_the_option_sealed_run(
     text = _text(result)
     assert "cli_sealed option-run" in text
     assert "family option" in text
+
+
+def test_a_missing_sealed_underlying_refuses_with_the_pull_command(db: Path) -> None:
+    """The likely first failure: the sealed chain has existed since the embargo
+    split and its raw-adjusted underlying is a separate pull. Without the check
+    it surfaces as a FileNotFoundError three layers down, in a process that has
+    already promoted itself -- nothing is lost, because the seal is spent at the
+    end, but a one-shot command should fail with the command that fixes it."""
+    spec = _spec()
+    with Registry(db) as reg:
+        reg.upsert_option_strategy(spec)
+        reg.preregister(spec.fingerprint(), selection_rule="the best", seal_digest="d")
+
+    with scope(Seal()) as seal:
+        result = runner.invoke(
+            app,
+            [
+                "option-run",
+                spec.fingerprint(),
+                "--db",
+                str(db),
+                "--underlying-root",
+                "no-such-root",
+            ],
+        )
+        assert seal.phase.name == "RESEARCH"
+
+    assert result.exit_code != 0
+    text = _text(result)
+    assert "adjustment raw" in text
+    assert "moneyness the trade never had" in text

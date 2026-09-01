@@ -697,6 +697,33 @@ def option_run(
                 "changed, so a sealed run at another size is a different experiment "
                 "wearing this one's declaration."
             )
+        # Both caches, checked as *paths* before anything is read. A missing
+        # sealed underlying is the likely first failure here -- the sealed chain
+        # has existed since the embargo split and its raw-adjusted underlying is
+        # a separate pull -- and without this it surfaces as a FileNotFoundError
+        # from three layers down, in a process that has already promoted itself.
+        # Nothing would be lost (the seal is spent by ``record_sealed_run``, at
+        # the end), but a one-shot command should fail with the command that
+        # fixes it rather than with a traceback.
+        chain_file = Path(chain_root) / "option_chain" / f"{spec.underlying}.csv"
+        bar_file = Path(underlying_root) / timeframe / f"{spec.underlying}.csv"
+        if not chain_file.exists():
+            raise typer.BadParameter(
+                f"no sealed option chain at {chain_file}. Build it with "
+                "`aqr options-pull` and then `aqr options-embargo`."
+            )
+        if not bar_file.exists():
+            raise typer.BadParameter(
+                f"no sealed underlying bars at {bar_file}. Settlement reads the "
+                f"underlying's close on each expiration date, so the sealed run "
+                f"cannot settle anything without them. Pull them RAW -- an "
+                f"adjusted close compared against a strike reports a moneyness "
+                f"the trade never had (specs/10 D0):\n"
+                f"  python -m aqr.cli_sealed pull --symbols {spec.underlying} "
+                f"--adjustment raw --csv-root {underlying_root} "
+                f"--timeframe {timeframe}"
+            )
+
         console.print(
             f"running [bold]{spec.name}[/bold] [{fingerprint}]\n"
             f"{spec.structure.type} on {spec.underlying}, "
