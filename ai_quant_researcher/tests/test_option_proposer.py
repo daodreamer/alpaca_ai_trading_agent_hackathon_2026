@@ -36,6 +36,7 @@ from aqr.agent.option_proposer import (
     build_option_spec,
     check_option_proposal,
     option_spec_to_proposal_fields,
+    unreachable_thresholds,
 )
 from aqr.agent.proposer import Proposal
 from aqr.features.registry import REGISTRY
@@ -433,7 +434,7 @@ def test_a_repair_that_is_still_unusable_raises_rather_than_returning_it() -> No
         )
 
 
-def test_the_dead_rule_instruction_carries_the_census_and_the_real_ranges() -> None:
+def test_the_dead_rule_instruction_carries_the_census() -> None:
     """A rule can be perfectly satisfiable and still trade nothing, because the
     account could not afford the structure (D8a). Telling the model to "loosen
     the condition" for an affordability skip would have it weaken a hypothesis
@@ -446,5 +447,125 @@ def test_the_dead_rule_instruction_carries_the_census_and_the_real_ranges() -> N
     )
     instruction = client.calls[0][-1]["content"]
     assert "affordability=578" in instruction
-    assert "iv_rank()" in instruction
-    assert "17.8%" in instruction
+    assert "put_credit_spread" in instruction
+
+
+def test_the_dead_rule_instruction_quotes_the_ranges_of_the_features_it_named() -> None:
+    """The first version of this instruction quoted ``iv_rank()``'s range no
+    matter what the rule said -- and in the campaign that motivated the fix,
+    ``iv_rank()`` was the one feature that was never the problem. The model read
+    a range for something it had not misused and repeated its unit error on the
+    features it had."""
+    client = FakeChat([json.dumps(fields(name="repaired_v2"))])
+    proposer = DeepSeekOptionProposer(client=client)
+    proposer.repair(
+        proposal=Proposal(
+            fields=fields(entry="term_slope() > 0.01 and close > sma(200)"),
+            source="test",
+        ),
+        problems=["the rule opened no positions"],
+        span=_span,
+    )
+    instruction = client.calls[0][-1]["content"]
+    assert "term_slope()" in instruction
+    assert "sma(200)" in instruction
+    assert "iv_rank" not in instruction
+
+
+# --------------------------------------------------------------------------- #
+# Thresholds nothing can satisfy
+# --------------------------------------------------------------------------- #
+#
+# The measured failure this guards, in full: a twenty-hypothesis campaign lost
+# eight slots to rules that opened nothing, and seven of those eight were a
+# units error. The volatility features here are decimal fractions; the model
+# wrote percentage points, because ``iv_rank()`` is the only feature on a 0..100
+# scale and it was the only one that documented itself. Each of those is a good
+# hypothesis in the wrong unit, and each cost a slot of a fixed budget.
+
+_SPANS: dict[str, tuple[float, float]] = {
+    "term_slope()": (-1.019, 0.0519),
+    "iv_hv_spread()": (-0.4783, 0.1683),
+    "iv_current()": (0.0923, 0.7663),
+    "skew_25d()": (-0.8855, 0.3019),
+    "iv_rank()": (0.0, 100.0),
+    "realized_vol(20)": (0.0473, 0.8619),
+    "sma(200)": (100.0, 560.0),
+    "close": (100.0, 570.0),
+}
+
+
+def _span(key: Any) -> tuple[float, float] | None:
+    return _SPANS.get(str(key))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "term_slope() > 5",
+        "term_slope() > 5 and iv_rank() > 30 and close > sma(200)",
+        "iv_hv_spread() > 5",
+        "iv_hv_spread() > 2 and close > sma(200)",
+        "rvol(5) > 1.5 and roc(5) > 0 and iv_current() > 25",
+        "close > highest(20) and realized_vol(20) > 15 and iv_rank() > 5",
+        "skew_25d() > 2.0",
+        "5 < term_slope()",  # the mirrored form is the same claim
+    ],
+)
+def test_a_threshold_no_session_can_satisfy_is_caught(entry: str) -> None:
+    problems = unreachable_thresholds(entry, _span)
+    assert problems, entry
+    assert "never" in problems[0]
+    assert "DECIMAL" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "term_slope() > 0",
+        "iv_rank() > 50",
+        "iv_hv_spread() > 0.05",
+        "skew_25d() > 0.12",  # rare, and rare is not the same as impossible
+        "close > sma(200)",
+        "term_slope() > 0 and iv_rank() < 50",
+    ],
+)
+def test_a_reachable_threshold_is_left_alone(entry: str) -> None:
+    """Only "none" is flagged, never "few". A rule firing on 2% of sessions is a
+    small sample and the cycle gate already says so; flagging it here would put
+    the proposer in the business of preferring rules that trade more."""
+    assert unreachable_thresholds(entry, _span) == []
+
+
+def test_a_feature_with_no_measured_span_is_not_guessed_at() -> None:
+    assert unreachable_thresholds("adx(14) > 9000", _span) == []
+
+
+def test_an_unparseable_entry_is_left_to_the_parser() -> None:
+    """The parser's "unknown feature, did you mean..." is the useful message;
+    a second complaint in the language of ranges would bury it."""
+    assert unreachable_thresholds("dealer_gamma() > 5", _span) == []
+
+
+def test_the_range_check_runs_inside_the_proposers_own_retry_loop() -> None:
+    """This is the whole point: the model gets the numbers back and fixes it
+    before a spec exists, so an unreachable threshold costs a retry rather than
+    a slot of the search budget."""
+    bad = json.dumps(fields(entry="term_slope() > 5"))
+    good = json.dumps(fields(entry="term_slope() > 0.01"))
+    client = FakeChat([bad, good])
+    proposer = DeepSeekOptionProposer(client=client)
+
+    proposal = proposer.propose(underlying="SPY", memory=[], span=_span)
+
+    assert proposal.fields["entry"] == "term_slope() > 0.01"
+    repair = client.calls[1][-1]["content"]
+    assert "term_slope() is never above 5" in repair
+    assert "-1.019 .. 0.0519" in repair
+
+
+def test_without_a_span_the_range_check_simply_does_not_run() -> None:
+    """A caller with no market -- a schema test, a hand-written spec -- can still
+    check everything else."""
+    assert check_option_proposal(fields(entry="term_slope() > 5")) == []
+    assert check_option_proposal(fields(entry="term_slope() > 5"), span=_span) != []

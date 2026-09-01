@@ -28,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from aqr.agent import option_research
 from aqr.agent.option_proposer import TemplateOptionProposer, build_option_spec
 from aqr.agent.option_research import (
     OPTION_SEARCH_BUDGET,
@@ -239,18 +240,34 @@ def test_an_option_strategy_round_trips_through_the_registry(registry: Registry)
 # --------------------------------------------------------------------------- #
 
 
-def test_a_campaign_wider_than_the_budget_is_refused_outright() -> None:
-    with pytest.raises(ValueError, match="71 independent"):
+def test_a_campaign_wider_than_the_ceiling_is_refused_outright() -> None:
+    """The ceiling is a guardrail against a runaway loop -- a script with a typo
+    in its iteration count -- not the statistical control. The control is the
+    deflation term, which scales with the trial count whether or not anything is
+    capped: on the first real campaign it took a 97/100 rule's Sharpe of 0.67
+    down to -0.28 at twenty trials, and the cap was never involved."""
+    with pytest.raises(ValueError, match="guardrail"):
         OptionResearchConfig(iterations=OPTION_SEARCH_BUDGET + 1)
 
 
+def test_the_ceiling_is_wide_enough_for_the_campaigns_this_is_used_for() -> None:
+    """Hundreds, not dozens. Kept as an assertion because the number is a
+    decision -- specs/10 D8 argues for 20 and this project diverged from it
+    deliberately -- and a decision nobody wrote down gets un-made by accident."""
+    assert OPTION_SEARCH_BUDGET >= 1000
+
+
 def test_the_budget_counts_the_registry_not_this_run(
-    registry: Registry, market: OptionMarket
+    registry: Registry, market: OptionMarket, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cap enforced per run is not a cap: two invocations of ten would spend
-    twenty and a third would spend thirty, and the multiple-comparisons problem
-    does not reset when a process exits."""
-    _record_option(registry, OPTION_SEARCH_BUDGET)
+    """A ceiling enforced per run is not a ceiling: two invocations of ten would
+    spend twenty and a third would spend thirty, and the multiple-comparisons
+    problem does not reset when a process exits.
+
+    The real ceiling is a thousand; patched down here because what is under test
+    is where the count is read from, not how big it is."""
+    monkeypatch.setattr(option_research, "OPTION_SEARCH_BUDGET", 6)
+    _record_option(registry, 6)
     loop = OptionResearchLoop(
         market=market,
         registry=registry,
@@ -263,13 +280,14 @@ def test_the_budget_counts_the_registry_not_this_run(
     assert "budget is spent" in (steps[0].error or "")
     # Nothing was proposed, so nothing was recorded: a refused campaign must not
     # itself inflate the denominator it refused over.
-    assert registry.distinct_hypotheses(family=OPTION) == OPTION_SEARCH_BUDGET
+    assert registry.distinct_hypotheses(family=OPTION) == 6
 
 
 def test_a_campaign_stops_at_the_budget_mid_run(
-    registry: Registry, market: OptionMarket
+    registry: Registry, market: OptionMarket, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _record_option(registry, OPTION_SEARCH_BUDGET - 1)
+    monkeypatch.setattr(option_research, "OPTION_SEARCH_BUDGET", 6)
+    _record_option(registry, 5)
     loop = OptionResearchLoop(
         market=market,
         registry=registry,
@@ -377,3 +395,54 @@ def test_a_surviving_rule_is_written_beside_the_equity_ones_but_not_among_them(
         # The far more likely outcome on this window, and it is a result rather
         # than a failure -- specs/07 D0 says the premium's alpha has decayed.
         assert not target.exists() or not list(target.glob("*.yaml"))
+
+
+
+# --------------------------------------------------------------------------- #
+# The loop hands the proposer the ranges its own market actually holds
+# --------------------------------------------------------------------------- #
+
+
+def test_the_loop_measures_spans_from_its_own_market(
+    registry: Registry, market: OptionMarket
+) -> None:
+    """A campaign without this lost seven of twenty slots to conditions no
+    session could satisfy. The spans must come from the market the loop was
+    handed -- measured, not documented -- because a re-pull moves them."""
+    from aqr.features.engine import FeatureKey
+
+    loop = OptionResearchLoop(
+        market=market,
+        registry=registry,
+        config=OptionResearchConfig(iterations=1, save_accepted_to=None),
+    )
+    span = loop.span(FeatureKey("close", ()))
+    assert span is not None
+    low, high = span
+    assert low <= float(market.underlying.close.min())
+    assert high >= float(market.underlying.close.max()) - 1e-9
+    # A feature this fixture's market cannot answer is None, never a guess: the
+    # chain here carries no volatility history.
+    assert loop.span(FeatureKey("iv_rank", ())) is None
+
+
+def test_the_proposer_is_handed_the_span_resolver(
+    registry: Registry, market: OptionMarket
+) -> None:
+    seen: dict[str, Any] = {}
+
+    class Watching:
+        def propose(self, **kwargs: Any) -> Proposal:
+            seen.update(kwargs)
+            return TemplateOptionProposer().propose(**kwargs)
+
+    OptionResearchLoop(
+        market=market,
+        registry=registry,
+        config=OptionResearchConfig(iterations=1, save_accepted_to=None),
+        proposer=Watching(),
+        backtest_config=OptionBacktestConfig(initial_equity=1_000_000.0),
+    ).run()
+
+    assert callable(seen["span"])
+    assert seen["spans"] is not None

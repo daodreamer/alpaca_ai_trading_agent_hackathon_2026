@@ -75,6 +75,7 @@ from aqr.options.chain import ChainIndex, NoSuchContract
 __all__ = [
     "MAX_FORWARD_FILL_DAYS",
     "OPTION_FEATURES",
+    "feature_span",
     "OptionFeatureFrame",
     "OptionFeatureSpec",
     "VolatilityHistory",
@@ -448,26 +449,32 @@ _register(
     "iv_rank",
     0,
     lambda data, _a: _iv_rank_series(_need_volatility(data, "iv_rank")),
-    "iv_rank(): (iv_current - iv_year_low) / (iv_year_high - iv_year_low) * 100, "
-    "on a 0..100 scale; the vendor supplies the year extremes",
+    "iv_rank(): (iv_current - iv_year_low) / (iv_year_high - iv_year_low) * 100. "
+    "UNITS: 0..100. The ONLY feature here on that scale -- every other one below "
+    "is a decimal fraction. Median 18.4 on the research window, above 50 on 17.8% "
+    "of sessions",
 )
 _register(
     "iv_hv_spread",
     0,
     lambda data, _a: _iv_hv_spread_series(_need_volatility(data, "iv_hv_spread")),
-    "iv_hv_spread(): iv_current - hv_current, the variance risk premium",
+    "iv_hv_spread(): iv_current - hv_current, the variance risk premium. "
+    "UNITS: a DECIMAL difference, not volatility points -- 0.05 is a five-point "
+    "premium. Measured range on the research window: -0.38 .. 0.17, median 0.01",
 )
 _register(
     "iv_current",
     0,
     lambda data, _a: _iv_current_series(_need_volatility(data, "iv_current")),
-    "iv_current(): the vendor's current implied volatility level",
+    "iv_current(): the vendor's current implied volatility level. UNITS: a "
+    "DECIMAL -- 0.156 is 15.6% vol, not 15.6. Measured range: 0.10 .. 0.77",
 )
 _register(
     "hv_current",
     0,
     lambda data, _a: _hv_current_series(_need_volatility(data, "hv_current")),
-    "hv_current(): the vendor's current realised (historical) volatility level",
+    "hv_current(): the vendor's current realised (historical) volatility level. "
+    "UNITS: a DECIMAL, like iv_current. Measured range: 0.07 .. 0.83",
 )
 _register(
     "iv_change",
@@ -476,7 +483,8 @@ _register(
         _need_volatility(data, "iv_change"), _int_literal(a, 0, default=None, feature="iv_change")
     ),
     "iv_change(n): iv_current minus n days ago; n must be 5 (week) or 21 "
-    "(month) -- the only lookbacks the vendor table carries",
+    "(month) -- the only lookbacks the vendor table carries. UNITS: a DECIMAL "
+    "difference, same scale as iv_current",
 )
 _register(
     "atm_iv",
@@ -487,19 +495,23 @@ _register(
         ).items()
     ),
     "atm_iv(dte): IV of the call nearest 0.50 delta, in the expiry nearest "
-    "dte days out (default 28, the cache's median)",
+    "dte days out (default 28, the cache's median). UNITS: a DECIMAL. "
+    "Measured range at 28 DTE: 0.10 .. 1.53, median 0.16",
 )
 _register(
     "term_slope",
     0,
     lambda data, _a: _valid_series(_term_slope_by_session(_need_chain(data, "term_slope")).items()),
-    "term_slope(): atm_iv(49) - atm_iv(14), the term-structure slope",
+    "term_slope(): atm_iv(49) - atm_iv(14), the term-structure slope. UNITS: a "
+    "DECIMAL difference. Measured range: -0.150 .. 0.052, median 0.012 -- so a "
+    "threshold above about 0.05 can never be true",
 )
 _register(
     "skew_25d",
     0,
     lambda data, _a: _valid_series(_skew_25d_by_session(_need_chain(data, "skew_25d")).items()),
-    "skew_25d(): 25-delta put IV minus 25-delta call IV, in the ~28 DTE bucket",
+    "skew_25d(): 25-delta put IV minus 25-delta call IV, in the ~28 DTE bucket. "
+    "UNITS: a DECIMAL difference. Measured range: 0.014 .. 0.302, median 0.055",
 )
 
 
@@ -594,3 +606,44 @@ class OptionFeatureFrame:
             observed = int(finite[0]) + 1 if finite.size else len(self)
             needed = max(needed, observed)
         return min(needed, len(self))
+
+
+def feature_span(frame: OptionFeatureFrame, key: FeatureKey) -> tuple[float, float] | None:
+    """The lowest and highest value ``key`` actually takes over the window.
+
+    ``None`` when the feature is never defined -- every value ``NaN``, which is
+    what a vendor table this cache does not hold produces.
+
+    This exists because of a measured failure, not as a nicety. A twenty-
+    hypothesis campaign lost **eight** of its slots to rules that could never
+    fire, and seven of those eight were a units error: the model wrote
+    ``term_slope() > 5`` and ``iv_hv_spread() > 5`` because ``iv_rank()``
+    documents itself as "0..100" and nothing else documented itself at all, so
+    it generalised. ``term_slope()`` never exceeds 0.052. Those rules are not
+    bad ideas -- ``iv_hv_spread() > 5`` is a perfectly good hypothesis about a
+    five-point variance premium -- they are good ideas in the wrong unit, and
+    the search paid full price for every one.
+
+    The docs now state their units, which stops the mistake being *likely*. This
+    is what stops it being *possible*: ``agent/option_proposer.py`` compares
+    every literal in a proposed condition against the span of the feature it is
+    compared to, and sends an unreachable one back before any budget is spent.
+
+    Measured over whatever window the caller's frame holds, which for a search
+    is the research window. Handing this a sealed frame would leak the embargoed
+    years into a prompt -- the callers that build one all come from
+    ``research_option_market``, and ``aqr.seal`` is what makes the difference
+    checkable rather than a convention.
+    """
+    try:
+        values = np.asarray(frame.get(key), dtype=np.float64)
+    except (KeyError, ValueError, AssertionError):
+        # An unresolvable key is the *parser's* problem to report, with its own
+        # "closest match" message. Reporting it twice, once here in the language
+        # of ranges, would bury the message that actually tells a model what to
+        # write instead.
+        return None
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(finite.min()), float(finite.max())

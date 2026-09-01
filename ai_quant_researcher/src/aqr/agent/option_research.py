@@ -3,21 +3,33 @@
     propose -> compile -> run -> evaluate -> record -> remember -> propose
 
 The same machine [`research.py`](research.py) runs, with one difference that is
-the whole reason this module exists: **the search budget is a gate, not a
-default.**
+the whole reason this module exists: **the search is counted separately, and
+what it costs is reported rather than capped away.**
 
 specs/10 D8 measured 71 non-overlapping 28-DTE cycles in the 5.55-year research
-window. The equity campaign spent 414 hypotheses and deflated its Sharpe to 0.74
-for it; 400 trials against 71 cycles produces a number with no information in
-it, because the best of 400 draws from a null distribution looks exactly like an
-edge at that sample size. So :data:`OPTION_SEARCH_BUDGET` is enforced against
-the registry's own count of option hypotheses — not against this run's
-``iterations``, which a second invocation would reset — and a campaign that
-would cross it is refused rather than truncated silently.
+window and argued for a cap of 20 hypotheses, on the grounds that the best of
+many draws from a null distribution looks like an edge at that sample size. The
+premise is right; the conclusion that a *cap* is the defence is not, and the
+first real campaign showed why. At twenty trials the highest-scoring rule --
+97/100, every robustness component maxed, beating buy-and-hold on Sharpe -- was
+rejected because its 0.67 Sharpe deflated to **-0.28** once the search that
+found it was paid for. The deflation term did that, not the cap.
+
+So :data:`OPTION_SEARCH_BUDGET` is a guardrail against a runaway loop rather
+than a statistical control, and it is enforced against the registry's own count
+of option hypotheses — not against this run's ``iterations``, which a second
+invocation would reset. What keeps a wide search honest is that its width is
+priced into every verdict and recorded in every artefact.
 
 The three properties ``research.py`` names hold here unchanged: the proposer
 never touches the verdict, a malformed proposal costs one iteration rather than
 the run, and nothing is promoted past PAPER.
+
+One thing this loop does that the equity one does not: it hands the proposer the
+**measured range of every feature** (:meth:`OptionResearchLoop.span`). That is
+not a nicety. A campaign without it lost seven of twenty slots to conditions no
+session could satisfy — ``term_slope() > 5`` against a maximum of 0.052 — and
+five more to repair turns that made the same mistake again.
 """
 
 from __future__ import annotations
@@ -29,33 +41,64 @@ from aqr.agent.option_proposer import (
     OptionProposer,
     TemplateOptionProposer,
     build_option_spec,
+    catalogue_spans,
     option_spec_to_proposal_fields,
 )
 from aqr.agent.proposer import Proposal
+from aqr.features.engine import FeatureKey
 from aqr.option_pipeline import OptionResearchOutcome, evaluate_option_candidate
 from aqr.options.engine import OptionBacktestConfig
+from aqr.options.features import OptionFeatureFrame, feature_span
 from aqr.options.run import OptionMarket
 from aqr.options.spec import OptionSpec, dumps_option_spec
 from aqr.registry.db import OPTION, ExperimentRecord, Registry
 
 __all__ = [
     "OPTION_SEARCH_BUDGET",
+    "WIDE_SEARCH_WARNING_AT",
     "OptionResearchConfig",
     "OptionResearchLoop",
     "OptionResearchStep",
     "option_saved_filename",
 ]
 
-OPTION_SEARCH_BUDGET = 20
-"""specs/10 D8's cap on the option search, and it is a hard gate.
+OPTION_SEARCH_BUDGET = 1000
+"""The ceiling on the option search, counted across the life of a registry.
 
-Not a suggested default and not a per-run limit: the count that matters is how
-many *distinct option hypotheses this registry has ever evaluated*, because the
-multiple-comparisons problem does not reset when a process exits. Twenty against
-71 independent cycles is already a Bonferroni factor of twenty on a sample that
-small; forty would mean the winner has to clear a bar the data cannot resolve,
-and four hundred would mean the exercise stopped being measurement.
+Not a per-run limit: the count that matters is how many *distinct option
+hypotheses this database has ever evaluated*, because the multiple-comparisons
+problem does not reset when a process exits.
+
+**specs/10 D8 argues for 20, and this is 1000.** The divergence is deliberate
+and it is worth being precise about what it does and does not give up. D8's
+reasoning is that the research window holds about 71 non-overlapping 28-DTE
+cycles, so a wide search produces a winner indistinguishable from the luckiest
+draw. That reasoning is correct and nothing here contradicts it. What it does
+not establish is that a *cap* is the defence, because the defence was never the
+cap: it is the deflation term, and the deflation term already scales with the
+trial count. Measured on the first real campaign, at twenty trials, the
+best-scoring rule's Sharpe of 0.67 deflated to **-0.28** -- the machinery priced
+the search and rejected the rule without the cap being involved at all. At two
+hundred trials it prices it harder, and at a thousand harder still.
+
+So the cap is a guardrail against an accident (a loop left running, a script
+with a typo in its iteration count), not the statistical control. The control is
+that every verdict carries ``sharpe_inflation``, every book carries
+``distinct_option_hypotheses``, and neither number can be spent without being
+recorded. A wide search is allowed to be wide; it is not allowed to be quiet.
+
+The honest cost of raising it: a search this wide will find something that
+looks good, and the deflated number is then the only thing standing between
+that and a promotion. Read it.
 """
+
+WIDE_SEARCH_WARNING_AT = 50
+"""Where the campaign starts saying out loud what the search is costing.
+
+Not a gate and not a prompt -- a line of output. Past this many trials the
+deflation term is large enough that a reader who has not thought about it will
+misread a high score, and the cheapest place to make that hard is next to the
+score."""
 
 
 def option_saved_filename(spec: OptionSpec) -> str:
@@ -86,12 +129,18 @@ class OptionResearchConfig:
     so this is a stated choice rather than a hidden one.
     """
     max_concurrent: int = 3
-    memory_depth: int = 20
+    memory_depth: int = 40
+    """How many past experiments the proposer is shown.
+
+    Raised from the equity loop's 20 because an option campaign can now run to
+    hundreds: a model shown the last twenty of two hundred hypotheses has no way
+    to avoid re-proposing the hundred and eightieth. Repeats are caught on the
+    fingerprint and cost no budget, but they do cost an iteration and an API
+    call."""
     mutate_best_every: int = 4
     """Every Nth iteration, refine the best rule so far instead of proposing a
-    new mechanism. Sparser than the equity loop's 3 because the budget is 20
-    rather than 414: refinement iterations are the ones least likely to teach
-    anything new, and here each one is 5% of the whole search."""
+    new mechanism. Pure exploration never converges; pure refinement never
+    discovers anything."""
     dataset_version: str = "options-cache"
     save_accepted_to: str | None = "strategies/options"
 
@@ -100,10 +149,11 @@ class OptionResearchConfig:
             raise ValueError("iterations must be >= 1")
         if self.iterations > OPTION_SEARCH_BUDGET:
             raise ValueError(
-                f"iterations={self.iterations} exceeds the option search budget of "
-                f"{OPTION_SEARCH_BUDGET} (specs/10 D8). The window holds about 71 "
-                "independent 28-DTE cycles; a search wider than this produces a "
-                "winner that cannot be distinguished from the luckiest draw."
+                f"iterations={self.iterations} exceeds the option search ceiling of "
+                f"{OPTION_SEARCH_BUDGET}. That ceiling is a guardrail against a "
+                "runaway loop, not a statistical control -- the control is the "
+                "deflation term, which scales with the trial count and is reported "
+                "with every verdict."
             )
 
 
@@ -143,6 +193,37 @@ class OptionResearchLoop:
     proposer: OptionProposer = field(default_factory=TemplateOptionProposer)
     backtest_config: OptionBacktestConfig = field(default_factory=OptionBacktestConfig)
     steps: list[OptionResearchStep] = field(default_factory=list)
+    _frame: OptionFeatureFrame | None = field(default=None, init=False, repr=False)
+
+    def span(self, key: FeatureKey) -> tuple[float, float] | None:
+        """What ``key`` actually ranges over on this campaign's own market.
+
+        Bound to the market the loop was handed, which for a search is always
+        the research market -- ``research_option_market`` is what the CLI
+        builds, and ``aqr.seal`` is what makes that checkable rather than a
+        convention. Handing a proposer spans measured on the sealed years would
+        put embargoed information into a prompt.
+
+        The frame is built once and caches per key, so the twentieth proposal
+        pays nothing for the range check the first one paid for.
+        """
+        if self._frame is None:
+            self._frame = OptionFeatureFrame(
+                bars=self.market.underlying,
+                chain=self.market.chain,
+                volatility=self.market.volatility,
+            )
+        return feature_span(self._frame, key)
+
+    def _catalogue_spans(self) -> dict[str, tuple[float, float]]:
+        """Measured once per campaign, then reused.
+
+        ``self.span`` caches per key inside the frame, so the second call is
+        free; the dict is rebuilt each iteration only because a campaign is
+        allowed to be handed a different market between runs and a cached copy
+        would then describe the wrong one.
+        """
+        return catalogue_spans(self.span)
 
     def run(self) -> list[OptionResearchStep]:
         """Run the configured iterations, or as many as the budget still allows.
@@ -198,6 +279,8 @@ class OptionResearchLoop:
                 memory=memory,
                 parent=parent,
                 budget=(spent, OPTION_SEARCH_BUDGET),
+                span=self.span,
+                spans=self._catalogue_spans(),
             )
         except Exception as exc:  # a proposer failure must not end the run
             placeholder = Proposal(fields={"name": f"proposal_failed_{iteration}"}, source="error")
@@ -285,7 +368,7 @@ class OptionResearchLoop:
             return None
         problems = [outcome.rejected_early or "the rule opened no positions"]
         try:
-            repaired = repair(proposal=proposal, problems=problems)
+            repaired = repair(proposal=proposal, problems=problems, span=self.span)
             candidate = self._build(repaired, parent)
         except Exception:
             # A failed repair is not a failed run. The original's rejection

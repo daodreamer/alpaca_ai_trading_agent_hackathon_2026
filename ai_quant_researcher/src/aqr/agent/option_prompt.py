@@ -34,6 +34,7 @@ exist.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from aqr.features.registry import REGISTRY
@@ -126,6 +127,17 @@ with the observation date.
 4. THERE IS ONE UNDERLYING: SPY. There is no cross-section to rank, no \
 relative-strength claim to make, and no portfolio mode.
 
+5. THE VOLATILITY FEATURES ARE DECIMAL FRACTIONS, NOT PERCENTAGE POINTS. \
+`iv_current()` of 0.156 means 15.6% vol. `term_slope()` never exceeds 0.052, so \
+`term_slope() > 5` is false on every session that has ever existed and the rule \
+opens nothing. `iv_hv_spread()` runs -0.38 to 0.17; a five-point variance \
+premium is 0.05. `iv_rank()` is the ONE feature on a 0..100 scale, and its being \
+the exception is exactly what makes this easy to get wrong. Every feature in the \
+catalogue below states its units and its measured range -- read them before you \
+write a number. A threshold outside a feature's range is not a strict \
+hypothesis, it is a rule that cannot fire, and it costs a slot of the search \
+budget for no information at all.
+
 What makes a good proposal:
 
 - It states a REASON the premium should exist -- a risk-transfer, structural or \
@@ -175,7 +187,9 @@ def structure_catalogue() -> str:
     return "\n".join(lines)
 
 
-def option_feature_catalogue() -> str:
+def option_feature_catalogue(
+    spans: Mapping[str, tuple[float, float]] | None = None,
+) -> str:
     """Every feature an option entry expression can name.
 
     Both halves of it: specs/10 D6's option table *and* the unchanged bar
@@ -187,6 +201,15 @@ def option_feature_catalogue() -> str:
     lines = ["Option features (from the volatility history and the chain):"]
     for name in sorted(OPTION_FEATURES):
         lines.append(f"  {OPTION_FEATURES[name].doc}")
+        # Measured on this run's own market rather than taken from the doc
+        # string, when a caller has one. The docs carry a range too, and a
+        # re-pull can move it; the number a model reads should be the number the
+        # engine will use.
+        rendered = (spans or {}).get(name)
+        if rendered is not None:
+            lines.append(
+                f"      measured this run: {rendered[0]:.4g} .. {rendered[1]:.4g}"
+            )
     lines.append("")
     lines.append(
         "Underlying-bar features (SPY daily bars, the same registry the equity side uses):"
@@ -353,19 +376,26 @@ def build_option_user_prompt(
     instruction: str | None = None,
     parent: dict[str, Any] | None = None,
     budget: tuple[int, int] | None = None,
+    spans: Mapping[str, tuple[float, float]] | None = None,
 ) -> str:
     """The volatile half of the prompt: catalogue, memory, and this turn's ask.
 
-    ``budget`` is ``(spent, cap)`` and is shown to the model on purpose. specs/10
-    D8 caps the option search at 20 hypotheses against 71 independent cycles, and
-    a model that does not know the search is nearly over will keep proposing
-    small variations. Telling it how many attempts remain is the cheapest way to
-    buy back some variety in the ones that are left.
+    ``budget`` is ``(spent, cap)`` and is shown to the model on purpose: a model
+    that does not know how much of the search is left will keep proposing small
+    variations. Telling it how many attempts remain is the cheapest way to buy
+    back some variety in the ones that are left.
+
+    ``spans`` is the measured range of each option feature on this run's own
+    market. Optional, and supplying it is strongly recommended: a campaign
+    without it lost seven of twenty slots to thresholds no session could satisfy
+    (``iv_hv_spread() > 5`` against a maximum of 0.17), which is the failure
+    :func:`~aqr.agent.option_proposer.unreachable_thresholds` now catches after
+    the fact and this prevents before it.
     """
     parts = [
         structure_catalogue(),
         "",
-        option_feature_catalogue(),
+        option_feature_catalogue(spans),
         "",
         f"Underlying: {underlying}. End-of-day chains only -- one snapshot per "
         "session, no intraday, about 24 strikes per expiry.",

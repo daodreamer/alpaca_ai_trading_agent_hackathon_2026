@@ -94,7 +94,7 @@ its own budget — see [Options](#options-a-second-search-with-its-own-budget):
 
 ```bash
 uv run aqr option-features                   # structures and features an option rule may name
-uv run aqr option-research --iterations 8    # capped at 20 hypotheses, and the cap is a gate
+uv run aqr option-research --iterations 8    # the search; its width is priced, not capped
 uv run aqr option-book FINGERPRINT           # the rule, without strikes. Nothing here places it
 ```
 
@@ -1261,14 +1261,23 @@ uv run python -m aqr.cli_sealed option-run FINGERPRINT
 uv run aqr option-book FINGERPRINT              # the handoff. Nothing here places it
 ```
 
-**The search is capped at twenty hypotheses, and the cap is a gate.** The window
-holds **71** non-overlapping 28-DTE cycles across 5.55 years. The equity campaign
-spent 414 hypotheses and deflated its Sharpe to 0.74 for it; 400 trials against
-71 cycles produces a winner that cannot be told apart from the luckiest draw. So
-`OptionResearchConfig` refuses `iterations > 20` outright, and the loop stops
-when the *registry's* count of distinct option hypotheses reaches it — a cap
-enforced per run is not a cap, because the multiple-comparisons problem does not
-reset when a process exits.
+**The width of the search is priced, not capped.** The window holds **71**
+non-overlapping 28-DTE cycles across 5.55 years, and specs/10 D8 argued from that
+for a hard cap of twenty hypotheses. The premise is right and the conclusion was
+wrong, which the first real campaign settled: at twenty trials the highest-scoring
+rule — 97/100, every robustness component maxed, beating buy-and-hold on Sharpe —
+was rejected because its 0.67 Sharpe **deflated to −0.28** once the search that
+found it was paid for. The deflation term did that. The cap was never involved.
+
+So the ceiling is 1000, it is a guardrail against a runaway loop rather than a
+statistical control, and it is counted against the *registry's* distinct option
+hypotheses rather than one run's `iterations` — a ceiling enforced per run is not
+a ceiling, because the multiple-comparisons problem does not reset when a process
+exits. What keeps a wide search honest is that its width is charged to every
+verdict (`sharpe_inflation` in the overfitting report) and recorded in every
+artefact (`distinct_option_hypotheses` in the book). A wide search is allowed to
+be wide; it is not allowed to be quiet. Past 50 trials the command says so before
+it starts.
 
 **The two searches are counted separately, everywhere a denominator appears.**
 `distinct_hypotheses(family=...)`, `total_backtests(family=...)`,
@@ -1304,16 +1313,17 @@ uv run --extra dev pytest tests/test_option_cache_claims.py -q
 # moved under the spec and nothing below is worth running until that is
 # resolved -- that is what those tests are for.
 
-# --- 1. Let the model explore. THIS SPENDS THE BUDGET ----------------------
-uv run aqr option-research --iterations 20 --provider deepseek
+# --- 1. Let the model explore ----------------------------------------------
+uv run aqr option-research --iterations 100 --provider deepseek
 # Offline (--provider offline) is seconds and costs nothing; it walks a
 # template library of the structures specs/07 and specs/10 were written about
-# and is the baseline the model has to beat. With deepseek the wall time is
-# almost entirely API latency.
+# and is the baseline the model has to beat -- 60 offline iterations against the
+# real cache take about a minute. With deepseek the wall time is almost entirely
+# API latency.
 #
-# Twenty is the whole budget, for the life of runs/research.sqlite. The loop
-# refuses to go past it and does not reset when the process exits. Run it once,
-# with the provider you actually want.
+# The count is cumulative across the life of runs/research.sqlite and does not
+# reset when the process exits, so a second run of 100 leaves the search at 200
+# and every verdict is deflated against that. Read `sharpe_inflation`.
 
 # --- 2. Read the result ----------------------------------------------------
 uv run aqr experiments --family option         # cycles beside trades
@@ -1359,10 +1369,28 @@ fallback that keeps the hand-written rule running when the research promoted
 nothing. Nothing about the Risk Gate changes; a researched rule is an input to
 the agent, never an exemption from the gate.
 
-Two of those steps are one-way doors and it is worth being blunt about which:
-**step 1** spends search budget that does not come back, and **step 5** spends a
-seal that is per candidate and cannot be re-run. Steps 0, 2, 4 and 6 are free
-and repeatable.
+One of those steps is a one-way door: **step 5** spends a seal that is per
+candidate and cannot be re-run. Step 1 is not a door but it is a ratchet —
+hypotheses accumulate in the registry and every future verdict is deflated
+against the total, so a campaign run twice is a campaign that has to clear a
+higher bar. Steps 0, 2, 4 and 6 are free and repeatable.
+
+### What a wide search actually costs
+
+Nothing stops you running hundreds, and the machinery is built to price them
+rather than forbid them. What changes as the count grows:
+
+| | |
+|---|---|
+| `sharpe_inflation` | the deflated Sharpe falls with `log(trials)`. At 20 trials a 0.67 became −0.28 |
+| `search_cost` | an overfitting signal in its own right, `log10(trials)/3` |
+| the reason line | every verdict names the trial count it was deflated against |
+| the book | `distinct_option_hypotheses` travels inside the artefact |
+
+The thing to read is never the score. A 97/100 that deflates negative is a rule
+the search manufactured; a 70/100 that survives deflation is a rule. The
+evaluator already gates on the second, and the score is there to rank what
+survived, not to decide it.
 
 ### The handoff is a rule, not a book of legs
 

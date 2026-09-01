@@ -32,6 +32,8 @@ from __future__ import annotations
 import json
 import os
 import random
+from collections.abc import Callable, Mapping
+from contextlib import suppress
 from typing import Any, Protocol
 
 from aqr.agent.option_prompt import (
@@ -43,7 +45,20 @@ from aqr.agent.option_prompt import (
 )
 from aqr.agent.prompts import prompt_hash
 from aqr.agent.proposer import Proposal
-from aqr.dsl.expr import Compare, Logic, Not, ParseError, parse
+from aqr.dsl.expr import (  # noqa: I001
+    Binary,
+    Call,
+    Compare,
+    Expr,
+    Logic,
+    Not,
+    Number,
+    ParseError,
+    Unary,
+    feature_keys,
+    parse,
+)
+from aqr.features.engine import FeatureKey
 from aqr.options.features import resolve_entry_feature
 from aqr.options.spec import Anchor, Cadence, DteTarget, OptionSizing, OptionSpec, StructureSpec
 
@@ -53,9 +68,13 @@ __all__ = [
     "OpenAICompatOptionProposer",
     "OptionProposer",
     "TemplateOptionProposer",
+    "CATALOGUE_KEYS",
+    "SpanResolver",
     "build_option_spec",
+    "catalogue_spans",
     "check_option_proposal",
     "option_spec_to_proposal_fields",
+    "unreachable_thresholds",
 ]
 
 DEFAULT_MODEL = "claude-opus-5"
@@ -73,7 +92,40 @@ class OptionProposer(Protocol):
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
         budget: tuple[int, int] | None = None,
+        span: SpanResolver | None = None,
+        spans: Mapping[str, tuple[float, float]] | None = None,
     ) -> Proposal: ...
+
+
+CATALOGUE_KEYS: tuple[tuple[str, tuple[float, ...]], ...] = (
+    ("iv_rank", ()),
+    ("iv_current", ()),
+    ("hv_current", ()),
+    ("iv_hv_spread", ()),
+    ("iv_change", (5.0,)),
+    ("atm_iv", (28.0,)),
+    ("term_slope", ()),
+    ("skew_25d", ()),
+)
+"""The eight option features, at a representative argument where they take one.
+
+``span`` answers about one key a rule actually named; this is the fixed list the
+*catalogue* shows before any rule exists, so a model reads the scale of every
+feature before it writes a number rather than after. The arity-1 pair is measured
+at the arguments a rule most often uses -- 5 for ``iv_change`` (the vendor's week
+column) and 28 for ``atm_iv`` (the cache's median DTE, and that feature's own
+default).
+"""
+
+
+def catalogue_spans(span: SpanResolver) -> dict[str, tuple[float, float]]:
+    """Measured ranges for :data:`CATALOGUE_KEYS`, for the prompt."""
+    out: dict[str, tuple[float, float]] = {}
+    for name, args in CATALOGUE_KEYS:
+        bounds = span(FeatureKey(name, args))
+        if bounds is not None:
+            out[name] = bounds
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -160,7 +212,9 @@ def build_option_spec(
 # --------------------------------------------------------------------------- #
 
 
-def check_option_proposal(fields: dict[str, Any]) -> list[str]:
+def check_option_proposal(
+    fields: dict[str, Any], *, span: SpanResolver | None = None
+) -> list[str]:
     """Problems with a raw option proposal, phrased so a model can act on them.
 
     Runs *before* the spec is built, and its output is fed straight back to the
@@ -173,6 +227,12 @@ def check_option_proposal(fields: dict[str, Any]) -> list[str]:
     and stops; a model that got three fields wrong deserves to hear about all
     three in one turn, because the alternative is three round trips out of a
     twenty-hypothesis budget.
+
+    ``span`` is what turns "this rule happens not to fire" into "this rule
+    *cannot* fire", and it is the difference between a slot spent and a slot
+    saved -- see :func:`unreachable_thresholds`. Optional because a caller with
+    no market to measure against (a schema test, a hand-written spec) can still
+    check everything else; absent, the range check simply does not run.
 
     Returns an empty list when the proposal is usable.
     """
@@ -295,7 +355,34 @@ def check_option_proposal(fields: dict[str, Any]) -> list[str]:
                     f"entry is an expression, not a condition: {entry!r}. Compare it "
                     f"to something, for example '{entry} > 0'."
                 )
+            elif span is not None:
+                # Last, and only once the expression is known to be a condition:
+                # a threshold nothing can satisfy is a rule that opens nothing,
+                # and finding that out from the engine costs a slot of the search
+                # budget. Finding it out here costs a retry.
+                problems += unreachable_thresholds(entry, span)
     return problems
+
+
+def _named_ranges(entry: str, span: SpanResolver | None) -> str:
+    """What every feature the rule named actually ranges over."""
+    if span is None or not entry.strip():
+        return ""
+    try:
+        node = parse(entry, resolve_feature=resolve_entry_feature)
+    except ParseError:
+        return ""
+    lines: list[str] = []
+    for key in sorted(feature_keys(node), key=str):
+        bounds = span(key)
+        if bounds is not None:
+            lines.append(f"  {key}: {bounds[0]:.4g} .. {bounds[1]:.4g}")
+    if not lines:
+        return ""
+    return (
+        "The features your condition names, and the range each one actually "
+        "takes over the research window:\n" + "\n".join(lines) + "\n\n"
+    )
 
 
 _EXIT_WORDS = ("stop", "target", "roll", "exit", "manage")
@@ -323,7 +410,9 @@ def _repair_instruction(problems: list[str], raw: str) -> str:
     )
 
 
-def _dead_rule_instruction(fields: dict[str, Any], problems: list[str]) -> str:
+def _dead_rule_instruction(
+    fields: dict[str, Any], problems: list[str], span: SpanResolver | None = None
+) -> str:
     """Ask for a fix to a rule that compiled and then opened nothing.
 
     Narrow on purpose, and the option version says one thing the equity version
@@ -335,9 +424,16 @@ def _dead_rule_instruction(fields: dict[str, Any], problems: list[str]) -> str:
     two it is looking at.
     """
     joined = "\n".join(f"- {p}" for p in problems)
+    # The ranges of the features THIS rule named, not a fixed example. The first
+    # version of this instruction quoted iv_rank()'s range regardless, and in the
+    # campaign that motivated it iv_rank() was the one feature that was never
+    # the problem: the model read a range for a feature it had not misused and
+    # repeated its unit error on the ones it had.
+    ranges = _named_ranges(str(fields.get("entry") or ""), span)
     return (
         "Your hypothesis compiled correctly but produced no usable evidence.\n\n"
         f"{joined}\n\n"
+        f"{ranges}"
         "Here is what you proposed:\n"
         f"  entry:      {fields.get('entry', '')!r}\n"
         f"  structure:  {fields.get('structure_type', '')} at "
@@ -346,10 +442,9 @@ def _dead_rule_instruction(fields: dict[str, Any], problems: list[str]) -> str:
         f"  cadence:    every {fields.get('min_sessions_between_entries', '')} sessions\n\n"
         "Keep the same mechanism and the same structure. Change the condition, the "
         "cadence or the anchor delta so the rule can actually open positions -- "
-        "check that every threshold is inside the feature's real range (iv_rank() "
-        "has median 18.5 on this window and exceeds 50 on 17.8% of sessions), and "
-        "that a cadence shorter than the DTE target is what you meant. Return the "
-        "complete JSON object again."
+        "check every threshold against the ranges above, and check that a cadence "
+        "shorter than the DTE target is what you meant. Return the complete JSON "
+        "object again."
     )
 
 
@@ -395,6 +490,8 @@ class AnthropicOptionProposer:
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
         budget: tuple[int, int] | None = None,
+        span: SpanResolver | None = None,
+        spans: Mapping[str, tuple[float, float]] | None = None,
     ) -> Proposal:
         user = build_option_user_prompt(
             underlying=underlying,
@@ -402,18 +499,73 @@ class AnthropicOptionProposer:
             instruction=instruction,
             parent=parent,
             budget=budget,
+            spans=spans,
         )
-        return self._ask(user)
+        # Anthropic's json_schema mode constrains the *shape* of the reply and
+        # can say nothing about whether a number is inside a feature's range, so
+        # the range check needs its own turn here exactly as it does on the
+        # OpenAI-compatible path.
+        return self._ask(user, span=span)
 
-    def repair(self, *, proposal: Proposal, problems: list[str]) -> Proposal:
+    def repair(
+        self,
+        *,
+        proposal: Proposal,
+        problems: list[str],
+        span: SpanResolver | None = None,
+    ) -> Proposal:
         """One more turn for a rule that opened nothing."""
-        return self._ask(_dead_rule_instruction(proposal.fields, problems))
+        return self._ask(
+            _dead_rule_instruction(proposal.fields, problems, span), span=span
+        )
 
-    def _ask(self, user: str) -> Proposal:
-        # The SDK types these as TypedDicts. Importing them would pull anthropic
-        # to module scope and break the optional-extra design, so the widening
-        # happens here, at the boundary, and nowhere else.
-        messages: Any = [{"role": "user", "content": user}]
+    def _ask(self, user: str, *, span: SpanResolver | None = None) -> Proposal:
+        text = self._turn([{"role": "user", "content": user}])
+        try:
+            fields = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"model returned non-JSON output: {text[:400]}") from exc
+
+        # ``json_schema`` mode constrains the *shape* of the reply and can say
+        # nothing about whether a number lies inside a feature's range, so the
+        # range check needs a turn of its own here exactly as it does on the
+        # OpenAI-compatible path. One retry, not a loop: a model that cannot put
+        # a threshold inside a range it was just handed will not manage it on
+        # the third attempt, and the next iteration is a cheaper place to spend
+        # the tokens.
+        problems = check_option_proposal(fields, span=span) if span is not None else []
+        if problems:
+            retry = self._turn(
+                [
+                    {"role": "user", "content": user},
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": _repair_instruction(problems, text)},
+                ]
+            )
+            # A retry that comes back unparseable leaves the original standing:
+            # the loop then evaluates it and it is rejected with the reason it
+            # earned, which is a better record than an exception here.
+            with suppress(json.JSONDecodeError):
+                fields = json.loads(retry)
+                text = retry
+        return Proposal(
+            fields=fields,
+            source="anthropic",
+            model=self.model,
+            prompt_hash=prompt_hash(OPTION_SYSTEM_PROMPT, user),
+            raw=text,
+        )
+
+    def _turn(self, messages: list[dict[str, str]]) -> str:
+        """One request, and the one place the SDK's TypedDicts are widened.
+
+        The SDK types ``messages``, ``thinking`` and ``output_config`` as
+        TypedDicts. Importing them would pull ``anthropic`` to module scope and
+        break the optional-extra design, so the widening happens here, at the
+        boundary, and nowhere else -- which is also why the retry above goes
+        through this rather than repeating the call.
+        """
+        widened: Any = messages
         thinking: Any = {"type": "adaptive"}
         output_config: Any = {
             "effort": self.effort,
@@ -423,25 +575,14 @@ class AnthropicOptionProposer:
             model=self.model,
             max_tokens=self.max_tokens,
             system=OPTION_SYSTEM_PROMPT,
-            messages=messages,
+            messages=widened,
             thinking=thinking,
             output_config=output_config,
         )
         if getattr(response, "stop_reason", None) == "refusal":
             details = getattr(response, "stop_details", None)
             raise RuntimeError(f"model declined to answer: {details}")
-        text = "".join(block.text for block in response.content if block.type == "text")
-        try:
-            fields = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"model returned non-JSON output: {text[:400]}") from exc
-        return Proposal(
-            fields=fields,
-            source="anthropic",
-            model=self.model,
-            prompt_hash=prompt_hash(OPTION_SYSTEM_PROMPT, user),
-            raw=text,
-        )
+        return "".join(block.text for block in response.content if block.type == "text")
 
 
 # --------------------------------------------------------------------------- #
@@ -516,6 +657,8 @@ class OpenAICompatOptionProposer:
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
         budget: tuple[int, int] | None = None,
+        span: SpanResolver | None = None,
+        spans: Mapping[str, tuple[float, float]] | None = None,
     ) -> Proposal:
         system = self._system_prompt()
         user = build_option_user_prompt(
@@ -524,6 +667,7 @@ class OpenAICompatOptionProposer:
             instruction=instruction,
             parent=parent,
             budget=budget,
+            spans=spans,
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system},
@@ -539,7 +683,7 @@ class OpenAICompatOptionProposer:
             except json.JSONDecodeError as exc:
                 problems = [f"the reply was not valid JSON: {exc}"]
             else:
-                problems = check_option_proposal(fields)
+                problems = check_option_proposal(fields, span=span)
                 if not problems:
                     return Proposal(
                         fields=fields,
@@ -555,7 +699,13 @@ class OpenAICompatOptionProposer:
 
         raise ValueError(f"{self.provider} produced an unusable option proposal: {last_error}")
 
-    def repair(self, *, proposal: Proposal, problems: list[str]) -> Proposal:
+    def repair(
+        self,
+        *,
+        proposal: Proposal,
+        problems: list[str],
+        span: SpanResolver | None = None,
+    ) -> Proposal:
         """One more turn, carrying the reason the rule produced nothing.
 
         Raises rather than returning something unchecked: the research loop
@@ -563,7 +713,7 @@ class OpenAICompatOptionProposer:
         keeps the real rejection reason attached to the real attempt.
         """
         system = self._system_prompt()
-        user = _dead_rule_instruction(proposal.fields, problems)
+        user = _dead_rule_instruction(proposal.fields, problems, span)
         raw = self._call(
             [{"role": "system", "content": system}, {"role": "user", "content": user}]
         )
@@ -571,7 +721,7 @@ class OpenAICompatOptionProposer:
             fields = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{self.provider} repair returned non-JSON: {raw[:200]}") from exc
-        problems_now = check_option_proposal(fields)
+        problems_now = check_option_proposal(fields, span=span)
         if problems_now:
             raise ValueError(
                 f"{self.provider} repair is still unusable: {'; '.join(problems_now)}"
@@ -825,6 +975,8 @@ class TemplateOptionProposer:
         instruction: str | None = None,
         parent: dict[str, Any] | None = None,
         budget: tuple[int, int] | None = None,
+        span: SpanResolver | None = None,
+        spans: Mapping[str, tuple[float, float]] | None = None,
     ) -> Proposal:
         if parent:
             return self._mutate(parent)
@@ -976,3 +1128,108 @@ def option_spec_to_proposal_fields(spec: OptionSpec) -> dict[str, Any]:
         "min_sessions_between_entries": spec.cadence.min_sessions_between_entries,
         "expected_cycles_per_year": 12,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Thresholds that can never be true
+# --------------------------------------------------------------------------- #
+
+SpanResolver = Callable[[FeatureKey], "tuple[float, float] | None"]
+"""What a feature's value actually ranges over, or ``None`` if unknown.
+
+A callable rather than a mapping because the set of keys is not known until a
+proposal names them: ``realized_vol(20)`` and ``realized_vol(60)`` are different
+keys and a campaign cannot enumerate the arguments a model might choose.
+:func:`~aqr.options.features.feature_span` is the implementation; the research
+loop binds it to the research market.
+"""
+
+
+def unreachable_thresholds(entry: str, span: SpanResolver) -> list[str]:
+    """Comparisons in ``entry`` that no session can satisfy.
+
+    The failure this exists for was measured on a real campaign, not imagined.
+    Seven of twenty hypotheses died writing ``term_slope() > 5``,
+    ``iv_hv_spread() > 2``, ``iv_current() > 25`` and ``realized_vol(20) > 15``:
+    the volatility features here are decimal fractions and the model wrote
+    percentage points, because ``iv_rank()`` is the one feature on a 0..100
+    scale and it was the only one whose documentation said so. ``term_slope()``
+    never exceeds 0.052, so ``> 5`` is off by a factor of ninety-six.
+
+    Every one of those is a *good hypothesis in the wrong unit*, and every one
+    cost a slot of a fixed search budget -- plus, for five of them, a second slot
+    on a repair turn that reproduced the same class of error. Catching it here
+    costs nothing: this runs inside the proposer's own retry loop, before a spec
+    exists and before anything is recorded.
+
+    Deliberately narrow. Only ``feature <op> number`` (and the mirrored form) is
+    checked, and only against the *whole observed range* -- not a percentile, not
+    a "this looks rare" warning. A rule firing on 2% of sessions is a small
+    sample and the evaluator already says so with the cycle gate; a rule firing
+    on 0% of them is a typo. The difference between "few" and "none" is the only
+    one this function is competent to judge, and widening it would put the
+    proposer in the business of preferring rules that trade more.
+    """
+    try:
+        node = parse(entry, resolve_feature=resolve_entry_feature)
+    except ParseError:
+        return []  # the parser's own message is the useful one
+    problems: list[str] = []
+    for call, op, number in _threshold_comparisons(node):
+        bounds = span(call.key)
+        if bounds is None:
+            continue
+        low, high = bounds
+        if op in (">", ">=") and number > high:
+            problems.append(_never(call, op, number, low, high, "above"))
+        elif op in ("<", "<=") and number < low:
+            problems.append(_never(call, op, number, low, high, "below"))
+    return problems
+
+
+_DECIMAL_HINT = (
+    "Volatility features here are DECIMAL fractions -- iv_current() of 0.156 is "
+    "15.6% vol, and a five-point term slope is 0.05, not 5. iv_rank() is the "
+    "only feature on a 0..100 scale."
+)
+
+
+def _never(call: Call, op: str, number: float, low: float, high: float, side: str) -> str:
+    # ``call.key`` rather than ``call``: ``Call.__str__`` drops the parentheses
+    # on an arity-0 feature, and the catalogue the model read writes
+    # ``term_slope()``. Two spellings of one name in the same conversation is a
+    # small thing that costs a retry.
+    name = call.key
+    return (
+        f"{name} is never {side} {number:g}: over the whole research window it "
+        f"ranges {low:.4g} .. {high:.4g}, so `{name} {op} {number:g}` is false on "
+        f"every session and the rule would open nothing. {_DECIMAL_HINT}"
+    )
+
+
+_MIRRORED_OP = {"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}
+
+
+def _threshold_comparisons(node: Expr) -> list[tuple[Call, str, float]]:
+    """Every ``feature <op> number`` in the tree, with the mirrored form flipped.
+
+    ``5 < term_slope()`` and ``term_slope() > 5`` are the same claim, and a check
+    that caught one and not the other would be one a model could walk around
+    without meaning to.
+    """
+    found: list[tuple[Call, str, float]] = []
+    stack: list[Expr] = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, Compare):
+            left, right = current.left, current.right
+            if isinstance(left, Call) and isinstance(right, Number):
+                found.append((left, current.op, right.value))
+            elif isinstance(right, Call) and isinstance(left, Number):
+                found.append((right, _MIRRORED_OP[current.op], left.value))
+            stack += [left, right]
+        elif isinstance(current, Logic | Binary):
+            stack += [current.left, current.right]
+        elif isinstance(current, Not | Unary):
+            stack.append(current.operand)
+    return found

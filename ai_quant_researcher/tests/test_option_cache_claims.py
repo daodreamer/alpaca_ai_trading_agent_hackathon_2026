@@ -442,3 +442,66 @@ def test_exactly_four_sessions_have_greeks_computed_against_the_wrong_spot() -> 
         date(2021, 11, 19),
         date(2021, 11, 22),
     ]
+
+
+# --------------------------------------------------------------------------- #
+# The units the feature catalogue promises a model (D6)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_documented_feature_ranges_still_match_the_cache() -> None:
+    """The catalogue tells a model what scale each feature is on, and those
+    numbers are in a docstring.
+
+    A docstring cannot notice when the data moves underneath it, and getting
+    this wrong is expensive in a specific, measured way: a twenty-hypothesis
+    campaign lost seven slots to conditions like ``term_slope() > 5`` against a
+    feature whose maximum is 0.052, because the docs stated a unit for
+    ``iv_rank()`` and for nothing else. The docs now state one for everything,
+    so this asserts they are still true -- a re-pull that moves a range fails
+    the build instead of quietly teaching the next campaign the wrong scale.
+
+    Loose bounds on purpose. What must not drift is the *order of magnitude* --
+    "this is a decimal fraction, not a percentage point" -- and pinning p99 to
+    three places would fail on a re-pull that changed nothing that matters.
+    """
+    if not UNDERLYING.exists():
+        pytest.skip("no underlying cache")
+    from aqr.features.engine import FeatureKey
+    from aqr.option_data import research_option_market
+    from aqr.options.features import OptionFeatureFrame, feature_span
+
+    market, _ = research_option_market("SPY")
+    frame = OptionFeatureFrame(
+        bars=market.underlying, chain=market.chain, volatility=market.volatility
+    )
+
+    # (feature, args, the band the documented range has to stay inside)
+    expected: list[tuple[str, tuple[float, ...], float, float]] = [
+        ("iv_rank", (), 0.0, 100.0),
+        ("iv_current", (), 0.0, 2.0),
+        ("hv_current", (), 0.0, 2.0),
+        ("iv_hv_spread", (), -2.0, 1.0),
+        ("term_slope", (), -2.0, 1.0),
+        ("skew_25d", (), -2.0, 1.0),
+        ("atm_iv", (28.0,), 0.0, 3.0),
+    ]
+    for name, args, low, high in expected:
+        span = feature_span(frame, FeatureKey(name, args))
+        assert span is not None, f"{name} is never defined on this cache"
+        assert low <= span[0] and span[1] <= high, (
+            f"{name}{args} ranges {span[0]:.4g}..{span[1]:.4g}, outside the "
+            f"documented band {low}..{high}. Either the cache changed or the "
+            f"units did; options/features.py's doc strings tell a model which "
+            f"scale to write a threshold on, and a wrong one costs a whole "
+            f"hypothesis every time it is read."
+        )
+
+    # The one that carries the whole confusion: iv_rank is the exception and
+    # everything else is a decimal. If that ever stops being true, the sentence
+    # the system prompt leads with is a lie.
+    rank = feature_span(frame, FeatureKey("iv_rank", ()))
+    slope = feature_span(frame, FeatureKey("term_slope", ()))
+    assert rank is not None and slope is not None
+    assert rank[1] > 50.0, "iv_rank is documented as the one 0..100 feature"
+    assert slope[1] < 1.0, "term_slope is documented as a decimal fraction"

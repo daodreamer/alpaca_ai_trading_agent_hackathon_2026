@@ -64,7 +64,7 @@ from typing import Any
 import numpy as np
 
 from aqr.backtest.engine import BacktestResult, Trade
-from aqr.backtest.metrics import Metrics, compute_metrics
+from aqr.backtest.metrics import MIN_TRADES_FOR_RATIOS, Metrics, compute_metrics
 from aqr.data.bars import Bars
 from aqr.options.engine import (
     OptionBacktestConfig,
@@ -222,11 +222,32 @@ class OptionFoldResult:
             ),
         }
 
+    @property
+    def test_sharpe_measured(self) -> bool:
+        """Whether this fold has enough trades for ``compute_metrics`` to have
+        computed a ratio at all.
+
+        Below :data:`~aqr.backtest.metrics.MIN_TRADES_FOR_RATIOS` it returns
+        0.0, and that zero means *declined* rather than *flat*. A six-month
+        options fold routinely holds two trades -- a structure held to expiry
+        produces evidence only when it closes (specs/10 D8) -- so this is the
+        common case here rather than an edge one, and a report that printed
+        "0.00" seven times beside a stitched "0.96" would read as a
+        contradiction when it is a refusal.
+        """
+        return self.test.num_trades >= MIN_TRADES_FOR_RATIOS
+
     def __str__(self) -> str:
+        sharpe = (
+            f"sharpe {self.test.sharpe:.2f}"
+            if self.test_sharpe_measured
+            else f"sharpe n/a ({self.test.num_trades} trades, under the "
+            f"{MIN_TRADES_FOR_RATIOS}-trade ratio floor)"
+        )
         return (
             f"{self.fold}: train {self.train.num_trades} trades/{self.train_cycles} cycles "
             f"-> test {self.test.num_trades} trades/{self.test_cycles} cycles, "
-            f"ret {self.test.total_return:+.1%}, sharpe {self.test.sharpe:.2f}"
+            f"ret {self.test.total_return:+.1%}, {sharpe}"
         )
 
 

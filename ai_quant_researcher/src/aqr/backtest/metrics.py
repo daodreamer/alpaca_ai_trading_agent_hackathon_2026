@@ -24,10 +24,26 @@ import numpy as np
 from aqr.backtest.engine import BacktestResult, Trade
 
 __all__ = [
-    "periods_per_year","Metrics", "compute_metrics", "drawdown_series"]
+    "MIN_PERIODS_FOR_RATIOS",
+    "MIN_TRADES_FOR_RATIOS",
+    "periods_per_year", "Metrics", "compute_metrics", "drawdown_series"]
 
-_MIN_TRADES_FOR_RATIOS = 5
-_MIN_PERIODS_FOR_RATIOS = 20
+MIN_TRADES_FOR_RATIOS = 5
+MIN_PERIODS_FOR_RATIOS = 20
+"""Below either floor, ``sharpe`` and ``sortino`` are returned as 0.0 -- and
+that zero means *declined to compute*, not *measured and flat*.
+
+Public because a report that prints the number has to be able to tell those two
+apart. An options walk-forward fold can hold two trades (specs/10 D8: a
+structure held to expiry produces evidence only when it closes), and seven folds
+each printing "sharpe 0.00" beside a stitched "0.96" reads as a contradiction
+when it is actually a refusal. ``options/walkforward.py`` reads these to print
+``n/a`` instead.
+"""
+
+# The old private spellings, kept so nothing outside this module breaks.
+_MIN_TRADES_FOR_RATIOS = MIN_TRADES_FOR_RATIOS
+_MIN_PERIODS_FOR_RATIOS = MIN_PERIODS_FOR_RATIOS
 
 
 @dataclass(frozen=True, slots=True)

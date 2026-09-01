@@ -37,6 +37,7 @@ from aqr.agent.option_prompt import STRUCTURE_CATALOGUE
 from aqr.agent.option_proposer import OptionProposer
 from aqr.agent.option_research import (
     OPTION_SEARCH_BUDGET,
+    WIDE_SEARCH_WARNING_AT,
     OptionResearchConfig,
     OptionResearchLoop,
 )
@@ -2029,9 +2030,10 @@ def option_features() -> None:
 def option_research(
     iterations: int = typer.Option(
         8,
-        help=f"Hypotheses to test. Hard-capped at {OPTION_SEARCH_BUDGET} (specs/10 D8): "
-        "the window holds about 71 independent 28-DTE cycles and a wider search "
-        "produces a winner indistinguishable from the luckiest draw.",
+        help=f"Hypotheses to test. Ceiling {OPTION_SEARCH_BUDGET}, counted across "
+        "the life of the database rather than per run. The ceiling is a guardrail "
+        "against a runaway loop; what actually prices a wide search is the "
+        "deflation term, reported as `sharpe_inflation` with every verdict.",
     ),
     underlying: str = typer.Option("SPY", help="The one underlying. The cache holds SPY."),
     chain_root: str = typer.Option(DEFAULT_OPTIONS_ROOT, help="Option chain cache root."),
@@ -2109,6 +2111,20 @@ def option_research(
             f"(the equity search's {registry.distinct_hypotheses(family=EQUITY)} are "
             "counted separately and do not raise this bar)"
         )
+        projected = spent + iterations
+        if projected >= WIDE_SEARCH_WARNING_AT:
+            # Said before the run, not after, because after is when the score is
+            # already on the screen. The deflation term is what prices a wide
+            # search, and a reader who has not thought about it will misread a
+            # high score -- the first real campaign produced a 97/100 rule whose
+            # Sharpe deflated to -0.28 at twenty trials.
+            console.print(
+                f"[yellow]this campaign will take the option search to about "
+                f"{projected} distinct hypotheses[/yellow] — the deflation term "
+                "scales with that count, so read `sharpe_inflation` in the "
+                "overfitting report before believing any score this run produces. "
+                "The window holds about 71 independent cycles (specs/10 D8)."
+            )
         loop = OptionResearchLoop(
             market=market,
             registry=registry,

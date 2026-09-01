@@ -146,21 +146,38 @@ data cannot price:
 Acceptance: an offline proposer run produces valid, varied `OptionSpec`s with no
 API key; every rejection is recorded with its reason.
 
-### O4.2 — The campaign, capped at 20 hypotheses — **built, not spent**
+### O4.2 — The campaign — **spent once, then the cap was removed**
 
-`OptionResearchConfig` refuses `iterations > 20` outright and the loop stops
-when the *registry's* count of distinct option hypotheses reaches it — a cap
-enforced per run is not a cap, because the problem does not reset when a
-process exits.
+The first campaign ran 2026-09-01: 20 hypotheses, **all REJECT**. The
+best-scoring rule (`term_slope_put_credit_spread_v1`, 97/100, every robustness
+component maxed, beating buy-and-hold on Sharpe) was rejected because its 0.67
+Sharpe **deflated to −0.28** after 20 trials, and because 12 independent cycles
+is below the 25 gate. Nobody beat the offline template baseline, which reached
+REVIEW at 29–37 cycles.
+
+Eight of the twenty opened nothing, and **seven of those eight were a units
+error** — `term_slope() > 5` against a feature whose maximum is 0.052, because
+`iv_rank()` documented itself as 0..100 and nothing else documented itself at
+all. That is fixed (the docs state units, the catalogue carries measured ranges,
+and `unreachable_thresholds` sends a threshold nothing can satisfy back to the
+model before it costs a slot).
+
+**The cap is now 1000, and it is a guardrail rather than a statistical
+control.** D8's premise — 71 independent cycles, so a wide search finds noise —
+is correct; its conclusion that a *cap* is the defence is not, and the campaign
+above is the evidence: the deflation term rejected a 97/100 rule with the cap
+never involved. What keeps a wide search honest is that its width is charged to
+every verdict and recorded in every artefact.
 
 ```bash
 uv run aqr option-research --iterations 20 --provider deepseek
 ```
 
-**The cap is a hard gate, not a default.** specs/10 D8: there are 71
-non-overlapping cycles in 5.55 years. The equity search spent 414 hypotheses and
-deflated its Sharpe to 0.74 for it; 400 trials against 71 cycles produces a
-number with no information in it.
+specs/10 D8's reasoning still stands and is why the deflation term matters:
+there are 71 non-overlapping cycles in 5.55 years, and the equity search spent
+414 hypotheses and deflated its Sharpe to 0.74 for it. What changed is where
+that is enforced — in the score, per verdict, rather than in a refusal to
+propose.
 
 ### O4.3 — Keep the search denominators apart — **done**
 
