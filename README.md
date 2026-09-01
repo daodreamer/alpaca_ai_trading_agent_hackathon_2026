@@ -345,10 +345,40 @@ There are **two** trading paths in this repository, and they are different
 answers to the same brief.
 
 **The options agent** is the one the first half of this README describes: the
-LLM proposes a structure, the Risk Gate disposes. Its strategy layer is
-incomplete — specs/07 D4 and D5 are unimplemented, so the live path builds
-fixed-width put credit spreads whatever the trend says — and it has no backtest,
-so nothing about it is a claim about edge yet.
+LLM proposes a structure, the Risk Gate disposes. It now executes a *researched*
+rule rather than a hand-written one. `ai_quant_researcher/` ran an LLM search
+over option hypotheses, and the survivor was pre-registered and measured once
+against a sealed two-year window:
+
+```
+iv_rank_low_sticky_put_credit_spread_v1 [cc197008e0deb097]
+sealed window 2024-09-03 → 2026-08-31   (500 sessions, never read during the search)
+
+  entry      iv_rank() < 15          sell a put credit spread into CHEAP volatility
+  structure  0.16Δ short, 0.08Δ wing, 14 DTE ± 10, at most one entry per session
+
+  strategy   return +8.14%   Sharpe 1.15   max drawdown −2.05%
+  benchmark  return +36.08%  Sharpe 1.02
+  residual   alpha +2.52%/yr   beta 0.09   t = +1.11   bar = 1.96
+```
+
+**Read that last line before believing anything else about it.** t = +1.11
+against a significance bar of 1.96 means the alpha is positive and
+*unmeasurable*, which is not evidence. The window holds about 25 independent
+cycles, and specs/10 D8 is explicit that a window that size is entitled to say a
+rule stopped working and is never entitled to say it works. So the only claim
+available is: **the rule survived a pre-registered attempt to refute it on data
+it had never seen.** It was not confirmed. `SealedOptionRun` carries `refuted`
+and `can_confirm` as two separate booleans precisely so no dashboard, README or
+demo script can flatten the distinction, and specs/07 D8 forbids wording it
+otherwise.
+
+The rule also *inverts* the hand-written one it replaced. specs/07 D3 used to
+sell premium only when `iv_rank >= 30`, on the standard reasoning that the
+variance risk premium is largest when volatility is elevated. The search tested
+that shape about a hundred times; what survived out of sample was the opposite
+condition. We do not claim the proposed mechanism is true — only that it was
+declared before the sealed window was opened.
 
 **The equity agent** executes a strategy that *has* been validated, and it
 executes only that one. `ai_quant_researcher/` searched 414 hypotheses, put the
@@ -408,8 +438,9 @@ resulting order, and places what survives.
 `scripts/pipeline.py` runs the whole chain:
 
 ```bash
-python scripts/pipeline.py            # refresh the cache → rebuild the book → trade it
-python scripts/pipeline.py --dry-run  # rebuild the book, plan against it, place nothing
+python scripts/pipeline.py --only equity            # refresh the cache → rebuild the book → trade it
+python scripts/pipeline.py --only equity --dry-run  # rebuild the book, plan against it, place nothing
+python scripts/pipeline.py                          # both sleeves, equity first
 ```
 
 **Neither project imports the other.** The seam is the JSON artefact, and
@@ -509,9 +540,9 @@ than stopping.
 The whole chain, from bars to orders:
 
 ```bash
-python scripts/pipeline.py              # refresh → rebuild the book → trade it
-python scripts/pipeline.py --dry-run    # rebuild the book, plan against it, send nothing
-python scripts/pipeline.py book trade   # skip the pull; the cache is already current
+python scripts/pipeline.py --only equity            # refresh → rebuild the book → trade it
+python scripts/pipeline.py --only equity --dry-run  # rebuild the book, plan against it, send nothing
+python scripts/pipeline.py book trade               # skip the pull; the cache is already current
 ```
 
 Or one stage at a time, which is what you type when something is wrong:
@@ -568,9 +599,9 @@ on a fresh clone. That book goes stale after a week, and the strategy re-picks
 its holdings every five sessions, so it has to be rebuilt.
 
 ```bash
-python scripts/pipeline.py            # refresh data → rebuild the book → trade it
-python scripts/pipeline.py --dry-run  # rebuild the book, plan against it, place nothing
-python scripts/pipeline.py book       # just rebuild it; the data is already current
+python scripts/pipeline.py --only equity            # refresh data → rebuild the book → trade it
+python scripts/pipeline.py --only equity --dry-run  # rebuild the book, plan against it, place nothing
+python scripts/pipeline.py book                     # just rebuild it; the data is already current
 ```
 
 The `refresh` stage pulls about 160 MB of daily bars for 682 companies and takes
@@ -716,7 +747,7 @@ the nine guards that enforce it, and the daily loop.
 | [adr/](adr/) | Decisions and the reasoning behind them. |
 | [docs/](docs/) | [Architecture and workflow](docs/ARCHITECTURE.md), with diagrams. English and 简体中文. |
 | [ai_quant_researcher/](ai_quant_researcher/) | A separate system sharing the repository: an equities strategy-research lab that implements [specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md). It produces the strategy the equity agent executes, and imports nothing from AlphaGate. |
-| [scripts/](scripts/) | `pipeline.py` — refresh, rebuild the book, trade it; `pull_sp500_intraday.py` — build the 1h/4h bar caches and arm their canaries; `pull_progress.py` — watch a pull. They run both projects' CLIs as subprocesses and import neither. |
+| [scripts/](scripts/) | `pipeline.py` — refresh, rebuild both books, trade them (`--only equity` / `--only options`); `pull_sp500_intraday.py` — build the 1h/4h bar caches and arm their canaries; `pull_progress.py` — watch a pull. They run both projects' CLIs as subprocesses and import neither. |
 
 `ai_quant_researcher/` is a **sibling project, not part of AlphaGate**. It has
 its own `pyproject.toml`, its own virtualenv, its own test suite, and it imports

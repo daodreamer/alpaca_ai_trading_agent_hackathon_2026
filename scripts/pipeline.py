@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """The chain, driven from one place — specs/09 D0.
 
+Two chains, one shape. The equity sleeve:
+
 ```
 aqr research → walk-forward → pre-register → sealed run   (occasionally)
                                                   ↓
@@ -8,6 +10,28 @@ aqr research → walk-forward → pre-register → sealed run   (occasionally)
                                                   ↓
                               alphagate equity-run → orders   (every session)
 ```
+
+and the options sleeve, which is the same four steps against a different
+artefact — an *option book*, which carries a rule rather than a vector of
+weights, because the executor rebuilds the structure from live quotes and a
+strike named from yesterday's close is wrong by today's open:
+
+```
+aqr option-research → pre-register → cli_sealed option-run   (occasionally)
+                                                  ↓
+                              aqr option-book → a JSON file   (every session)
+                                                  ↓
+                              alphagate iv-seed → the rank the rule reads
+                                                  ↓
+                              alphagate run → orders          (every session)
+```
+
+The `iv-seed` step has no equity counterpart and is not an optimisation. The
+researched rule's entry is `iv_rank() < 15`, and `iv_rank` needs a year of
+implied-volatility history that Alpaca will not serve without a signed OPRA
+agreement (`agent/iv_store.py`). Without the seed the rule is not *false*, it is
+*undecidable*, and the agent stands aside every cycle — which looks exactly like
+a quiet market from the outside. So it runs before every session.
 
 **This script imports neither project.** It runs their command-line interfaces
 as subprocesses, which is the only coupling specs/09 D0 permits: the researcher
@@ -63,6 +87,21 @@ RESEARCHER = ROOT / "ai_quant_researcher"
 BACKEND = ROOT / "backend"
 
 DEFAULT_UNIVERSE = "sp500_pit"
+DEFAULT_VOLATILITY_CSV = "data-options-sealed/volatility_history/SPY.csv"
+"""The vendor implied-volatility table `iv-seed` reads, inside the researcher.
+
+A path handed to AlphaGate's own CLI, which parses the CSV itself. Named here
+rather than defaulted inside `alphagate` so that the one place that knows both
+projects' layouts is this script — which is the only place allowed to."""
+
+IV_WINDOW_DAYS = 365
+"""How much history to seed, and it is load-bearing rather than a default.
+
+`options/volatility.py` ranks against the whole stored history, and the
+researched rule meant the vendor's own one-year range. Seed seven years and
+`iv_rank` ranks against a window containing March 2020 — a different number
+under the same name, which is the substitution specs/07 D3 refuses everywhere
+else."""
 DEFAULT_CACHE = "data-sp500-sealed"
 """The only root that holds sessions up to the present.
 
@@ -114,23 +153,54 @@ def strategy_fingerprint(explicit: str | None) -> str:
     that is what the pin is for — but catching it here costs nothing and saves a
     pull.
     """
+    return _pinned(
+        explicit,
+        "ALPHAGATE_STRATEGY_FINGERPRINT",
+        "the equity strategy the research validated (specs/09 D1)",
+    )
+
+
+def _pinned(explicit: str | None, variable: str, what: str) -> str:
+    """A fingerprint from the flag, the environment, or `.env.local` — in that order.
+
+    Read out of the same variable AlphaGate reads, rather than passed between
+    stages, so the book that is built and the book that is executed cannot
+    disagree about which rule this is. A mismatch would be caught at load — that
+    is what the pin is for — but catching it here costs nothing and saves a pull.
+    """
     if explicit:
         return explicit
-    env = os.environ.get("ALPHAGATE_STRATEGY_FINGERPRINT")
+    env = os.environ.get(variable)
     if env:
         return env
     path = ROOT / ".env.local"
     if path.is_file():
         for line in path.read_text(encoding="utf-8").splitlines():
             key, _, value = line.partition("=")
-            if key.strip() == "ALPHAGATE_STRATEGY_FINGERPRINT":
+            if key.strip() == variable:
                 found = value.strip().strip("\"'")
                 if found:
                     return found
     raise SystemExit(
-        "no strategy pinned. Set ALPHAGATE_STRATEGY_FINGERPRINT in .env.local, "
-        "or pass --fingerprint. There is deliberately no default: the pin is "
-        "what makes 'only the strategy the researcher validated' checkable."
+        f"nothing pinned for {what}. Set {variable} in .env.local, or pass the "
+        "matching --fingerprint flag. There is deliberately no default: the pin "
+        "is what makes 'only the rule the researcher validated' checkable."
+    )
+
+
+def option_fingerprint(explicit: str | None) -> str:
+    """The pinned option rule, from the flag or from `.env.local`.
+
+    The sibling of `strategy_fingerprint`, and a separate variable rather than a
+    shared one because the two sleeves execute two different rules validated
+    against two different sealed windows. One pin covering both would make
+    "which rule was live" unanswerable the moment they diverged, which they
+    already have.
+    """
+    return _pinned(
+        explicit,
+        "ALPHAGATE_OPTION_FINGERPRINT",
+        "the option rule the research validated (specs/07 D1)",
     )
 
 
@@ -212,18 +282,78 @@ def stage_trade(args: argparse.Namespace) -> int:
     return run(command, cwd=BACKEND, dry=False)
 
 
+def stage_option_book(args: argparse.Namespace) -> int:
+    """Write today's option book for the pinned option rule.
+
+    Refuses for the same reasons `target-book` does — unspent seal, refuted
+    sealed run, wrong registry status — and writes the *rule*, deliberately
+    without strikes. Runs even under `--dry-run`, like `book` above and for the
+    same reason: it writes a file and sends it nowhere, and a rehearsal against
+    yesterday's book is not a rehearsal of today.
+    """
+    command = [
+        "uv", "run", "aqr", "option-book", option_fingerprint(args.option_fingerprint),
+    ]
+    return run(command, cwd=RESEARCHER, dry=False)
+
+
+def stage_iv_seed(args: argparse.Namespace) -> int:
+    """Top up the implied-volatility history the option rule's entry reads.
+
+    Idempotent per session, so running it every day is correct rather than
+    merely harmless. Runs under `--dry-run` too: it reads a CSV and appends to a
+    local file, places nothing, and skipping it would make the dry run rehearse
+    a rule that cannot be decided -- which is not the failure being rehearsed.
+    """
+    command = [
+        "uv", "run", "python", "-m", "alphagate", "iv-seed",
+        "--from", str(RESEARCHER / DEFAULT_VOLATILITY_CSV),
+        "--symbol", args.underlying,
+        "--days", str(IV_WINDOW_DAYS),
+    ]
+    return run(command, cwd=BACKEND, dry=False)
+
+
+def stage_options_trade(args: argparse.Namespace) -> int:
+    """Hand the option book to AlphaGate.
+
+    `once` when `--dry-run`, `run` otherwise. The asymmetry is deliberate and is
+    documented in CLAUDE.md section 6: `once` defaults to NOT placing because it
+    is the debugging command, and `run` defaults to placing because running a
+    whole session is the thing that is meant to trade. Two commands rather than
+    one flag, so the journal records two different acts.
+    """
+    if args.dry_run:
+        command = ["uv", "run", "python", "-m", "alphagate", "once"]
+    else:
+        command = ["uv", "run", "python", "-m", "alphagate", "run"]
+    return run(command, cwd=BACKEND, dry=False)
+
+
 STAGES = {
     "refresh": stage_refresh,
     "book": stage_book,
     "trade": stage_trade,
+    "option-book": stage_option_book,
+    "iv-seed": stage_iv_seed,
+    "options-trade": stage_options_trade,
 }
+
+EQUITY_CHAIN = ("refresh", "book", "trade")
+OPTIONS_CHAIN = ("option-book", "iv-seed", "options-trade")
+"""The two sleeves' stages, named so `--only` can select one.
+
+`refresh` is in the equity chain alone because it pulls *stock* bars. The option
+chain cache is refreshed by `aqr options-pull`, which is hours of transfer from
+a public database and is not a per-session step; it is run by hand when the
+vendor publishes, and `README.md` documents it."""
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pipeline",
         description=(
-            "Refresh the cache, rebuild the target book, and trade it. "
+            "Refresh the caches, rebuild both books, and trade them. "
             "Runs two projects' CLIs as subprocesses and imports neither."
         ),
     )
@@ -231,9 +361,24 @@ def main(argv: list[str] | None = None) -> int:
         "stages",
         nargs="*",
         metavar="STAGE",
-        help=f"which of {', '.join(STAGES)} to run, in order. Default: all three.",
+        help=(
+            f"which of {', '.join(STAGES)} to run, in order. "
+            "Default: both sleeves, equity first."
+        ),
     )
-    parser.add_argument("--fingerprint", default=None)
+    parser.add_argument("--fingerprint", default=None, help="equity strategy pin override")
+    parser.add_argument(
+        "--option-fingerprint", default=None, help="option rule pin override"
+    )
+    parser.add_argument(
+        "--only",
+        choices=("equity", "options"),
+        default=None,
+        help="run one sleeve's chain instead of both",
+    )
+    parser.add_argument(
+        "--underlying", default="SPY", help="the option sleeve's one underlying"
+    )
     parser.add_argument("--universe", default=DEFAULT_UNIVERSE)
     parser.add_argument("--cache", default=DEFAULT_CACHE)
     parser.add_argument("--source", default="alpaca")
@@ -246,13 +391,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    wanted = args.stages or list(STAGES)
+    if args.stages and args.only:
+        parser.error("--only selects a chain; naming stages selects them explicitly")
+    if args.only == "equity":
+        wanted = list(EQUITY_CHAIN)
+    elif args.only == "options":
+        wanted = list(OPTIONS_CHAIN)
+    else:
+        wanted = args.stages or [*EQUITY_CHAIN, *OPTIONS_CHAIN]
     unknown = [name for name in wanted if name not in STAGES]
     if unknown:
         parser.error(f"unknown stage(s) {unknown}; choose from {list(STAGES)}")
     print(f"AlphaGate pipeline — {' → '.join(wanted)}")
     if args.dry_run:
         print("dry run: no bars pulled, no orders placed")
+    print(
+        "the two sleeves are budgeted apart (specs/03 D6): a failure in one "
+        "stops the run before the other trades on a stale book"
+    )
 
     for name in wanted:
         code = STAGES[name](args)
