@@ -1,0 +1,134 @@
+{
+  "as_of": "2024-08-30",
+  "consumer_must_supply": [
+    "a live option chain, and the delta-selection that resolves this rule against it",
+    "account equity, and the contract counts that follow from it",
+    "reconciliation against the structures actually open",
+    "an options-shaped risk gate -- defined risk in the type, no naked short legs",
+    "position and concurrency limits at the account level, across every sleeve",
+    "a kill switch",
+    "a fill journal",
+    "an exit policy for early assignment, which this research does not model"
+  ],
+  "dataset_version": "csv:data-options-underlying:1D+chain:data-options:753sessions",
+  "evidence": {
+    "first_session": "2019-02-09",
+    "independent_cycles": 74,
+    "last_entry_session": "2024-08-19",
+    "risk_per_trade_researched": 0.02,
+    "sessions": 753,
+    "skip_census": {
+      "affordability": 1,
+      "embargo_refusal": 2,
+      "greek_consistency": 1,
+      "no_expiry_in_band": 0,
+      "no_leg_or_wing": 6,
+      "stale_underlying": 0,
+      "total": 10
+    },
+    "trades": 185
+  },
+  "exit_convention": "Held to expiry. There is no stop, no profit target, no roll and no management rule, because the research data cannot price one: a specific contract is re-quoted on 1-3% of later sessions (specs/10 D0, D1). Settlement is modelled European-style against the underlying's close on the expiration date; SPY options are American, so early assignment is real, is not modelled, and belongs to the executor.",
+  "fill_convention": "Decide at the close of session t-1; select and fill from session t's chain, buying at the ask and selling at the bid, per leg, spread crossed in full. The research charges no better fill than that and an executor should not assume one.",
+  "generated_at": "2026-09-01T17:45:16.592121+00:00",
+  "provenance": {
+    "campaign": "run-b8818e2a-1",
+    "campaign_hypotheses": 41,
+    "database": "runs\\research.sqlite",
+    "distinct_option_hypotheses": 172,
+    "hypothesis": "When implied volatility is very low relative to its recent history, the market persistently overprices short-dated put options because institutional demand for downside protection is sticky and slow to unwind even in calm regimes. This leaves the variance risk premium elevated and put credit spreads rich relative to the subdued realized path, a structural feature of the options market that is not arbitraged away quickly. Selling a defined-risk put credit spread in such low-IV states harvests this premium with rapid theta decay and limited tail risk.",
+    "option_campaigns_run": 3,
+    "preregistration": {
+      "declared_at": "2026-09-01T12:44:22.096316+00:00",
+      "seal_digest": "e74496c02cdc8200f5fa81790aa1817f41d2c4383f1cb919c9d28996b0e27517",
+      "selection_rule": "the only ACCEPT among 40 hypotheses in campaign run-b8818e2a-1; 172 option hypotheses across 3 campaigns all time"
+    },
+    "score": 100.0,
+    "sealed_look": 1,
+    "sealed_looks_total": 1,
+    "sealed_measurement": {
+      "alpha_clears_bar": false,
+      "backtest_sessions": 2680,
+      "benchmark_return": 0.36078980982117237,
+      "benchmark_sharpe": 1.0165698607908455,
+      "can_confirm": false,
+      "fingerprint": "cc197008e0deb097",
+      "first_session": "2024-09-03T04:00:00+00:00",
+      "last_session": "2026-08-31T04:00:00+00:00",
+      "looks": 1,
+      "max_drawdown": -0.020506993613550795,
+      "note": "32 independent cycles settled inside the window; specs/10 D8 -- this window can refute and cannot confirm",
+      "observations": 500,
+      "refuted": false,
+      "residual": {
+        "alpha": 0.02519242147512302,
+        "beta": 0.08798412543996473,
+        "excess_sharpe": 0.1290859980871082,
+        "information_ratio": 0.7923587014035711,
+        "is_significant": false,
+        "observations": 500,
+        "r_squared": 0.17496971143976447,
+        "residual_vol": 0.03179421318967985,
+        "t_alpha": 1.1138228384227529
+      },
+      "sharpe_standard_error": 0.7099295739719539,
+      "significance_bar": 1.9599639845400536,
+      "since": "2024-09-01T00:00:00+00:00",
+      "strategy": "iv_rank_low_sticky_put_credit_spread_v1",
+      "strategy_return": 0.08141483533621496,
+      "strategy_sharpe": 1.1456558588779537,
+      "trades": 85
+    },
+    "sealed_run_at": "2026-09-01T12:44:40.260395+00:00",
+    "sealed_seal": {
+      "digest": "cddf0a0ca3e228baacdc12878ab66c9eed6a6e485d3432658e83bd0bde12030b",
+      "embargo_start": 1725148800,
+      "knowledge_exposure": null,
+      "loads": 1,
+      "max_event_time": 1788148800,
+      "phase": "sealed",
+      "run_id": "db774b93f3424b9c9c2a2e799cd941a7",
+      "tainted": false
+    },
+    "sealed_window_can_refute_not_confirm": "about 25 independent 28-DTE cycles: entitled to say this stopped working, never entitled to say it works (specs/10 D8)",
+    "status": "PAPER"
+  },
+  "rule": {
+    "anchor": {
+      "delta": 0.16,
+      "tolerance": 0.06
+    },
+    "cadence": {
+      "min_sessions_between_entries": 1
+    },
+    "call_anchor_delta": null,
+    "call_width_delta": null,
+    "dte": {
+      "target": 14,
+      "tolerance": 10
+    },
+    "entry": "iv_rank() < 15",
+    "sizing": {
+      "max_concurrent": 3,
+      "risk_per_trade": 0.02
+    },
+    "structure": "put_credit_spread",
+    "width_delta": 0.08,
+    "width_points": null
+  },
+  "schema_version": 1,
+  "seal": {
+    "digest": "4632d08d0efcdfdc943552b6725c9bd755e7fceb5d295d059eb21ee73333681b",
+    "embargo_start": 1725148800,
+    "knowledge_exposure": null,
+    "loads": 1,
+    "max_event_time": 1724990400,
+    "phase": "research",
+    "run_id": "08d756ae5b8f497ab8b00da5b5f401dd",
+    "tainted": false
+  },
+  "spec_fingerprint": "cc197008e0deb097",
+  "spec_name": "iv_rank_low_sticky_put_credit_spread_v1",
+  "spec_version": 1,
+  "underlying": "SPY"
+}

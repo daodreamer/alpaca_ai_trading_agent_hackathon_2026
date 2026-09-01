@@ -1,0 +1,30 @@
+option_strategy:
+  underlying: SPY
+  entry: iv_rank() < 15
+  structure:
+    type: put_credit_spread
+    dte:
+      target: 14
+      tolerance: 10
+    anchor:
+      delta: 0.16
+      tolerance: 0.06
+    width_delta: 0.08
+    width_points: null
+    call_anchor: null
+    call_width_delta: null
+    call_width_points: null
+  sizing:
+    risk_per_trade: 0.02
+    max_concurrent: 3
+  cadence:
+    min_sessions_between_entries: 1
+  name: iv_rank_low_sticky_put_credit_spread_v1
+  version: 1
+  hypothesis: When implied volatility is very low relative to its recent history, the market persistently
+    overprices short-dated put options because institutional demand for downside protection is sticky
+    and slow to unwind even in calm regimes. This leaves the variance risk premium elevated and put credit
+    spreads rich relative to the subdued realized path, a structural feature of the options market that
+    is not arbitraged away quickly. Selling a defined-risk put credit spread in such low-IV states harvests
+    this premium with rapid theta decay and limited tail risk.
+  parent: null
