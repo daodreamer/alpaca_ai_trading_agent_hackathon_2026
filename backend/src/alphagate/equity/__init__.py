@@ -36,11 +36,12 @@ from alphagate.equity.plan import (
     SkipReason,
     plan_rebalance,
 )
-from alphagate.equity.policy import DEFAULT_EQUITY_POLICY, EquityPolicy
+from alphagate.equity.policy import DEFAULT_EQUITY_POLICY, EQUITY_SLEEVE_ALLOCATION, EquityPolicy
 
 __all__ = [
     "BOOK_SCHEMA_VERSION",
     "DEFAULT_EQUITY_POLICY",
+    "EQUITY_SLEEVE_ALLOCATION",
     "EquityPolicy",
     "EquitySide",
     "Holding",

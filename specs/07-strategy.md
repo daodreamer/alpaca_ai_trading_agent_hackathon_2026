@@ -57,15 +57,64 @@ position's loss capped at construction.
 
 ## D2 — Universe
 
-Liquid optionable underlyings only — the strategy's real enemy over four days is
-the bid/ask spread, not the market:
+**`SPY`. One underlying.**
 
-- Index ETFs: `SPY`, `QQQ`, `IWM`
-- Large caps with dense chains: three to five, chosen at kickoff for open
-  interest, **excluding any with earnings inside the window**
+It is the only instrument that satisfies all four requirements this strategy
+places on an underlying at once.
 
-Breadth exists to produce enough independent fills to escape single-trade noise
-([00](00-brief.md)), not to diversify a return stream.
+**The market is tight enough to trade.** Median relative spread on ~16-delta
+puts — the short-leg candidates — measured on live quotes:
+
+| Underlying | Spread | Gate limit is 5% |
+| --- | --- | --- |
+| **SPY** | **0.53%** | passes |
+| QQQ | 2.34% | passes |
+| IWM | 4.74% | passes |
+| TSLA, NVDA, MSFT | 2.5–4.0% | passes |
+| AAPL | 6.23% | refused |
+| DIA, XLF, XLE, XLI | 10–23% | refused |
+| XLK, XBI, XLU | 22–27% | refused |
+| XLV, XLY, XLC, XLB, XLRE | 35–200% | refused |
+
+The sector ETFs are not small versions of SPY and are not available as breadth:
+on the strikes this strategy sells, XLRE quotes a 200% relative spread and the
+Gate refuses every candidate.
+
+**It has no earnings.** An index trust has no quarter to report, so
+`earnings.ETF_UNDERLYINGS` answers `earnings_within_dte` as a fact about the
+instrument. Alpaca serves no earnings calendar, so for a single name that field
+is `None` and [05](05-agent.md) D6 fail-closes on it — a single-name universe
+trades nothing until a human fills in every report date by hand.
+
+**The evidence in [D0](#d0--what-the-evidence-actually-says) is index evidence.**
+The Cboe PUT index is SPX, the variance-risk-premium decay paper measures index
+options, and the tastytrade 45-DTE convention was studied on SPY, IWM and SPX.
+Nothing in that section supports a single-name credit-spread book. Single-name
+premium is richer because it compensates earnings gaps and idiosyncratic jump
+risk, which is a different trade.
+
+**It is the only underlying with free history to backtest on.** The historical
+source ([`OPTIONS_DATA.md`](../ai_quant_researcher/OPTIONS_DATA.md)) carries SPY
+back to 2019 with bid, ask, implied volatility and greeks. It does not carry QQQ
+or IWM, nor any cash-settled index option. Buying the gap costs about $40/month
+and is not bought: seven years of bid/ask on the instrument actually traded is
+worth more than three instruments with none.
+
+### What one underlying costs
+
+**Breadth comes from expiries and strikes, not from names.** Concurrent
+positions differ by expiry and short strike on the same underlying, so they are
+not independent bets — one adverse move in SPY moves all of them. The
+[00](00-brief.md) target of roughly thirty fills is still reachable, and the
+P&L it produces is a sample of one underlying's four days rather than of a
+strategy across a market. [D7](#d7--reporting-pl-honestly) reports it as such.
+
+**`underlying_concentration` stops being a diversification control.** With one
+name in the universe, that check and `portfolio_heat` measure the same quantity,
+so the tighter of the two is the only one that binds. [03](03-risk-gate.md) D6
+sets them equal for this reason, and keeps the check rather than deleting it:
+the universe is configuration, and the day a second name is added the check must
+already be there and already correct.
 
 ## D3 — Regime gate
 
@@ -162,4 +211,17 @@ the live window is what demonstrates the system.
 5. Width selection produces `max_loss` within budget, or no candidate at all.
 6. Each management rule fires at its exact threshold and not one tick before.
 7. Management rules are unreachable from any model output (boundary test).
-8. Earnings inside the window excludes an underlying from the universe.
+8. Earnings inside the window excludes an underlying from the universe, and an
+   **unmeasured** earnings date excludes it too — the distinction that costs
+   money is between `False` and `None` (`agent/earnings.py`), and D2 now rests
+   on it entirely.
+9. Every watchlist entry is in `earnings.ETF_UNDERLYINGS`. Asserted against
+   that set rather than against the string `SPY`, so a name added without a
+   report date fails the test rather than passing by not being checked.
+10. `tradeable_today()` returning empty is a reported state, not an exception
+    and not a silent no-op. Under D2 it is never the expected state, so an empty
+    return must be reported rather than idled through.
+11. An underlying whose measured spread exceeds the Gate's limit is refused by
+    `liquidity`, not by the watchlist. D2 chooses the universe; the Gate is what
+    enforces it, and a name slipped into the watchlist must be stopped by the
+    check rather than by the list having been correct.

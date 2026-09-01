@@ -43,9 +43,11 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Final
 
+from alphagate.agent.book import realised_pl
 from alphagate.core.identifiers import Ticker
 from alphagate.equity import (
     DEFAULT_EQUITY_POLICY,
+    EQUITY_SLEEVE_ALLOCATION,
     EquityPolicy,
     EquitySide,
     Holding,
@@ -65,6 +67,7 @@ from alphagate.execution import (
     Submission,
     Tradeability,
     read_account,
+    read_positions,
     read_share_positions,
     read_tradeability,
     submit_equity,
@@ -78,6 +81,8 @@ from alphagate.risk import (
     VetoedEquity,
     evaluate_equity,
 )
+from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION
+from alphagate.risk.sleeve import Sleeve, residual_sleeve
 
 __all__ = [
     "BOOK_ARCHIVE",
@@ -618,6 +623,14 @@ class EquityContext:
     engine that runs it lives in the other project."""
     pinned_fingerprint: str
     policy: EquityPolicy = DEFAULT_EQUITY_POLICY
+    allocation: Decimal = EQUITY_SLEEVE_ALLOCATION
+    """The capital this book may deploy — specs/03 D6.
+
+    The base every fraction in `policy` is taken of, and what the kill switch
+    marks its high-water against. Not `account.equity`: this account also funds
+    the options agent, and a book that budgeted against the whole of it would
+    both overspend and inherit the other strategy's drawdown."""
+
     peak_equity: Decimal | None = None
     killswitch_tripped: bool = False
 
@@ -641,6 +654,34 @@ class EquityContext:
         """Raise the high-water mark. Never lowers it — that is the whole job."""
         if self.peak_equity is None or equity > self.peak_equity:
             self.peak_equity = equity
+
+    def sleeve(self, account: AccountRead) -> Sleeve:
+        """This book's capital, as the residual of the account — specs/03 D6.
+
+        The options agent's sleeve is measured bottom-up from its own contracts
+        and its own journalled round-trips; whatever the account holds beyond it
+        is this book. Computed as a residual rather than from holdings so that
+        the two sleeves sum to the account exactly: an options loss lowers both
+        the account and the options sleeve by the same amount and leaves this
+        one untouched, which is the isolation the whole design is for.
+
+        Option legs are read here rather than assumed to be worth their
+        allocation, because assuming it is what re-couples the two the moment
+        the options agent takes its first mark.
+        """
+        legs = read_positions(self.mcp) if self.mcp is not None else ()
+        options = Sleeve(
+            name="options",
+            allocation=OPTIONS_SLEEVE_ALLOCATION,
+            realised=realised_pl(self.journal.read_through(account.observed_at.date())),
+            unrealised=sum((leg.unrealised for leg in legs), Decimal(0)),
+        )
+        return residual_sleeve(
+            "equity",
+            allocation=self.allocation,
+            account_equity=account.equity,
+            others=(options,),
+        )
 
     def drawdown(self, equity: Decimal) -> Decimal:
         if self.peak_equity is None or self.peak_equity <= 0:
@@ -729,9 +770,13 @@ def run_equity_cycle(
 
     account = read_account(context.mcp, observed_at=as_of)
     context.last_account = account
-    context.observe(account.equity)
     holdings = read_share_positions(context.mcp)
     context.last_holdings = holdings
+    sleeve = context.sleeve(account)
+    # After the sleeve is known, and on the sleeve — specs/03 D6. Observing the
+    # account here was what let a stock drawdown and an options drawdown share
+    # one high-water mark.
+    context.observe(sleeve.equity)
 
     symbols = sorted(set(book.weights) | {h.symbol for h in holdings}, key=str)
     snapshots = context.data.stock_snapshots(symbols)
@@ -742,7 +787,7 @@ def run_equity_cycle(
         book,
         holdings=holdings,
         marks=marks,
-        equity=account.equity,
+        equity=sleeve.equity,
         policy=context.policy,
         as_of=as_of,
     )
@@ -750,12 +795,12 @@ def run_equity_cycle(
 
     orders_today, turnover_today = today_totals(context.journal, as_of.date())
     portfolio = EquityPortfolio(
-        equity=account.equity,
+        equity=sleeve.equity,
         cash=account.cash,
         buying_power=account.buying_power,
         holdings=tuple(holdings),
         marks={symbol: mark.price for symbol, mark in marks.items()},
-        drawdown_pct=context.drawdown(account.equity),
+        drawdown_pct=sleeve.drawdown(peak=context.peak_equity),
         orders_today=orders_today,
         turnover_today=turnover_today,
         killswitch_tripped=context.killswitch_tripped,
@@ -769,7 +814,7 @@ def run_equity_cycle(
             as_of=as_of,
             stage=EquityStage.NO_MARKS if plan.is_blind else EquityStage.NO_TRADES,
             strategy=strategy_view(book),
-            equity=account.equity,
+            equity=sleeve.equity,
             band_pct=plan.band_pct,
             orders=(),
             skipped=tuple(_skip_view(s) for s in plan.skipped),
@@ -787,7 +832,7 @@ def run_equity_cycle(
         as_of=as_of,
         stage=stage,
         strategy=strategy_view(book),
-        equity=account.equity,
+        equity=sleeve.equity,
         band_pct=plan.band_pct,
         orders=orders,
         skipped=tuple(_skip_view(s) for s in plan.skipped),

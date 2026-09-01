@@ -198,6 +198,46 @@ class Journal:
     def path_for(self, day: date) -> Path:
         return self.directory / f"{day.isoformat()}.jsonl"
 
+    def days(self) -> tuple[date, ...]:
+        """Every day this journal holds a file for, oldest first.
+
+        Oldest first because the readers that want the whole history are
+        accumulating something over it — realised P&L, an open-position match —
+        and both want the records in the order they happened.
+
+        A file whose name is not a date is skipped rather than fatal. The
+        directory is also a place humans put things.
+        """
+        if not self.directory.is_dir():
+            return ()
+        found: list[date] = []
+        for path in self.directory.glob("*.jsonl"):
+            try:
+                found.append(date.fromisoformat(path.stem))
+            except ValueError:
+                continue
+        return tuple(sorted(found))
+
+    def read_through(self, day: date) -> list[dict[str, Any]]:
+        """Every record up to and including `day`, oldest first.
+
+        The whole-history read, for the two callers that cannot work from one
+        file. `agent.book.read_book` is both of them: realised P&L is cumulative
+        by definition, and matching broker legs against journalled fills needs
+        the day a position was *opened*, which for anything held overnight is
+        not the day being read.
+
+        Bounded by `day` rather than reading the directory whole, so that a
+        replay of Tuesday cannot see Wednesday. Look-ahead is look-ahead even
+        when the thing leaking backwards is our own P&L.
+        """
+        records: list[dict[str, Any]] = []
+        for each in self.days():
+            if each > day:
+                break
+            records.extend(self.read(each))
+        return records
+
     def append(self, entry: Any, *, day: date | None = None) -> Path:
         """Write one record. Encode, redact, append, flush.
 

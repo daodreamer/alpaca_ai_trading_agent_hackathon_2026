@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from alphagate.agent import (
     CycleInputs,
@@ -74,7 +74,8 @@ from alphagate.live.status import build_status, write_status
 from alphagate.marketdata import MarketData
 from alphagate.marketdata.alpaca import AlpacaMarketData
 from alphagate.options import OptionContract, OptionQuote, Right, StructureRisk, compute_risk
-from alphagate.risk import DEFAULT_LIMITS, RiskLimits
+from alphagate.risk import RiskLimits
+from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
 
 __all__ = [
     "LiveContext",
@@ -129,6 +130,14 @@ def mcp_session(env: dict[str, str], *, timeout: float = 30.0) -> Any:
     return StdioSession(env=mcp_environment(env), timeout=timeout)
 
 
+ACCOUNT_BASIS: Final = "account"
+"""The pre-sleeve basis. A state file with no `basis` key was written under it,
+which is why it is the default rather than an error."""
+
+OPTIONS_SLEEVE_BASIS: Final = "options-sleeve"
+EQUITY_SLEEVE_BASIS: Final = "equity-sleeve"
+
+
 @dataclass
 class SessionState:
     """What must survive a restart, and where it lives.
@@ -141,21 +150,55 @@ class SessionState:
     path: Path
     peak_equity: Decimal | None = None
     killswitch_tripped: bool = False
+    basis: str = ACCOUNT_BASIS
+    """What `peak_equity` was measured against — specs/03 D6.
+
+    Persisted, and checked on load. Before sleeves existed every high-water mark
+    was a mark on account equity; now each strategy marks its own sleeve, and
+    the two are not comparable. A file written under one basis and read under
+    another hands the kill switch a threshold measured on a different quantity:
+    on this account an untouched $95,000 sleeve, read against a $100,175 account
+    peak, reports a 5% drawdown that never happened."""
+
+    discarded_peak: Decimal | None = None
+    """A high-water mark dropped by a basis change, kept for one message.
+
+    Not persisted. The CLI prints it once, because a kill switch that quietly
+    forgot its history is exactly the failure worth being loud about."""
 
     @classmethod
-    def load(cls, path: Path) -> SessionState:
+    def load(cls, path: Path, *, basis: str = ACCOUNT_BASIS) -> SessionState:
+        """Read the state, discarding a peak measured against something else.
+
+        **Discarded, not rescaled.** Rescaling an account peak into a sleeve
+        peak means subtracting what the other sleeve was worth at that moment,
+        and nothing in this file records it. It happens to equal the allocation
+        today, because the options sleeve has not traded — and a migration that
+        is correct only while some fact remains true is one that will be wrong
+        silently later.
+
+        Dropping the mark can only understate a drawdown, and only until the
+        sleeve makes a new high. Rescaling it wrongly could overstate one and
+        latch a kill switch on arithmetic nobody would think to check.
+        """
         if not path.is_file():
-            return cls(path=path)
+            return cls(path=path, basis=basis)
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return cls(path=path)
+            return cls(path=path, basis=basis)
         peak = raw.get("peak_equity")
-        return cls(
-            path=path,
-            peak_equity=Decimal(str(peak)) if peak is not None else None,
-            killswitch_tripped=bool(raw.get("killswitch_tripped")),
-        )
+        stored = Decimal(str(peak)) if peak is not None else None
+        latched = bool(raw.get("killswitch_tripped"))
+        if str(raw.get("basis", ACCOUNT_BASIS)) != basis:
+            return cls(
+                path=path,
+                peak_equity=None,
+                killswitch_tripped=latched,
+                basis=basis,
+                discarded_peak=stored,
+            )
+        return cls(path=path, peak_equity=stored, killswitch_tripped=latched, basis=basis)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +207,7 @@ class SessionState:
                 {
                     "peak_equity": str(self.peak_equity) if self.peak_equity else None,
                     "killswitch_tripped": self.killswitch_tripped,
+                    "basis": self.basis,
                 },
                 indent=2,
             )
@@ -187,7 +231,16 @@ class LiveContext:
     journal: Journal
     iv: IvHistoryStore
     state: SessionState
-    limits: RiskLimits = DEFAULT_LIMITS
+    sleeve_allocation: Decimal = OPTIONS_SLEEVE_ALLOCATION
+    """The capital this agent is allowed to commit — specs/03 D6.
+
+    The base every budget in `limits` is a fraction of. Held here rather than
+    read from the account, so that what the options agent may risk does not move
+    because the equity book had a good morning."""
+    limits: RiskLimits = SLEEVE_LIMITS
+    """`SLEEVE_LIMITS`, not `DEFAULT_LIMITS`: the fractions are fractions of
+    `sleeve_allocation`. Pairing the account-scaled limits with a sleeve base
+    would apply the 5% twice and size every candidate to zero."""
     exit_policy: ExitPolicy = DEFAULT_EXIT_POLICY
     """The exit thresholds — specs/07 D6.
 
@@ -226,21 +279,43 @@ class LiveContext:
         return read_account(self.mcp, observed_at=as_of)
 
     def book(self, *, as_of: datetime, fills_today: int = 0) -> BookRead:
-        """Re-read the account and the book from the broker. Never inferred."""
+        """Re-read the account and the sleeve from the broker. Never inferred.
+
+        Three orderings matter here and each was a bug waiting to happen.
+
+        **The whole journal, not today's file.** `read_through` because a spread
+        opened on Monday and still held on Wednesday has no fill in Wednesday's
+        file: reading one day would report its legs as unexplained and drop the
+        position out of the Gate's risk model. Realised P&L is cumulative for
+        the same reason.
+
+        **Bounded at `as_of`**, so a replay of an earlier day cannot see a later
+        one.
+
+        **The high-water mark is observed after the read, and on the sleeve.**
+        Before, it recorded account equity — which made the options kill switch
+        a function of what the equity book did overnight (specs/03 D6). It is
+        raised after the book is built rather than before because the drawdown
+        must be measured against the peak as it stood, and a new high raises the
+        mark for the *next* cycle. At a new high the two orderings agree, since
+        `Sleeve.drawdown` already returns zero above the peak; at a new low they
+        do not, and observing first would quietly rebase the loss to zero.
+        """
         if self.mcp is None:
             raise RuntimeError("no MCP session: cannot read the book")
         account = read_account(self.mcp, observed_at=as_of)
         self.last_account = account
-        self.state.observe(account.equity)
         legs = read_positions(self.mcp)
         book = read_book(
             account,
             legs,
-            self.journal.read(as_of.date()),
+            self.journal.read_through(as_of.date()),
+            sleeve_allocation=self.sleeve_allocation,
             peak_equity=self.state.peak_equity,
             fills_today=fills_today,
             killswitch_tripped=self.state.killswitch_tripped,
         )
+        self.state.observe(book.snapshot.equity)
         self.last_book = book
         return book
 

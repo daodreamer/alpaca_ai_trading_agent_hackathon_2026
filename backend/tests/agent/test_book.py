@@ -42,6 +42,16 @@ def account(equity: str = "100000") -> AccountRead:
     )
 
 
+def closed_for(realised: Decimal) -> dict[str, object]:
+    """A journal record for a round-trip that closed at `realised`.
+
+    Only the outcome amendment matters here: `realised_pl` is the same field
+    `interface/read.py` renders, so the dashboard's number and the kill switch's
+    number have one source.
+    """
+    return {"cycle_id": "2026-08-31-000", "outcome": {"realised_pl": str(realised)}}
+
+
 def contract(strike: str, right: Right = Right.PUT) -> OptionContract:
     return OptionContract(SPY, EXPIRY, Decimal(strike), right)
 
@@ -252,13 +262,44 @@ class TestUnexplainedLegsAreNeverModelled:
 
 
 class TestDrawdown:
+    """Measured against the sleeve, never against the account — specs/03 D6."""
+
     def test_it_is_measured_against_the_high_water_mark(self) -> None:
-        book = read_book(account("95000"), (), [], peak_equity=Decimal("100000"))
+        """$5,000 allocated, $250 lost on closed trades, peak $5,000."""
+        book = read_book(
+            account(),
+            (),
+            [closed_for(Decimal("-250"))],
+            peak_equity=Decimal("5000"),
+        )
+        assert book.snapshot.equity == Decimal("4750")
         assert book.snapshot.drawdown_pct == Decimal("0.05")
 
     def test_a_new_high_is_not_a_drawdown(self) -> None:
-        book = read_book(account("105000"), (), [], peak_equity=Decimal("100000"))
+        book = read_book(
+            account(),
+            (),
+            [closed_for(Decimal("250"))],
+            peak_equity=Decimal("5000"),
+        )
         assert book.snapshot.drawdown_pct == Decimal(0)
+
+    def test_the_equity_book_cannot_trip_the_options_kill_switch(self) -> None:
+        """The bug this sleeve exists to remove.
+
+        The account falls from $100,000 to $92,000 — an 8% fall, all of it the
+        equity book's mark-to-market. Under the old account-scaled rule that was
+        a 5% drawdown against a 5% threshold, and the options agent latched shut
+        having lost nothing. The options sleeve traded nothing, so it is flat.
+        """
+        book = read_book(account("92000"), (), [], peak_equity=Decimal("5000"))
+        assert book.snapshot.equity == Decimal("5000")
+        assert book.snapshot.drawdown_pct == Decimal(0)
+
+    def test_the_gate_budgets_against_the_sleeve_not_the_account(self) -> None:
+        """A $100,000 account does not buy a $100,000 options budget."""
+        book = read_book(account("100000"), (), [])
+        assert book.snapshot.equity == Decimal("5000")
 
     def test_no_history_means_no_drawdown_and_has_to_be_asked_for(self) -> None:
         """specs/03 D4's kill switch watches this number. A drawdown that resets

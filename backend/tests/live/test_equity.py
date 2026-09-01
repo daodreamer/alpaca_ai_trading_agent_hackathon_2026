@@ -535,7 +535,12 @@ def test_todays_totals_are_read_off_the_journal(context: EquityContext) -> None:
     context.journal.append(record)
     orders, turnover = today_totals(context.journal, NOW.date())
     assert orders == 3
-    assert turnover == Decimal(20_000)
+    # $19,000, not $20,000: the book is sized against the equity *sleeve*
+    # (specs/03 D6), which is 95% of this fixture's $100,000 account. The
+    # remaining 5% is the options agent's allocation and this strategy may not
+    # spend it. Every target scales by the same 0.95, so the ratio is the whole
+    # of the change.
+    assert turnover == Decimal(19_000)
 
 
 def test_an_options_cycle_does_not_count_towards_the_equity_caps(

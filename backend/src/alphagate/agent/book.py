@@ -51,6 +51,8 @@ from alphagate.options import (
     StructureKind,
 )
 from alphagate.risk import OpenPosition, PortfolioSnapshot
+from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION
+from alphagate.risk.sleeve import Sleeve
 
 __all__ = [
     "BookRead",
@@ -58,6 +60,7 @@ __all__ = [
     "contract_from",
     "open_positions",
     "read_book",
+    "realised_pl",
     "structure_from",
 ]
 
@@ -87,6 +90,13 @@ class BookRead:
     """The snapshot, and everything the caller needs to distrust it."""
 
     snapshot: PortfolioSnapshot
+    sleeve: Sleeve | None = None
+    """The capital pool `snapshot.equity` came from — specs/03 D6.
+
+    Carried so the status page and `preflight` can show the allocation, the
+    realised and the mark-to-market separately. `snapshot.equity` has already
+    summed them, and a dashboard that can only show the sum cannot answer "is
+    this sleeve down because a trade lost, or because it never had the money"."""
     held: tuple[HeldPosition, ...] = ()
     """The same positions as `snapshot.positions`, in the same order, with their
     entry premium and originating cycle attached."""
@@ -106,7 +116,7 @@ class BookRead:
 
     def summary(self) -> str:
         parts = [
-            f"equity {self.snapshot.equity}",
+            f"sleeve equity {self.snapshot.equity}",
             f"{self.snapshot.open_structures} open",
             f"risk {self.snapshot.open_risk}",
         ]
@@ -115,16 +125,60 @@ class BookRead:
         return ", ".join(parts)
 
 
+def realised_pl(journal_records: Sequence[Mapping[str, Any]]) -> Decimal:
+    """Closed round-trips, summed from the journal's outcome amendments. Pure.
+
+    Reads `outcome.realised_pl`, the field `interface/read.py` already renders,
+    so the number the dashboard shows and the number the kill switch measures
+    come from one place. A record with no outcome is an open position and
+    contributes nothing: specs/07 D7 keeps realised and mark-to-market apart,
+    and a sum that quietly folded in unrealised marks would be the flattering
+    number that spec exists to refuse.
+    """
+    total = Decimal(0)
+    for record in journal_records:
+        outcome = record.get("outcome")
+        if not isinstance(outcome, Mapping):
+            continue
+        raw = outcome.get("realised_pl")
+        if raw is None or raw == "":
+            continue
+        try:
+            total += Decimal(str(raw))
+        except (ArithmeticError, ValueError):
+            # A malformed amendment is not a licence to guess at P&L. Skipping
+            # it understates the sleeve, which fails towards a tighter budget.
+            continue
+    return total
+
+
 def read_book(
     account: AccountRead,
     legs: Sequence[LegPosition],
     journal_records: Sequence[Mapping[str, Any]],
     *,
+    sleeve_allocation: Decimal = OPTIONS_SLEEVE_ALLOCATION,
     peak_equity: Decimal | None = None,
     fills_today: int = 0,
     killswitch_tripped: bool = False,
 ) -> BookRead:
-    """Assemble the Gate's view of the account. Pure.
+    """Assemble the Gate's view of the **options sleeve**. Pure.
+
+    Not of the account. specs/03 D6: this system runs two strategies against one
+    broker account, and every budget here is a fraction of what the options
+    agent was allocated rather than of what the account happens to be worth. The
+    equity book's mark-to-market does not appear in this arithmetic, so it can
+    neither resize these budgets nor trip this kill switch.
+
+    `account` is still read, because the Gate needs the broker's own view for
+    things the sleeve cannot answer — options level, buying power, whether the
+    account is blocked. It is no longer the base the limits scale off.
+
+    `journal_records` should span **every day the sleeve has traded**, not just
+    today. Two things depend on it: `realised_pl` is cumulative by definition,
+    and `open_positions` matches broker legs against journalled fills — a spread
+    opened on Monday and still held on Wednesday has no fill in Wednesday's file
+    and would otherwise be reported as an unexplained leg.
 
     `peak_equity` is the high-water mark the caller carries across days. Passing
     `None` means "no history", and drawdown comes back zero — correct on the
@@ -134,16 +188,25 @@ def read_book(
     latch across the days that matter.
     """
     held, unexplained, closed = open_positions(legs, journal_records)
-    peak = peak_equity if peak_equity is not None else account.equity
-    drawdown = _drawdown(peak, account.equity)
+    sleeve = Sleeve(
+        name="options",
+        allocation=sleeve_allocation,
+        realised=realised_pl(journal_records),
+        # Every option leg at the broker belongs to this sleeve, including the
+        # unexplained ones. A leg we cannot account for is still capital at
+        # risk, and leaving it out of the sleeve's equity would overstate what
+        # is left to trade with by exactly the amount nobody can explain.
+        unrealised=sum((leg.unrealised for leg in legs), Decimal(0)),
+    )
     return BookRead(
         snapshot=PortfolioSnapshot(
-            equity=account.equity,
+            equity=sleeve.equity,
             positions=tuple(item.position for item in held),
-            drawdown_pct=drawdown,
+            drawdown_pct=sleeve.drawdown(peak=peak_equity),
             fills_today=fills_today,
             killswitch_tripped=killswitch_tripped,
         ),
+        sleeve=sleeve,
         held=held,
         unexplained=unexplained,
         closed=closed,
@@ -354,12 +417,6 @@ def _opened_at(record: Mapping[str, Any]) -> datetime:
         except ValueError:
             pass
     raise ValueError(f"journalled fill {record.get('cycle_id')!r} has no usable as_of")
-
-
-def _drawdown(peak: Decimal, equity: Decimal) -> Decimal:
-    if peak <= 0 or equity >= peak:
-        return Decimal(0)
-    return (peak - equity) / peak
 
 
 def _date(value: Any) -> Any:

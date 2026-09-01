@@ -33,7 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from alphagate.equity import DEFAULT_EQUITY_POLICY, EquitySide
+from alphagate.equity import DEFAULT_EQUITY_POLICY, EQUITY_SLEEVE_ALLOCATION, EquitySide
 from alphagate.execution import (
     load_env_file,
     read_account,
@@ -61,7 +61,12 @@ from alphagate.live.equity_status import (
     read_equity_status,
     write_equity_status,
 )
-from alphagate.live.wiring import SessionState, build_market_data, market_session
+from alphagate.live.wiring import (
+    EQUITY_SLEEVE_BASIS,
+    SessionState,
+    build_market_data,
+    market_session,
+)
 from alphagate.live.wiring import mcp_session as open_mcp
 
 __all__ = ["add_equity_commands"]
@@ -105,7 +110,16 @@ def _books(args: argparse.Namespace, env: dict[str, str]) -> Path:
 
 def _context(args: argparse.Namespace, mcp: Any) -> tuple[EquityContext, SessionState]:
     env = load_env_file(Path(args.env))
-    state = SessionState.load(Path(args.equity_state))
+    state = SessionState.load(Path(args.equity_state), basis=EQUITY_SLEEVE_BASIS)
+    if state.discarded_peak is not None:
+        # Loud on purpose. specs/03 D6 changed what the high-water mark is a
+        # mark *on*, and a kill switch that silently forgot its history is the
+        # one thing worse than one that resets.
+        print(
+            f"note: discarded a high-water mark of {state.discarded_peak} — it was "
+            f"measured against account equity, and this sleeve marks "
+            f"{EQUITY_SLEEVE_ALLOCATION}. Tracking restarts from today."
+        )
     context = EquityContext(
         data=build_market_data(env, feed=args.feed),
         mcp=mcp,
@@ -113,6 +127,7 @@ def _context(args: argparse.Namespace, mcp: Any) -> tuple[EquityContext, Session
         books=_books(args, env),
         pinned_fingerprint=_fingerprint(args, env),
         policy=DEFAULT_EQUITY_POLICY,
+        allocation=EQUITY_SLEEVE_ALLOCATION,
         peak_equity=state.peak_equity,
         killswitch_tripped=state.killswitch_tripped,
     )

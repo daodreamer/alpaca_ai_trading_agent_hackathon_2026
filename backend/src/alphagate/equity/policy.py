@@ -159,6 +159,26 @@ class EquityPolicy:
         return self.max_daily_turnover_pct * equity
 
 
+EQUITY_SLEEVE_ALLOCATION: Final = Decimal(95000)
+"""The capital assigned to the equity book — specs/03 D6.
+
+95% of a $100,000 account; the other 5% is the options agent's
+`OPTIONS_SLEEVE_ALLOCATION`. The two must sum to no more than the account,
+because Alpaca holds one pool of buying power and has never heard of sleeves.
+
+**This is not the strategy's cash reserve.** The book's own gross is 0.61, so it
+already holds roughly 39% of its base in cash by design, for rebalancing. That
+reserve is a fraction of whatever base it is given, and taking the options
+sleeve out of the base rather than out of the reserve is what keeps it
+proportionally intact — the alternative spends cash the strategy was relying on.
+
+The cost is stated plainly rather than hidden: the equity book therefore runs at
+95% of the scale `ai_quant_researcher` validated. For a weight-based book that is
+linear — returns scale by 0.95 and the strategy's character does not change —
+but it is a deviation from the backtest and the submission says so.
+"""
+
+
 DEFAULT_EQUITY_POLICY: Final = EquityPolicy(
     # A fifth of the position. On a $8,276 core name that is $1,655 of drift
     # before an order — roughly a 20% move, which a five-session rebalance

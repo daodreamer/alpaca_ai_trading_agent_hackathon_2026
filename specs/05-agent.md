@@ -220,16 +220,19 @@ The LLM is the one nondeterministic component, so it is fenced:
 
 ## D8 — Cadence and scope
 
-- Watchlist: a handful of liquid optionable underlyings. Breadth is not the
-  point; enough fills to escape single-trade noise is ([00](00-brief.md)).
+- Watchlist: the liquid optionable underlyings the strategy may trade. Breadth
+  is not the point; enough fills to escape single-trade noise is
+  ([00](00-brief.md)).
 
-  As built (`agent/watchlist.py`) it holds six names — SPY, QQQ, IWM, AAPL,
-  MSFT, NVDA — of which **only the three ETFs are tradeable**. Alpaca has no
-  earnings calendar, so `earnings_within_dte` is `None` for a single name until
-  a human fills in its report date, and the screen fail-closes on an unmeasured
-  field rather than assuming there is no earnings event inside the window
-  (D6). `tradeable_today()` returns what the screen can actually admit, so a
-  quietly shrinking watchlist is visible rather than silent.
+  [07](07-strategy.md) D2 scopes it to **`SPY` alone**: the tightest option
+  market listed, no earnings by construction, and the only underlying with free
+  history to backtest on.
+
+  `agent/watchlist.py` holds that one entry. `tradeable_today()` still exists
+  and is still called rather than assumed — it returns what the screen can
+  actually admit, and under D2 that is always the whole watchlist, so an empty
+  return means the earnings calendar has changed shape and the run must say so
+  rather than idling quietly.
 
 - One underlying per slot, round-robin across whatever `tradeable_today()`
   returns. A cycle is about one name, and rotating spreads the day's fills

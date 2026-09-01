@@ -62,8 +62,15 @@ from alphagate.execution import ExecutionError, load_env_file, require_paper_acc
 from alphagate.interface.status import STALE_AFTER, _age_of, read_status
 from alphagate.journal import Journal, trust_report
 from alphagate.live.equity_cli import add_equity_commands
-from alphagate.live.wiring import LiveContext, SessionState, build_market_data, gather_for
+from alphagate.live.wiring import (
+    OPTIONS_SLEEVE_BASIS,
+    LiveContext,
+    SessionState,
+    build_market_data,
+    gather_for,
+)
 from alphagate.live.wiring import mcp_session as open_mcp
+from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
 
 __all__ = ["main"]
 
@@ -179,7 +186,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
                 mcp=mcp,
                 journal=Journal(directory=Path(args.journal)),
                 iv=IvHistoryStore(directory=Path(args.iv)),
-                state=SessionState.load(Path(args.state)),
+                state=SessionState.load(Path(args.state), basis=OPTIONS_SLEEVE_BASIS),
             ).account(as_of=datetime.now(UTC))
             check("account readable", True, f"equity {account.equity}")
             check(
@@ -204,12 +211,41 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     # -- 6. the model key --------------------------------------------- #
     check("model key present", _model_key_present(env), _MODEL_KEY_NOTE, fatal=False)
 
+    # -- 7. the sleeve, in dollars ------------------------------------ #
+    #
+    # Not a gate. `limits.py` says of itself that "a risk limit nobody can read
+    # is a risk limit nobody is enforcing", and these are the numbers that
+    # changed when the options agent stopped budgeting against the account
+    # (specs/03 D6). Printed as absolute money because that is the form in which
+    # a wrong one is obvious: a $50 per-trade budget on a $100 spread is a
+    # configuration that will simply never trade, and it looks identical to a
+    # quiet market from the outside.
+    _print_sleeve()
+
     print()
     if failures:
         print(f"{failures} gate(s) failed. Fix before the open.")
         return 1
     print("All gates pass. Clear to trade.")
     return 0
+
+
+def _print_sleeve() -> None:
+    """What the options agent is allowed to commit, and against what base."""
+    allocation = OPTIONS_SLEEVE_ALLOCATION
+    limits = SLEEVE_LIMITS
+    low, high = limits.scaled_delta_band(allocation)
+    print()
+    print(f"[{OK}] options sleeve — allocation {allocation}, budgets below")
+    for label, value in (
+        ("per trade", limits.max_trade_loss(allocation)),
+        ("book heat", limits.max_portfolio_loss(allocation)),
+        ("per underlying", limits.max_per_underlying(allocation)),
+        ("kill switch", limits.max_drawdown_pct * allocation),
+    ):
+        print(f"        {label:<16} {value}")
+    print(f"        {'net delta':<16} {low:+.2f} .. {high:+.2f}")
+    print(f"        {'open structures':<16} {limits.max_open_structures}")
 
 
 def _model_key_present(env: dict[str, str]) -> bool:
@@ -239,7 +275,7 @@ def _context(args: argparse.Namespace, mcp: Any) -> LiveContext:
         mcp=mcp,
         journal=Journal(directory=Path(args.journal)),
         iv=IvHistoryStore(directory=Path(args.iv)),
-        state=SessionState.load(Path(args.state)),
+        state=SessionState.load(Path(args.state), basis=OPTIONS_SLEEVE_BASIS),
     )
 
 

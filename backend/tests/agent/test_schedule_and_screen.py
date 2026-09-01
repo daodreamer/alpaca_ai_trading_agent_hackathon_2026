@@ -273,13 +273,16 @@ def test_the_fixture_read_still_builds() -> None:
 class TestWatchlist:
     """specs/05 D8. One place, reviewable, and honest about what it can trade."""
 
-    def test_it_is_a_handful_not_a_universe(self) -> None:
-        """"Breadth is not the point; enough fills to escape single-trade noise
-        is." Thirty fills across six names is five a name; across forty it is a
-        sampling of the market and a demonstration of nothing."""
+    def test_the_universe_is_spy_alone(self) -> None:
+        """specs/07 D2. One underlying, and it is a decision rather than a stub.
+
+        SPY is the only instrument that satisfies all four of that section's
+        requirements at once: a market inside the Gate's 5% limit, no earnings
+        by construction, weekly expiries, and free history to backtest on.
+        """
         from alphagate.agent import WATCHLIST
 
-        assert 3 <= len(WATCHLIST) <= 10
+        assert [str(entry.symbol) for entry in WATCHLIST] == ["SPY"]
 
     def test_every_name_has_a_width_that_suits_its_price(self) -> None:
         """Five dollars is a sensible wing on a $700 index and most of a $40
@@ -288,22 +291,34 @@ class TestWatchlist:
         from alphagate.agent import WATCHLIST
 
         assert all(entry.spread_width > 0 for entry in WATCHLIST)
-        widths = {str(entry.symbol): entry.spread_width for entry in WATCHLIST}
-        assert widths["IWM"] < widths["SPY"]
 
-    def test_the_etfs_can_trade_and_the_single_names_cannot_yet(self) -> None:
-        """The consequence of having no earnings calendar, made visible.
+    def test_every_watchlist_name_answers_earnings_structurally(self) -> None:
+        """specs/07 test plan 9, and the reason D2's universe is what it is.
 
-        This test will change when someone fills in `COMPETITION_EARNINGS`, and
-        that is the point: the single names sitting out is a fact somebody has
-        to look at, not a filter applied quietly at the top of a loop.
+        Asserted against `ETF_UNDERLYINGS` rather than against the string
+        "SPY", so a name added without a hand-checked report date fails here
+        rather than passing by not being the one the test was written for.
+        Alpaca serves no earnings calendar, and an earnings print inside the
+        holding period is the single most common way a defined-risk premium
+        sale becomes a maximum loss.
         """
-        from alphagate.agent import tradeable_today
+        from alphagate.agent import WATCHLIST
+        from alphagate.agent.earnings import ETF_UNDERLYINGS
+
+        assert {entry.symbol for entry in WATCHLIST} <= ETF_UNDERLYINGS
+
+    def test_the_whole_watchlist_is_tradeable_and_nothing_is_sitting_out(self) -> None:
+        """specs/07 test plan 10. Under D2 an empty return is never expected.
+
+        `tradeable_today()` is still called rather than assumed, so if the
+        calendar ever stops answering for an entry the watchlist shrinks
+        visibly instead of the agent idling through a day with nothing to do.
+        """
+        from alphagate.agent import WATCHLIST, tradeable_today
         from alphagate.agent.watchlist import next_earnings_gaps
 
-        tradeable = {str(entry.symbol) for entry in tradeable_today()}
-        assert tradeable == {"SPY", "QQQ", "IWM"}
-        assert set(map(str, next_earnings_gaps())) == {"AAPL", "MSFT", "NVDA"}
+        assert {e.symbol for e in tradeable_today()} == {e.symbol for e in WATCHLIST}
+        assert next_earnings_gaps() == ()
 
     def test_an_empty_calendar_declines_rather_than_guesses(self) -> None:
         """"An empty mapping that declines is honest; a populated one that was
@@ -312,9 +327,14 @@ class TestWatchlist:
 
         assert COMPETITION_EARNINGS.dates == {}
 
-    def test_filling_in_a_date_admits_the_name(self) -> None:
-        """One line of work, and it is a line a person has to sign for."""
-        from alphagate.agent.watchlist import tradeable_today
+    def test_a_single_name_needs_a_date_before_the_screen_can_admit_it(self) -> None:
+        """The mechanism D2 depends on, tested where it lives.
 
-        filled = StaticEarningsCalendar({AAPL: (date(2026, 10, 30),)})
-        assert "AAPL" in {str(entry.symbol) for entry in tradeable_today(filled)}
+        No single name is on the watchlist, so this exercises the calendar
+        rather than the list: unknown until a date is filled in, known
+        afterwards. That is the one line of work a name outside
+        `ETF_UNDERLYINGS` would cost, and it is a line a person has to sign
+        for.
+        """
+        assert not StaticEarningsCalendar({}).is_known(AAPL)
+        assert StaticEarningsCalendar({AAPL: (date(2026, 10, 30),)}).is_known(AAPL)

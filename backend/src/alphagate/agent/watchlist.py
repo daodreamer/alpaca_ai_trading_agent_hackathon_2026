@@ -1,37 +1,35 @@
-"""The competition watchlist — specs/05 D8.
+"""The competition watchlist — specs/05 D8, specs/07 D2.
 
-> "A handful of liquid optionable underlyings (SPY, QQQ and a few large caps).
-> Breadth is not the point; enough fills to escape single-trade noise is."
+**One entry: SPY.**
+
+Not a placeholder and not a starting point. specs/07 D2 requires four things of
+an underlying at once, and SPY is the only instrument that has all four:
+
+1. **A market tight enough to trade.** The Gate refuses anything wider than 5%
+   (specs/03 D5), and on a thin chain that check does all the work and no trade
+   ever happens — the first live runs of this system were vetoed on `liquidity`
+   repeatedly. SPY quotes 0.53% on the strikes this strategy sells; the sector
+   ETFs reached for as breadth quote 10% to 200%.
+2. **No earnings, structurally.** An index trust has no quarter to report, so
+   `earnings.ETF_UNDERLYINGS` answers `earnings_within_dte` as a fact about the
+   instrument rather than a lookup. Alpaca serves no earnings calendar, so a
+   single name's field is `None` and the screen fail-closes on it.
+3. **Weekly expiries**, so the 3-21 day window is reachable rather than rounding
+   to whatever monthly happens to be nearby.
+4. **Free history to backtest on**, back to 2019 with bid, ask, implied
+   volatility and greeks. QQQ and IWM are tradeable and have none.
 
 One place, logged at startup, rendered in the dashboard — the same treatment the
 risk limits get (specs/03 D5), and for the same reason: a configuration that
 lives at its call sites is a configuration nobody can review.
 
-**Why these, and why so few.** The scoring window is four days and the goal is
-roughly thirty fills. Thirty fills across six names is five trades a name, which
-is enough for the P&L to be about the strategy rather than about one spread;
-thirty fills across forty names is one trade each, which is a sampling of the
-market and not a demonstration of anything. Breadth would also break the
-per-underlying concentration limit's usefulness — a limit that is never near
-binding is a limit that tells you nothing.
-
-Every entry is chosen for the same three properties, in this order:
-
-1. **Penny-wide or near-penny option markets.** The Gate refuses anything wider
-   than 5% (specs/03 D5), and on a thin chain that check does all the work and
-   no trade ever happens. This was not hypothetical — the first live runs were
-   vetoed on `liquidity` repeatedly.
-2. **Weekly expiries**, so the 3–21 day window is actually reachable rather than
-   rounding to whatever monthly happens to be nearby.
-3. **A price that makes a 5-wide spread a sensible size** against a 1%-of-equity
-   per-trade limit.
-
-The ETFs carry the load. They have no earnings — a fact about the instrument,
-not a lookup (see `earnings.py`) — which means they are the only names that can
-satisfy the screen at all while this account has no earnings calendar. The
-single names are listed, and will be declined by the screen until someone fills
-in `COMPETITION_EARNINGS`. That is the correct behaviour and it is deliberately
-visible rather than quietly excluded.
+**What one name costs.** Concurrent positions differ by expiry and short strike
+on the same underlying, so they are not independent bets: one adverse move in
+SPY moves all of them. specs/07 D7 reports the P&L as a sample of one
+underlying's window rather than of a strategy across a market. It also makes
+`underlying_concentration` and `portfolio_heat` measure the same quantity, which
+is why specs/03 D6 sets them equal rather than leaving a concentration limit to
+silently become the binding cap.
 """
 
 from __future__ import annotations
@@ -72,25 +70,25 @@ class Underlying:
 
 
 WATCHLIST: Final[tuple[Underlying, ...]] = (
-    Underlying(ticker("SPY"), Decimal(5), "S&P 500. Penny-wide, daily expiries, no earnings."),
-    Underlying(ticker("QQQ"), Decimal(5), "Nasdaq 100. Same, slightly more volatility."),
-    Underlying(ticker("IWM"), Decimal(1), "Russell 2000. Cheaper, so a narrower wing."),
-    Underlying(ticker("AAPL"), Decimal(5), "Large cap. Needs an earnings date to trade."),
-    Underlying(ticker("MSFT"), Decimal(5), "Large cap. Needs an earnings date to trade."),
-    Underlying(ticker("NVDA"), Decimal(5), "Large cap, high IV. Needs an earnings date."),
+    Underlying(
+        ticker("SPY"),
+        Decimal(5),
+        "S&P 500. 0.53% quoted spread, weekly expiries, no earnings, 2019- history.",
+    ),
 )
 
+
 COMPETITION_EARNINGS: Final = StaticEarningsCalendar({})
-"""Hand-maintained earnings dates for the single names. **Deliberately empty.**
+"""Hand-maintained earnings dates. **Empty, and under specs/07 D2 it stays so.**
 
-Alpaca has no earnings calendar (see `earnings.py`), so until a human fills this
-in, every single-name read carries `earnings_within_dte=None`, the screen
-refuses it, and the journal says why. An empty mapping that declines is honest;
-a populated one that was guessed at is not.
-
-To trade the single names: look up the next report date for each, put it here,
-and the screen starts admitting them. That is one line of work and it is a line
-a person has to sign for."""
+The watchlist holds one index ETF, which has no quarter to report, so
+`StaticEarningsCalendar` answers it from `ETF_UNDERLYINGS` and this mapping is
+never consulted. It is kept rather than deleted because it is what a single name
+would need before the screen could admit it: Alpaca has no earnings calendar
+(see `earnings.py`), an earnings print inside the holding period is the single
+most common way a defined-risk premium sale becomes a maximum loss, and the date
+has to be one a human checked. Adding a name without adding its date is the
+mistake this empty mapping is positioned to catch."""
 
 
 def tradeable_today(

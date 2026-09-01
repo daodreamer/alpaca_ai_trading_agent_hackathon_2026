@@ -25,7 +25,7 @@ from typing import Final
 
 from alphagate.core.errors import InvariantViolation
 
-__all__ = ["DEFAULT_LIMITS", "RiskLimits"]
+__all__ = ["DEFAULT_LIMITS", "OPTIONS_SLEEVE_ALLOCATION", "SLEEVE_LIMITS", "RiskLimits"]
 
 _EQUITY_UNIT: Final = Decimal(1000)
 """Greek bands are quoted per $1k of equity."""
@@ -133,3 +133,87 @@ DEFAULT_LIMITS: Final = RiskLimits(
     max_daily_trades=15,
     max_quote_age=60.0,
 )
+"""The whole-account configuration, kept as the reference point.
+
+Every fraction here is a fraction of a $100,000 account. It is retained because
+the backtest and the existing tests are calibrated against it, and because
+`SLEEVE_LIMITS` below is best read as a diff against it.
+"""
+
+
+OPTIONS_SLEEVE_ALLOCATION: Final = Decimal(5000)
+"""The capital assigned to the options agent — 5% of a $100,000 account.
+
+A fixed figure, not a fraction of live equity, for the reason `risk.sleeve`
+gives: a fraction would let the equity book's overnight mark resize the options
+agent's budgets. The operator splits the account once and the split holds.
+"""
+
+
+SLEEVE_LIMITS: Final = RiskLimits(
+    # $1,000 a trade. The same absolute figure as DEFAULT_LIMITS produced on a
+    # $100k account, deliberately: `agent/candidates.py` was tuned against live
+    # runs at this size, and changing the sleeve base *and* the per-trade budget
+    # in one step would make a menu that suddenly ranks differently impossible
+    # to attribute.
+    max_trade_loss_pct=Decimal("0.20"),
+    # $4,000 of the $5,000 may be at risk at once. For defined-risk structures
+    # maximum loss *is* the capital committed -- Alpaca holds exactly that as
+    # buying power -- so this is the sleeve's deployment ceiling, not merely a
+    # risk cap. 0.80 rather than 1.00 leaves room for the last trade to be
+    # refused by a budget rather than by a broker rejection, which journals a
+    # reason instead of an exception.
+    max_portfolio_loss_pct=Decimal("0.80"),
+    max_open_structures=8,
+    # Equal to the heat cap, because specs/07 D2 gives this strategy one
+    # underlying. With a single-name universe this check and `portfolio_heat`
+    # measure the same quantity, so anything tighter is not a concentration
+    # limit -- it is a second, lower heat cap wearing a concentration limit's
+    # name, and it would silently cap the sleeve at a quarter of what it was
+    # allocated while `max_portfolio_loss_pct` read as the binding number.
+    #
+    # Set equal rather than removed: the universe is configuration, and on the
+    # day a second underlying is added this check must already be present and
+    # already correct rather than needing to be remembered.
+    max_per_underlying_pct=Decimal("0.80"),
+    # +/- 6.0 net delta on a $5,000 sleeve. The account-scaled band was +/- 30,
+    # which on a sleeve this size is not a band at all -- 30 delta is $19,500 of
+    # SPY notional against $5,000 of capital.
+    #
+    # 6.0 is sized to admit one full book and refuse a second: a one-wide put
+    # credit spread nets roughly +0.10 to +0.15 delta a contract, so eight
+    # structures at five contracts each lands near +5.
+    #
+    # **This is the number most likely to need a live adjustment.** It is the
+    # only limit here whose calibration comes from arithmetic rather than from
+    # an observed run, and the failure it produces is quiet -- candidates are
+    # dropped before the model sees them (`agent/candidates.py`), so a band set
+    # too tight looks like a market with no setups rather than like a
+    # misconfiguration. `preflight` prints it for that reason.
+    delta_band=(-1.20, 1.20),
+    # +/- 250 vega. Non-binding for one-wide verticals either way; kept at the
+    # same per-$1k rate so that a change of sleeve size does not silently
+    # change which greek is the binding one.
+    vega_band=(-50.0, 50.0),
+    max_spread_pct=Decimal("0.05"),
+    dte_range=(3, 21),
+    # A fifth of the sleeve. Under the account-scaled 5% this switch measured
+    # the *account* and was therefore tripped by the equity book: an 8% market
+    # move against a $95,000 stock sleeve is a 5% account drawdown, and the
+    # options agent -- having lost nothing -- latched shut until a human cleared
+    # it. Measured against the sleeve, 5% would be $250, which one spread
+    # reaching its stop can produce; that is a trade going wrong, not a strategy
+    # failing. 20% is $1,000, which is four such trades in a row and a real
+    # signal that something is not working.
+    max_drawdown_pct=Decimal("0.20"),
+    max_daily_trades=15,
+    max_quote_age=60.0,
+)
+"""The options sleeve's configuration — specs/03 D6.
+
+Read as a diff against `DEFAULT_LIMITS`: the base is `OPTIONS_SLEEVE_ALLOCATION`
+rather than account equity, so every fraction here is a fraction of $5,000. Two
+of the absolute figures are held where they were (per-trade, and the greek rate)
+and three are deliberately moved (heat, concentration, drawdown). Each comment
+above says which and why.
+"""
