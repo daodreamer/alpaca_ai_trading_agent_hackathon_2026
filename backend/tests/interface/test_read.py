@@ -19,7 +19,12 @@ from pathlib import Path
 import pytest
 
 from alphagate.agent import Stage
-from alphagate.interface.read import available_days, day_view, to_cycle
+from alphagate.interface.read import (
+    available_days,
+    day_records_with_category,
+    day_view,
+    to_cycle,
+)
 from alphagate.journal import Journal, outcome_from
 from tests.journal.conftest import DAY, at_stage, cycle, submission
 
@@ -206,6 +211,189 @@ class TestNearMisses:
             ]}}
         )
         assert view.checks[0].headroom is None
+
+
+class TestDayRecordsWithCategory:
+    """The serialized form `/api/day/{day}` now ships — the single classifier.
+
+    Before this existed the React app had no `category` field to read and
+    re-derived the same judgement in TypeScript, which is two implementations
+    of one classification with nothing keeping them in agreement. This is the
+    one place that adds the fields the frontend now trusts, so the test that
+    matters most here is the one that says every original key survives.
+    """
+
+    def test_every_original_key_survives(self) -> None:
+        record = {"cycle_id": "x", "stage": "no_setup", "read": {"iv_rank": None}}
+        (enriched,) = day_records_with_category([record])
+        assert enriched["cycle_id"] == "x"
+        assert enriched["stage"] == "no_setup"
+        assert enriched["read"] == {"iv_rank": None}
+
+    def test_the_three_fields_match_to_cycles_own_answer(self) -> None:
+        record = {"stage": "vetoed"}
+        (enriched,) = day_records_with_category([record])
+        view = to_cycle(record)
+        assert enriched["category"] == view.category
+        assert enriched["category_label"] == view.category_label
+        assert enriched["category_detail"] == view.category_detail
+
+    def test_an_equity_record_is_passed_through_unstamped(self) -> None:
+        """`category` is options' own decline taxonomy. Stamping it onto an
+        equity cycle's `no_trades` / `submitted` stages would not classify
+        anything -- it would mislabel it under a taxonomy that was never about
+        that sleeve, so equity records are left exactly as they arrived."""
+        record = {"cycle_id": "eq", "kind": "equity", "stage": "no_trades"}
+        (enriched,) = day_records_with_category([record])
+        assert "category" not in enriched
+        assert "category_label" not in enriched
+        assert "category_detail" not in enriched
+
+    def test_the_input_records_are_not_mutated(self) -> None:
+        record = {"stage": "declined"}
+        day_records_with_category([record])
+        assert "category" not in record
+
+    def test_todays_real_fixture_tells_no_setup_and_no_candidates_apart(self) -> None:
+        """The coordinator's own example: a `no_setup` cycle whose `iv_rank`
+        was measured and did not clear the bar, next to a `no_candidates`
+        cycle where the entry fired but nothing survived the menu screens.
+        The measured value here is a stand-in, not a claim about what the
+        correct reading was that day."""
+        records = [
+            {
+                "cycle_id": "a",
+                "stage": "no_setup",
+                "read": {"iv_rank": "12.3"},
+                "note": "iv_rank()=12.3 not < 15",
+            },
+            {
+                "cycle_id": "b",
+                "stage": "no_candidates",
+                "read": {"iv_rank": "12.3"},
+                "note": "no structure survived pricing, freshness, spread, DTE and sizing",
+            },
+        ]
+        by_id = {r["category"]: r for r in day_records_with_category(records)}
+        assert by_id["no_setup"]["cycle_id"] == "a"
+        assert by_id["no_candidates"]["cycle_id"] == "b"
+
+
+class TestCategory:
+    """specs/06 D2's three-way distinction, made renderable — requirement 3.
+
+    A cycle where the entry rule could not be decided must read differently
+    from one where the market simply did not qualify, and both differently
+    from a Risk Gate veto. `stage` alone cannot make the first distinction:
+    `no_setup` covers both an unmeasured feature and a measured one that failed
+    the rule, so `category` adds the split from `iv_rank` instead.
+    """
+
+    def test_traded_covers_filled_and_submitted(self) -> None:
+        assert to_cycle({"stage": "filled"}).category == "traded"
+        assert to_cycle({"stage": "submitted"}).category == "traded"
+
+    def test_dry_run_is_approved_not_sent(self) -> None:
+        assert to_cycle({"stage": "dry_run"}).category == "approved_not_sent"
+
+    def test_vetoed_and_breached_are_both_a_gate_veto(self) -> None:
+        assert to_cycle({"stage": "vetoed"}).category == "gate_veto"
+        assert to_cycle({"stage": "breached"}).category == "gate_veto"
+
+    def test_rejected_is_the_brokers_doing_not_the_gates(self) -> None:
+        assert to_cycle({"stage": "rejected"}).category == "broker_rejected"
+
+    def test_declined_is_the_model_saying_no_to_a_menu(self) -> None:
+        assert to_cycle({"stage": "declined"}).category == "model_declined"
+
+    def test_no_setup_with_unmeasured_iv_rank_is_undecidable(self) -> None:
+        view = to_cycle({"stage": "no_setup", "read": {"iv_rank": None}})
+        assert view.category == "undecidable"
+        assert "iv_rank" in view.category_label
+
+    def test_no_candidates_is_its_own_category_whether_or_not_iv_rank_is_measured(
+        self,
+    ) -> None:
+        """A third fact, not a rerun of the `no_setup` split.
+
+        `no_candidates` means the entry rule already fired — a `Setup` exists —
+        and the menu-building screens (pricing, freshness, spread, DTE, sizing)
+        found nothing to propose. That is a menu problem, not an entry problem,
+        and it is true whether or not `iv_rank` happened to be measured that
+        cycle — so this category must not collapse into `undecidable` just
+        because the read looks the same as a `no_setup` one would.
+
+        Modelled on today's real fixture: a `no_candidates` cycle noting "no
+        structure survived pricing, freshness, spread, DTE and sizing" — the
+        number below is an arbitrary stand-in for "measured", not a value this
+        test claims is correct behaviour.
+        """
+        measured = to_cycle({"stage": "no_candidates", "read": {"iv_rank": "12.3"}})
+        unmeasured = to_cycle({"stage": "no_candidates", "read": {"iv_rank": None}})
+        assert measured.category == "no_candidates"
+        assert unmeasured.category == "no_candidates"
+
+    def test_no_candidates_reads_differently_from_no_setup(self) -> None:
+        """The coordinator's own fixture: a `no_setup` cycle where `iv_rank`
+        was measured and simply did not clear the bar is a different fact from
+        a `no_candidates` cycle where the entry fired but nothing was
+        priceable — both quiet, neither the same story."""
+        no_setup = to_cycle({"stage": "no_setup", "read": {"iv_rank": "12.3"}})
+        no_candidates = to_cycle({"stage": "no_candidates", "read": {"iv_rank": "12.3"}})
+        assert no_setup.category == "no_setup"
+        assert no_candidates.category == "no_candidates"
+        assert no_setup.category != no_candidates.category
+
+    def test_no_setup_with_a_measured_iv_rank_is_a_plain_no_setup(self) -> None:
+        """A market that was read and simply did not qualify — not the same
+        fact as one the agent could not decide about at all."""
+        view = to_cycle({"stage": "no_setup", "read": {"iv_rank": "62"}})
+        assert view.category == "no_setup"
+        assert view.category != "undecidable"
+
+    def test_an_unrecognised_stage_is_other_not_a_crash(self) -> None:
+        assert to_cycle({"stage": "some_future_stage"}).category == "other"
+
+    @pytest.mark.parametrize(
+        "stage",
+        [
+            "filled",
+            "submitted",
+            "dry_run",
+            "vetoed",
+            "breached",
+            "rejected",
+            "declined",
+            "no_setup",
+            "no_candidates",
+        ],
+    )
+    def test_every_real_stage_has_a_non_empty_label_and_detail(self, stage: str) -> None:
+        view = to_cycle({"stage": stage})
+        assert view.category_label
+        assert view.category_detail
+
+    def test_a_gate_veto_and_a_market_decline_are_different_categories(self) -> None:
+        """The Risk Gate stopping an order and the market never producing one
+        are different facts, and a dashboard that badged them the same would
+        erase the thing specs/03 exists to demonstrate."""
+        vetoed = to_cycle({"stage": "vetoed"})
+        quiet = to_cycle({"stage": "no_setup", "read": {"iv_rank": "10"}})
+        assert vetoed.category != quiet.category
+
+    def test_real_pipeline_cycles_classify_the_same_way(self, journal: Journal) -> None:
+        """Integration with the actual pipeline, not just hand-built dicts: a
+        genuine `NO_SETUP` cycle and a genuine `VETOED` one land in different
+        buckets once they have been through `run_cycle`, `Journal.append` and
+        `Journal.read`."""
+        journal.append(cycle(with_setup=False))
+        journal.append(at_stage(Stage.VETOED, sequence=1))
+        journal.append(at_stage(Stage.FILLED, sequence=2))
+        views = day_view(journal, DAY).cycles
+        by_stage = {view.stage: view.category for view in views}
+        assert by_stage["no_setup"] in ("undecidable", "no_setup")
+        assert by_stage["vetoed"] == "gate_veto"
+        assert by_stage["filled"] == "traded"
 
 
 class TestMalformedLinesDoNotBreakThePage:

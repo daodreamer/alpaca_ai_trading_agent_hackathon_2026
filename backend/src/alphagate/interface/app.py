@@ -12,7 +12,10 @@ That is the whole brief for this file. Three views:
 * **the cycle** — the market read, the *whole menu* the model chose from, the
   rationale, and all thirteen checks with their numbers;
 * **the JSON** — the same line off disk, for anyone who would rather read the
-  record than a rendering of it.
+  record than a rendering of it, plus one addition: `/api/day/{day}` stamps
+  `category` / `category_label` / `category_detail` onto every options cycle
+  so the React page and this one classify a decline identically rather than
+  keeping two implementations of the same judgement.
 
 **It is read-only, structurally.** This module imports the journal and nothing
 else — no `McpSession`, no `submit`, no market data client. There is no code
@@ -37,7 +40,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from alphagate.interface.read import CheckView, CycleView, DayView, available_days, day_view
+from alphagate.interface.option_book_view import option_book_to_json, resolve_pinned_option_book
+from alphagate.interface.read import (
+    CheckView,
+    CycleView,
+    DayView,
+    available_days,
+    day_records_with_category,
+    day_view,
+)
+from alphagate.interface.sleeves import build_sleeve_overview
 from alphagate.interface.status import (
     EQUITY_STALE_AFTER,
     STALE_AFTER,
@@ -100,7 +112,16 @@ def build_app(journal_dir: Path) -> FastAPI:
 
     @app.get("/api/day/{day}")
     def api_day(day: str) -> JSONResponse:
-        return JSONResponse(journal.read(_parse(day)))
+        """The day's records, each carrying its own decline classification.
+
+        Every field the line on disk carries survives untouched; `category`,
+        `category_label` and `category_detail` are added on top of it, computed
+        by the same `CycleView.category` the server-rendered `/day/...` page
+        uses -- see `day_records_with_category`'s own docstring for why a
+        second, TypeScript-side classifier is exactly the drift this route
+        exists to prevent.
+        """
+        return JSONResponse(day_records_with_category(journal.read(_parse(day))))
 
     @app.get("/api/status")
     def api_status() -> JSONResponse:
@@ -171,6 +192,34 @@ def build_app(journal_dir: Path) -> FastAPI:
     @app.get("/api/days")
     def api_days() -> JSONResponse:
         return JSONResponse([day.isoformat() for day in available_days(journal)])
+
+    @app.get("/api/option-book")
+    def api_option_book() -> JSONResponse:
+        """The option book's provenance — specs/07 D1, specs/07 D8.
+
+        Resolved fresh on every request rather than cached at startup: the book
+        is a file another project rewrites once a session, and a dashboard that
+        needed a restart to notice a new one would be exactly the kind of stale
+        confidence specs/06 D4 exists to refuse.
+        """
+        view = resolve_pinned_option_book()
+        return JSONResponse(option_book_to_json(view))
+
+    @app.get("/api/sleeves")
+    def api_sleeves() -> JSONResponse:
+        """Both sleeves, measured apart — specs/03 D6.
+
+        `status.json` and `equity-status.json` still publish the broker's whole
+        account under the key `equity` (see `interface/sleeves.py`'s module
+        docstring for why); this route runs the same sleeve arithmetic each live
+        agent already uses to size its own budgets, against whatever the two
+        files last published, so the page never has to show one blended number.
+        """
+        options_status = read_status(journal_dir)
+        equity_status = read_equity_status(journal_dir)
+        return JSONResponse(
+            build_sleeve_overview(options_status, equity_status, journal=journal)
+        )
 
     _mount_spa(app)
     return app
@@ -371,7 +420,8 @@ def _day_row(cycle: CycleView, day: date) -> str:
         + (f" ×{cycle.quantity}" if cycle.quantity else "")
         + "</td>"
         f"<td>{cycle.candidate_count}</td>"
-        f"<td class='note'>{html.escape(cycle.note)}</td>"
+        f"<td class='note'>{html.escape(cycle.category_label)} — "
+        f"{html.escape(cycle.note or cycle.category_detail)}</td>"
         "</tr>"
     )
 
@@ -440,7 +490,9 @@ def _cycle_page(cycle: CycleView, view: DayView) -> str:
         + "<main>"
         f"<p><a href='/day/{view.day}'>← {view.day}</a></p>"
         f"<div class='panel'><h2>outcome</h2>{_stage_tag(cycle.stage)} "
-        f"<span class='note'>{html.escape(cycle.note)}</span></div>"
+        f"<span class='tag' style='color:var(--accent)'>{html.escape(cycle.category_label)}"
+        "</span> "
+        f"<span class='note'>{html.escape(cycle.note or cycle.category_detail)}</span></div>"
         + read_panel
         + model_panel
         + menu_panel

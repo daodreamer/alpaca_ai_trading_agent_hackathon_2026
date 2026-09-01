@@ -34,7 +34,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { type Check, type JournalCycle, clock, fmt, num } from "@/lib/status"
+import {
+  type Check,
+  type DeclineCategory,
+  type JournalCycle,
+  clock,
+  fmt,
+  num,
+} from "@/lib/status"
 
 const STAGE_TONE: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   filled: "default",
@@ -46,6 +53,26 @@ const STAGE_TONE: Record<string, "default" | "secondary" | "destructive" | "outl
   declined: "outline",
   no_setup: "outline",
   no_candidates: "outline",
+}
+
+/**
+ * A second badge, next to the stage — requirement 3.
+ *
+ * `stage` alone reads `no_setup` for both "the entry rule could not be
+ * decided" and "the market did not qualify", and reads `vetoed` for a Risk
+ * Gate stop without distinguishing it from either. This tone map is what
+ * makes those three read as different facts rather than the same shrug.
+ */
+const CATEGORY_TONE: Record<DeclineCategory, "default" | "secondary" | "destructive" | "outline"> = {
+  traded: "default",
+  approved_not_sent: "secondary",
+  gate_veto: "destructive",
+  broker_rejected: "destructive",
+  model_declined: "outline",
+  undecidable: "secondary",
+  no_setup: "outline",
+  no_candidates: "outline",
+  other: "outline",
 }
 
 export function Journal({ cycles, day }: { cycles: JournalCycle[]; day: string }) {
@@ -93,6 +120,13 @@ function CycleCard({
   const stage = cycle.stage ?? "unknown"
   const checks = cycle.verdict?.checks ?? []
   const near = nearMisses(checks)
+  // Read off the backend, never re-derived here — see the module-level
+  // comment on `JournalCycle.category` in `lib/status.ts` for why a second,
+  // client-side classifier is exactly the drift this field exists to rule
+  // out. `undefined` on an equity record (or any record predating this field)
+  // reads as "other" rather than crashing the card.
+  const category: DeclineCategory = cycle.category ?? "other"
+  const categoryLabel = cycle.category_label ?? "unclassified"
 
   return (
     <Card>
@@ -105,6 +139,7 @@ function CycleCard({
             {cycle.read?.underlying ?? "—"}
           </CardTitle>
           <Badge variant={STAGE_TONE[stage] ?? "outline"}>{stage}</Badge>
+          <Badge variant={CATEGORY_TONE[category]}>{categoryLabel}</Badge>
           {near.length > 0 ? (
             <Badge variant="secondary">near {near[0].name}</Badge>
           ) : null}
@@ -121,7 +156,7 @@ function CycleCard({
             {expanded ? "less" : "detail"}
           </Button>
         </div>
-        <CardDescription>{cycle.note}</CardDescription>
+        <CardDescription>{cycle.note || cycle.category_detail}</CardDescription>
       </CardHeader>
 
       {expanded ? (

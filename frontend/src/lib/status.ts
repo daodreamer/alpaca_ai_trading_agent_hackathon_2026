@@ -93,6 +93,22 @@ export type JournalCycle = {
   verdict?: { checks?: Check[] }
   proposal?: { quantity?: number; risk?: { max_loss?: string } }
   outcome?: { status?: string; realised_pl?: string | null }
+  /**
+   * Why nothing happened, computed once in Python (`CycleView.category` in
+   * `interface/read.py`) and stamped onto this record by `/api/day/{day}`
+   * (`day_records_with_category`). Absent on an equity record — `category` is
+   * options' own decline taxonomy — so every reader here must treat a missing
+   * value as "not classified" rather than guess.
+   *
+   * There is deliberately no TypeScript reimplementation of this
+   * classification. Two independent copies of one judgement are two chances
+   * for them to quietly disagree, which is exactly the failure this field
+   * exists to rule out — see `interface/read.py`'s `day_records_with_category`
+   * docstring.
+   */
+  category?: DeclineCategory
+  category_label?: string
+  category_detail?: string
 }
 
 export type Check = {
@@ -161,6 +177,30 @@ export function untilNext(iso: string | null): string {
   const minutes = Math.floor(seconds / 60)
   return minutes >= 1 ? `in ${minutes}m` : `in ${Math.floor(seconds)}s`
 }
+
+/**
+ * Why nothing happened, in a bucket a judge can tell apart from the rest.
+ *
+ * The classification itself lives in exactly one place: `CycleView.category`
+ * in `backend/src/alphagate/interface/read.py`. This type exists only so the
+ * value the backend already stamped onto `JournalCycle.category` (via
+ * `day_records_with_category`) is a checked union rather than a bare string —
+ * there is no `declineCategory()` here, on purpose. A second implementation of
+ * one judgement, in a second language, is two chances for the two to quietly
+ * disagree about why the agent declined, and that disagreement would not
+ * announce itself: it would just make this page and the server-rendered
+ * fallback tell a judge two different stories.
+ */
+export type DeclineCategory =
+  | "traded"
+  | "approved_not_sent"
+  | "gate_veto"
+  | "broker_rejected"
+  | "model_declined"
+  | "undecidable"
+  | "no_setup"
+  | "no_candidates"
+  | "other"
 
 /**
  * What the whole system is doing, in one word, for the header.

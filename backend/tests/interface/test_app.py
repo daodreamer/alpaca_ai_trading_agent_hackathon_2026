@@ -75,6 +75,19 @@ class TestRoutes:
             "2026-08-26-SPY-002",
         ]
 
+    def test_the_json_carries_its_own_decline_classification(
+        self, client: TestClient
+    ) -> None:
+        """The single-classifier fix: the React app reads `category` off this
+        response rather than re-deriving it, so `/day/...` and `/api/day/...`
+        cannot disagree about why a cycle declined."""
+        payload = client.get(f"/api/day/{DAY}").json()
+        by_id = {record["cycle_id"]: record for record in payload}
+        assert by_id["2026-08-26-SPY-001"]["category"] == "gate_veto"
+        assert by_id["2026-08-26-SPY-002"]["category"] == "traded"
+        assert by_id["2026-08-26-SPY-000"]["category_label"]
+        assert by_id["2026-08-26-SPY-000"]["category_detail"]
+
     def test_an_unknown_cycle_is_404(self, client: TestClient) -> None:
         assert client.get(f"/cycle/{DAY}/nope").status_code == 404
 

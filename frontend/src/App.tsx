@@ -27,11 +27,14 @@ import { RefreshCw } from "lucide-react"
 import { EquityStatus } from "@/components/equity-status"
 import { Journal } from "@/components/journal"
 import { LiveStatus } from "@/components/live-status"
+import { SleevesOverview } from "@/components/sleeves-overview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { EquityCycle, EquityStatusResponse } from "@/lib/equity"
+import type { OptionBookResponse } from "@/lib/option-book"
+import type { SleevesResponse } from "@/lib/sleeves"
 import type { JournalCycle, StatusResponse } from "@/lib/status"
 
 const POLL_MS = 15_000
@@ -43,6 +46,8 @@ export default function App() {
   const [cycles, setCycles] = useState<JournalCycle[] | null>(null)
   const [days, setDays] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [optionBook, setOptionBook] = useState<OptionBookResponse | null>(null)
+  const [sleeves, setSleeves] = useState<SleevesResponse | null>(null)
 
   // The day the user clicked, or `null` for "follow the agent". Storing the
   // *choice* rather than the resolved day means nothing has to write state
@@ -53,14 +58,19 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [statusResponse, equityResponse, daysResponse] = await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/equity/status"),
-        fetch("/api/days"),
-      ])
+      const [statusResponse, equityResponse, daysResponse, optionBookResponse, sleevesResponse] =
+        await Promise.all([
+          fetch("/api/status"),
+          fetch("/api/equity/status"),
+          fetch("/api/days"),
+          fetch("/api/option-book"),
+          fetch("/api/sleeves"),
+        ])
       setStatus(await statusResponse.json())
       setEquity(await equityResponse.json())
       setDays(await daysResponse.json())
+      setOptionBook(await optionBookResponse.json())
+      setSleeves(await sleevesResponse.json())
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "cannot reach the server")
@@ -142,6 +152,10 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-6">
+        <div className="mb-6">
+          <SleevesOverview sleeves={sleeves} />
+        </div>
+
         <Tabs defaultValue="live">
           <TabsList>
             <TabsTrigger value="live">Options</TabsTrigger>
@@ -150,7 +164,11 @@ export default function App() {
           </TabsList>
 
           <TabsContent value="live" className="pt-6">
-            {status === null ? <Loading /> : <LiveStatus status={status} />}
+            {status === null ? (
+              <Loading />
+            ) : (
+              <LiveStatus status={status} optionBook={optionBook} />
+            )}
           </TabsContent>
 
           <TabsContent value="equity" className="pt-6">

@@ -16,6 +16,7 @@ import {
   ShieldAlert,
 } from "lucide-react"
 
+import { OptionBookCard } from "@/components/option-book-card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -42,6 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import type { OptionBookResponse } from "@/lib/option-book"
 import { cn } from "@/lib/utils"
 import {
   type PositionStatus,
@@ -56,7 +58,13 @@ import {
   untilNext,
 } from "@/lib/status"
 
-export function LiveStatus({ status }: { status: StatusResponse }) {
+export function LiveStatus({
+  status,
+  optionBook,
+}: {
+  status: StatusResponse
+  optionBook: OptionBookResponse | null
+}) {
   const state = health(status)
   const snapshot = status.snapshot
 
@@ -80,6 +88,7 @@ export function LiveStatus({ status }: { status: StatusResponse }) {
   return (
     <div className="flex flex-col gap-6">
       <HealthBanner status={status} />
+      <OptionBookCard optionBook={optionBook} />
       <Money snapshot={snapshot} />
       <Warnings snapshot={snapshot} />
       <Positions snapshot={snapshot} />

@@ -153,6 +153,28 @@ class TestEquityDay:
         )
         assert len(client.get(f"/api/day/{day}").json()) == 2
 
+    def test_only_the_options_cycle_is_stamped_with_a_category(
+        self, client: TestClient, journal: Journal  # noqa: F811
+    ) -> None:
+        """`category` is options' own decline taxonomy (specs/07 D1). Running
+        it over an equity cycle's `kind` would mislabel a sleeve it was never
+        about, so the equity record passes through unstamped."""
+        day = "2026-08-28"
+        journal.append(
+            {"cycle_id": f"{day}-SPY-001", "as_of": f"{day}T13:45:00+00:00", "stage": "vetoed"}
+        )
+        journal.append(
+            {
+                "cycle_id": f"{day}-EQ-000",
+                "kind": "equity",
+                "as_of": f"{day}T13:45:00+00:00",
+                "stage": "no_trades",
+            }
+        )
+        by_id = {r["cycle_id"]: r for r in client.get(f"/api/day/{day}").json()}
+        assert by_id[f"{day}-SPY-001"]["category"] == "gate_veto"
+        assert "category" not in by_id[f"{day}-EQ-000"]
+
     def test_a_malformed_date_is_a_400(self, client: TestClient) -> None:
         assert client.get("/api/equity/day/not-a-date").status_code == 400
 
