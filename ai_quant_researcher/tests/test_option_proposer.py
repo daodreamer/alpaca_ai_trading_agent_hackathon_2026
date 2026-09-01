@@ -23,6 +23,7 @@ import pytest
 
 from aqr.agent.option_prompt import (
     ALLOWED_DTE_TARGETS,
+    CYCLE_BUDGET,
     OPTION_PROPOSAL_SCHEMA,
     OPTION_SYSTEM_PROMPT,
     STRUCTURE_CATALOGUE,
@@ -39,6 +40,7 @@ from aqr.agent.option_proposer import (
     unreachable_thresholds,
 )
 from aqr.agent.proposer import Proposal
+from aqr.evaluator.score import MIN_INDEPENDENT_CYCLES
 from aqr.features.registry import REGISTRY
 from aqr.options.features import OPTION_FEATURES
 from aqr.options.spec import dumps_option_spec, loads_option_spec
@@ -137,10 +139,17 @@ def test_the_user_prompt_shows_the_remaining_budget() -> None:
     assert "hypothesis 18 of 20" in prompt
 
 
-def test_memory_shows_cycles_beside_trades() -> None:
+def test_memory_shows_cycles_against_the_gate_not_on_their_own() -> None:
     """A prompt that showed the trade count alone would invite the model to
     propose something that trades more, when the binding constraint is how many
-    of those trades were independent (D8)."""
+    of those trades were independent (D8).
+
+    And a bare cycle count is barely better: the first campaign rendered "4
+    independent cycles" a hundred times without ever naming the 25 those 4 were
+    measured against, so the model could not tell a near miss from a structural
+    impossibility. The count is shown as a fraction of the gate, with what it
+    cost the experiment.
+    """
     prompt = build_option_user_prompt(
         underlying="SPY",
         memory=[
@@ -150,11 +159,40 @@ def test_memory_shows_cycles_beside_trades() -> None:
                 "hypothesis": "the variance risk premium",
                 "oos_trades": 89,
                 "oos_cycles": 37,
-            }
+            },
+            {
+                "name": "narrow_filter_v1",
+                "verdict": "REJECT",
+                "hypothesis": "three clauses and a long expiry",
+                "oos_trades": 6,
+                "oos_cycles": 4,
+            },
         ],
     )
     assert "89 trades" in prompt
-    assert "37 independent cycles" in prompt
+    assert f"37/{MIN_INDEPENDENT_CYCLES} cycles" in prompt
+    assert "cleared the sample-size gate" in prompt
+    assert f"4/{MIN_INDEPENDENT_CYCLES} cycles" in prompt
+    assert "REJECTED on sample size" in prompt
+
+
+def test_the_cycle_budget_names_the_buckets_that_cannot_pass() -> None:
+    """The prompt's strongest claim, present in the text the model actually sees.
+
+    A 49 DTE target cannot reach 25 out-of-sample cycles even with no entry
+    condition, and eight of the last hundred hypotheses were spent finding that
+    out one at a time. The table is rendered into the user prompt rather than
+    left in the system prompt's prose because it is arithmetic, and arithmetic
+    recalled from four paragraphs earlier gets approximated.
+    """
+    prompt = build_option_user_prompt(underlying="SPY", memory=[])
+    assert "Cycle budget" in prompt
+    for target, _window, _oos, floor in CYCLE_BUDGET:
+        assert f"  {target:<6}" in prompt
+        if floor == 0:
+            continue
+        assert f"{floor}% of sessions" in prompt
+    assert "always REJECT" in prompt
 
 
 # --------------------------------------------------------------------------- #

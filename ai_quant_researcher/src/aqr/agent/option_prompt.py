@@ -37,15 +37,19 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from aqr.evaluator.score import MIN_INDEPENDENT_CYCLES
 from aqr.features.registry import REGISTRY
 from aqr.options.features import OPTION_FEATURES
 
 __all__ = [
     "ALLOWED_DTE_TARGETS",
+    "CYCLE_BUDGET",
     "OPTION_PROPOSAL_SCHEMA",
     "OPTION_SYSTEM_PROMPT",
+    "SESSIONS_PER_YEAR",
     "STRUCTURE_CATALOGUE",
     "build_option_user_prompt",
+    "cycle_budget_table",
     "option_feature_catalogue",
     "structure_catalogue",
 ]
@@ -90,6 +94,58 @@ asserted against the cache by ``tests/test_option_cache_claims.py``."""
 ALLOWED_DTE_TARGETS = tuple(range(DTE_BAND[0], DTE_BAND[1] + 1))
 """Kept as a name because callers validate against it; now the whole band."""
 
+SESSIONS_PER_YEAR = 136
+"""Chain sessions per year, not trading days per year.
+
+The cache holds 753 sessions across 5.56 years and the median gap between two
+of them is **two calendar days** (448 gaps of 2, 226 of 3, 45 of 7 -- 2019 is
+one Saturday snapshot a week, 2020 onward is roughly Mon/Wed/Fri). So a session
+is not a day, and ``min_sessions_between_entries: 5`` is about ten calendar days
+apart rather than a week. The model was never told this and could not have
+inferred it from "one snapshot per session", which reads as daily."""
+
+CYCLE_BUDGET: tuple[tuple[int, int, int, int], ...] = (
+    (11, 144, 91, 7),
+    (14, 144, 91, 7),
+    (21, 126, 89, 7),
+    (28, 71, 46, 10),
+    (35, 71, 46, 10),
+    (42, 33, 21, 0),
+    (49, 33, 21, 0),
+    (56, 33, 21, 0),
+    (63, 32, 20, 0),
+)
+"""``(dte_target, cycles in the window, cycles out of sample, min firing rate %)``.
+
+The first three columns are the ceiling, not a forecast: what a rule with **no
+entry condition at all** gets, entering on every session available, holding to
+expiry, counted by the same non-overlapping walk the verdict uses
+(:func:`~aqr.validation.cycles.independent_cycles`). A real rule fires on some
+fraction of sessions and lands below its row.
+
+The fourth column is the number a proposer actually needs and is the reason this
+table has four columns rather than three: the smallest share of sessions an entry
+condition may fire on and still reach 25 OOS cycles, measured by resampling the
+real session grid (median of 25 draws). ``0`` means unreachable at any
+selectivity.
+
+Two facts fall out, and they are different facts:
+
+* **42 DTE and longer cannot clear the gate at all.** 21 cycles with the
+  condition removed entirely is below 25, so every hypothesis in that bucket is
+  a REJECT decided before the backtest runs. The 100-hypothesis campaign spent
+  eight slots there.
+* Between 14 and 28 DTE the *threshold* barely moves -- 7% against 10% -- because
+  at that selectivity the binding constraint is how often the rule fires, not
+  how much its holdings overlap. What doubles is the *headroom* (91 against 46),
+  and headroom past the gate is what buys statistical power rather than a bare
+  pass. Prefer the short expiry, but do not tell a model the short expiry is the
+  difference between passing and failing at 10%: it is not.
+
+The band stays open (the previous narrowing was wrong for its own reasons), but
+an open band with a published ceiling is a choice; an open band without one is a
+trap. Asserted against the cache by ``tests/test_option_cache_claims.py``."""
+
 STRUCTURE_CATALOGUE: tuple[tuple[str, str], ...] = (
     (
         "put_credit_spread",
@@ -131,14 +187,33 @@ option structures. You do not predict prices and you do not place trades.
 Every proposal is compiled into a deterministic rule and backtested on \
 end-of-day option chains with the full quoted spread charged on every leg, \
 walk-forward validated on calendar folds you have never seen, and put through \
-leave-one-year-out and DTE-bucket robustness tests. The verdict gates on \
-INDEPENDENT CYCLES, not on trade count: a structure held to expiry produces \
-new evidence only when it closes, so thirty overlapping spreads can be eight \
-independent bets. The whole research window holds about 71 non-overlapping \
-28-day cycles across five and a half years. You cannot flatter your way past \
-any of this.
+leave-one-year-out and DTE-bucket robustness tests. You cannot flatter your way \
+past any of this.
 
-Four things about this data decide what you may propose. They are measured \
+THE GATE YOU MUST DESIGN FOR, FIRST, BEFORE ANYTHING ELSE: the out-of-sample \
+period must contain AT LEAST 25 INDEPENDENT CYCLES. Not 25 trades -- 25 \
+non-overlapping ones. A structure held to expiry produces new evidence only \
+when it closes, so entries opened while an earlier one is still running are \
+correlated draws on the same outcome and are not counted again: thirty \
+overlapping spreads can be eight independent bets. Below 25 the verdict is \
+REJECT and nothing else about your hypothesis is even read.
+
+Two knobs decide whether you can reach 25. `dte_target` sets the CEILING, \
+because it fixes how long each cycle occupies the calendar; your entry condition \
+then takes some fraction of what the ceiling left. The cycle budget table in the \
+catalogue below prints both -- the ceiling for each target, and the smallest \
+share of sessions your condition may fire on and still reach 25. Read your \
+target's row before you write anything else. A target of 42 or more has a \
+ceiling of 21, which is under the gate with no condition at all: those \
+hypotheses are rejected before the backtest runs, and eight of the last hundred \
+were spent there.
+
+The previous campaign of 100 hypotheses produced zero passes and its best rule \
+reached 4 cycles against the 25 it needed. It did not fail on its ideas. It \
+failed on arithmetic nobody showed it: a three-clause `and` fires on roughly 4% \
+of sessions, and 4% is under the floor at every expiry this cache lists.
+
+Six things about this data decide what you may propose. They are measured \
 facts, not preferences:
 
 1. THERE IS NO EXIT. A structure is opened and held to expiry, and settles \
@@ -156,18 +231,28 @@ delta-selected wing resolves on 98% of sessions; an exact 10-point wing on \
 SMALLER than `anchor_delta` because the protective leg is further out of the \
 money.
 
-3. EXPIRIES RUN 11 TO 66 DAYS OUT and no further. No 0DTE, no weeklies, no \
-LEAPS, and no fixed calendar dates -- the expiries roll with the observation \
-date. Any target in that band is allowed and the engine takes the nearest \
-listed expiry within 10 days, but the buckets are not equally dense: 11-35 \
-resolves on essentially every session, 49 on 77%, 42 on 44%. The catalogue \
-below prints the coverage. A thin bucket is a legitimate choice; it is not a \
-legitimate accident.
+3. EXPIRIES RUN 11 TO 66 DAYS OUT and no further, and THE SHORTEST ONE LISTED \
+IS 14 DAYS. No 0DTE, no weeklies, no LEAPS, no fixed calendar dates -- the \
+expiries roll with the observation date. On 632 of the 753 sessions the nearest \
+expiry is exactly 14 days out; on the rest it is 11, 13, 15 or 16. So the \
+shortest position this data can express is a two-week one, and "hold for a few \
+days" does not exist here at any setting. Any target in the band is allowed and \
+the engine takes the nearest listed expiry within 10 days, but the choice costs \
+you sample size and the cycle budget table below prices it: 14 DTE buys 91 \
+possible OOS cycles, 28 buys 46, and 49 buys 21 against a gate of 25.
 
-4. THERE IS ONE UNDERLYING: SPY. There is no cross-section to rank, no \
+4. A SESSION IS NOT A DAY. The cache holds 753 sessions across 5.56 years -- \
+about 136 a year, against roughly 252 trading days. The median gap between two \
+sessions is TWO calendar days (2019 is one snapshot a week; 2020 onward is \
+roughly Monday/Wednesday/Friday). `min_sessions_between_entries` counts these \
+sessions, so 5 is about ten calendar days apart, not a week. Entering on every \
+session available -- cadence 1 -- is roughly an entry every other day, and that \
+is the fastest this data permits anything to happen.
+
+5. THERE IS ONE UNDERLYING: SPY. There is no cross-section to rank, no \
 relative-strength claim to make, and no portfolio mode.
 
-5. THE VOLATILITY FEATURES ARE DECIMAL FRACTIONS, NOT PERCENTAGE POINTS. \
+6. THE VOLATILITY FEATURES ARE DECIMAL FRACTIONS, NOT PERCENTAGE POINTS. \
 `iv_current()` of 0.156 means 15.6% vol. `term_slope()` never exceeds 0.052, so \
 `term_slope() > 5` is false on every session that has ever existed and the rule \
 opens nothing. `iv_hv_spread()` runs -0.38 to 0.17; a five-point variance \
@@ -184,10 +269,28 @@ What makes a good proposal:
 behavioural argument. "Short volatility earns the variance risk premium" is a \
 real mechanism; "credit spreads win 84% of the time" is a description of the \
 payoff, not a reason to be paid for it.
-- It fires often enough to produce independent cycles. Your entry condition and \
-your cadence together decide the sample size, and a condition that is true on \
-18% of sessions at a 28-day holding period leaves roughly twelve independent \
-bets in five years. That is not evidence, whatever it measures.
+- It fires often enough to produce independent cycles. Do this arithmetic \
+BEFORE you commit to a condition. Measured on this cache at 14 DTE with cadence \
+1, entry conditions of varying selectivity produce, out of sample:
+
+      fires on 100% of sessions -> 91 OOS cycles      fires on 15% -> 43
+      fires on  50% of sessions -> 76 OOS cycles      fires on 10% -> 33
+      fires on  30% of sessions -> 62 OOS cycles      fires on  5% -> 19
+      fires on  20% of sessions -> 50 OOS cycles
+
+  At 14 DTE a condition true on one session in ten still clears the gate of 25; \
+the measured floor is 7%. At 28 DTE the floor is 10% -- close, because at that \
+selectivity what limits you is how often the rule fires, not how much its \
+holdings overlap. What the short expiry really buys is HEADROOM: 91 possible \
+cycles against 46, and cycles past the gate are what turn a bare pass into a \
+measurable one. At 42 DTE and beyond there is no floor, because the ceiling \
+itself is under the gate.
+
+  A three-clause `and` on features that are each true a third of the time fires \
+on about 4% of sessions. That is below every floor in the table, and it is the \
+shape that produced 4 cycles and a REJECT one hundred times in a row. Two \
+clauses, or one clause and a well-chosen structure, is what a passing rule \
+looks like.
 - It has few parameters. Every numeric literal in your entry expression, plus \
 the DTE target, the anchor delta, the width and the cadence, is a degree of \
 freedom the overfitting detector charges you for.
@@ -287,6 +390,41 @@ def option_feature_catalogue(
         "condition on iv_rank() simply does not fire on those sessions rather "
         "than firing on a stale number."
     )
+    lines.append("")
+    lines.append(cycle_budget_table())
+    return "\n".join(lines)
+
+
+def cycle_budget_table() -> str:
+    """:data:`CYCLE_BUDGET`, rendered with the gate next to it.
+
+    Printed in the user prompt rather than only described in the system prompt
+    because it is the one table the model has to arithmetic against, and a
+    number it has to recall from four paragraphs earlier is a number it will
+    approximate.
+    """
+    lines = [
+        f"Cycle budget. The gate is {MIN_INDEPENDENT_CYCLES} out-of-sample "
+        "independent cycles. The first two columns are the CEILING -- what a rule",
+        "with no entry condition at all would get. The last column is the one to "
+        "design against.",
+        "",
+        "  dte    max cycles   max OOS cycles   your entry may fire on as little as",
+    ]
+    for target, window, oos, floor in CYCLE_BUDGET:
+        room = (
+            "NOTHING -- under the gate with no condition at all, always REJECT"
+            if floor == 0
+            else f"{floor}% of sessions"
+        )
+        lines.append(f"  {target:<6} {window:<12} {oos:<16} {room}")
+    lines.append("")
+    lines.append(
+        "So: 42 DTE and longer is an automatic REJECT whatever you write. At 35 and "
+        "shorter, a condition firing on under 10% of sessions is the failure mode "
+        "that rejected 100 hypotheses in a row -- a three-clause `and` usually "
+        "lands near 4%. Two clauses, or one, is the shape that survives."
+    )
     return "\n".join(lines)
 
 
@@ -312,7 +450,12 @@ OPTION_PROPOSAL_SCHEMA: dict[str, Any] = {
                 "session. Must be a comparison or a combination of them, e.g. "
                 "'iv_rank() > 40 and close > sma(200)'. Required: a rule with no "
                 "condition opens a position every session it can, which is a "
-                "schedule rather than a hypothesis."
+                "schedule rather than a hypothesis. It must also FIRE OFTEN "
+                "ENOUGH: see the cycle budget table for the minimum share of "
+                "sessions your dte_target leaves you (7% at 14 DTE, 10% at 28). "
+                "Each `and` clause multiplies the share down, so three of them on "
+                "features that are each true a third of the time lands near 4% "
+                "and is rejected on sample size before anything else is read."
             ),
         },
         "structure_type": {
@@ -327,8 +470,12 @@ OPTION_PROPOSAL_SCHEMA: dict[str, Any] = {
             "description": (
                 "Days to expiry, anywhere in 11..66 -- the whole band the cache "
                 "lists. The engine takes the nearest listed expiry within 10 days. "
-                "Coverage is uneven and is printed in the catalogue: 11-35 resolve "
-                "on every session, 42 on only 44% of them."
+                "This is the field that sets your sample-size ceiling, so choose "
+                "it before the entry condition: 14 leaves room for 91 "
+                "out-of-sample cycles, 28 leaves 46, and 42 or longer leaves 21 "
+                "against a gate of 25 -- an automatic REJECT whatever the rule "
+                "says. The shortest expiry the cache lists is 14 days; there is no "
+                "way to hold for less than about two weeks."
             ),
         },
         "anchor_delta": {
@@ -364,17 +511,24 @@ OPTION_PROPOSAL_SCHEMA: dict[str, Any] = {
         "min_sessions_between_entries": {
             "type": "integer",
             "description": (
-                "Cadence: how many chain sessions must pass between entries. This "
-                "is your only control over how correlated your trades are, and the "
-                "verdict counts independent cycles. Below the DTE target, entries "
-                "overlap."
+                "Cadence: how many CHAIN SESSIONS must pass between entries -- and "
+                "a session is about two calendar days, not one, so 5 means about "
+                "ten days apart. Raising it cannot raise your independent-cycle "
+                "count, because overlapping entries were never counted twice in "
+                "the first place; it can only lower the number of trades. Leave it "
+                "at 1 unless the mechanism genuinely needs spacing."
             ),
         },
         "expected_cycles_per_year": {
             "type": "integer",
             "description": (
                 "Your own estimate of independent (non-overlapping) cycles per "
-                "year. Used to check your intuition against what actually happened."
+                "year. Compute it, do not guess it: take your dte_target's row in "
+                "the cycle budget table, multiply the ceiling by the share of "
+                "sessions you think your entry fires on, and divide by 5.6 years. "
+                "If the answer is under 5 per year your hypothesis cannot clear "
+                "the gate and you should change the expiry or the condition now, "
+                "not propose it and find out."
             ),
         },
     },
@@ -417,8 +571,18 @@ def _render_memory(memory: list[dict[str, Any]]) -> str:
             detail.append(f"OOS Sharpe {sharpe:.2f}")
         if item.get("oos_trades") is not None:
             detail.append(f"{item['oos_trades']} trades")
-        if item.get("oos_cycles") is not None:
-            detail.append(f"{item['oos_cycles']} independent cycles")
+        cycles = item.get("oos_cycles")
+        if cycles is not None:
+            # Against the gate, not on its own. "4 independent cycles" is a fact
+            # the model cannot act on; "4/25 cycles -- REJECTED on sample size"
+            # names the constraint that actually decided the verdict, which is
+            # the whole reason the failures are shown at all.
+            verdict_note = (
+                " -- REJECTED on sample size, the rule was never measured"
+                if cycles < MIN_INDEPENDENT_CYCLES
+                else " -- cleared the sample-size gate"
+            )
+            detail.append(f"{cycles}/{MIN_INDEPENDENT_CYCLES} cycles{verdict_note}")
         if item.get("overfitting"):
             detail.append(f"overfitting {item['overfitting']}")
         if item.get("error"):
@@ -478,11 +642,13 @@ def build_option_user_prompt(
     if budget is not None:
         spent, cap = budget
         parts += [
-            f"Search budget: this is hypothesis {spent + 1} of {cap}. The cap is "
-            "small because the window holds about 71 independent cycles, and a "
-            "search wide enough to overwhelm that denominator produces a number "
-            "with no information in it. Spend the remaining attempts on "
-            "mechanisms that differ from each other, not on thresholds.",
+            f"Search budget: this is hypothesis {spent + 1} of {cap}, and every "
+            "one of them is charged against the deflated Sharpe -- a wide search "
+            "over a window this short produces a best-of-N number with no "
+            "information in it, and the overfitting report says so out loud. Do "
+            "not treat the cap as an allowance to spend. Spend attempts on "
+            "mechanisms that differ from each other, not on thresholds, and not "
+            "on rules the cycle budget already says cannot pass.",
             "",
         ]
     if parent:
