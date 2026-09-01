@@ -26,7 +26,7 @@ caveat, stated in `iv_history`'s own docstring rather than buried here.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Final
@@ -46,6 +46,7 @@ from alphagate.options.blackscholes import implied_volatility, time_to_expiry_ye
 from alphagate.options.volatility import (
     MIN_HISTORY,
     VolatilityRead,
+    iv_percentile,
     iv_rank,
     realised_volatility,
     summarise_volatility,
@@ -55,6 +56,7 @@ __all__ = [
     "ATR_PERIOD",
     "HISTORY_DAYS",
     "OPTIONS_HISTORY_FLOOR",
+    "STALE_AFTER_DAYS",
     "atm_implied_volatility",
     "atr_percent",
     "iv_history",
@@ -78,6 +80,16 @@ RISK_FREE: Final = 0.04
 """A flat 4% discount rate. Held as a named constant rather than fetched: over a
 9-to-21-day option the rate moves implied volatility in the fourth decimal, and
 a live curve would be three more failure modes for no change in any decision."""
+
+STALE_AFTER_DAYS: Final = 5
+"""How many calendar days a vendor observation may still count as current.
+
+Mirrors `ai_quant_researcher/src/aqr/options/features.py`'s
+`MAX_FORWARD_FILL_DAYS` exactly. The option book's `iv_rank() < 15` was fitted
+against that same forward-fill bound (specs/07 D1's rule comes from that
+research), so a looser bound here would let this executor decide on a staler
+reading than the one the threshold was ever measured against, and a tighter
+one would refuse readings the research treated as current."""
 
 
 def atr_percent(bars: Sequence[Bar], *, period: int = ATR_PERIOD) -> Decimal | None:
@@ -119,6 +131,51 @@ def atm_implied_volatility(
         return None
     candidates.sort(key=lambda pair: pair[0])
     return candidates[0][1].greeks.iv  # type: ignore[union-attr]
+
+
+def _vendor_rank(
+    history: Sequence[float],
+    history_as_of: date | None,
+    *,
+    as_of: date,
+    minimum: int,
+) -> tuple[float | None, float | None]:
+    """`(rank, percentile)` computed on the vendor's own series and its own
+    latest reading — never substituted with a different instrument's implied
+    volatility.
+
+    specs/07 D3: the option book's `iv_rank() < 15` was fitted against the
+    vendor's `iv_current` compared to its own trailing range. Ranking a live
+    chain's ATM greek against that same range compares two different
+    measurements under one name — the exact substitution D3 refuses for a
+    feature this account cannot measure at all, applied here to one it can
+    measure, just not with the number that happened to be sitting in `chain`.
+    Found by running the thing: a live cycle read `iv_rank()=19.38` from the
+    chain while the vendor's own arithmetic on the same day said `4.36` — on
+    opposite sides of the rule's threshold of 15.
+
+    `None` in every one of these cases, and `None` is the answer, not a
+    fallback to a different series:
+
+    * no history at all (`observations()` empty);
+    * no known date for the latest entry (`history_as_of is None`) — callers
+      that have not been taught to supply it get the safe answer, not the old
+      wrong one;
+    * the latest entry is more than `STALE_AFTER_DAYS` calendar days old.
+
+    That last case mirrors the researcher's own forward-fill bound
+    (`aqr.options.features.MAX_FORWARD_FILL_DAYS`). A book that cannot be
+    decided declines; it does not decide on a substitute.
+    """
+    if not history or history_as_of is None:
+        return None, None
+    if (as_of - history_as_of).days > STALE_AFTER_DAYS:
+        return None, None
+    current = history[-1]
+    return (
+        iv_rank(current, history, minimum=minimum),
+        iv_percentile(current, history, minimum=minimum),
+    )
 
 
 def iv_history(
@@ -203,6 +260,7 @@ def perceive(
     iv_reference: OptionContract | None = None,
     chain: Mapping[OptionContract, OptionQuote] | None = None,
     history: Sequence[float] | None = None,
+    history_as_of: date | None = None,
     calendar: EarningsCalendar | None = None,
     holding_through: date | None = None,
     intraday: Mapping[Timeframe, Sequence[Bar]] | None = None,
@@ -215,13 +273,27 @@ def perceive(
     here:
 
     * `history` — observations accumulated by `IvHistoryStore`, one per session.
-      This is the path that works on a Basic data plan.
+      This is the path that works on a Basic data plan. `history_as_of` is the
+      date of `history`'s own latest entry (`IvHistoryStore.latest`'s first
+      element) — pass it whenever `history` came from the store, so `iv_rank`
+      can tell a fresh vendor reading from a stale one rather than assuming
+      every history handed in is current.
     * `iv_reference` — a contract whose daily bars are inverted through
       Black–Scholes. Needs OPRA data; returns nothing without it.
 
     With neither, `iv_rank` comes back `None` and renders as `unmeasured`. That
     is the correct behaviour on the first run of a new underlying, and it is
     visibly so rather than quietly so.
+
+    **`iv_rank`/`iv_percentile` are ranked on `history`'s own current reading,
+    not on `implied`.** `implied` — this cycle's live chain ATM greek — is
+    still what `iv_vs_hv` compares against realised volatility, because that
+    question ("is today's option pricing more movement than the underlying has
+    delivered") is correctly answered by today's own chain. But the option
+    book's threshold was fitted against the vendor's own current-vs-history
+    comparison, and ranking a *different* instrument's implied volatility
+    against that history would be exactly the substitution specs/07 D3 forbids.
+    See `_vendor_rank`.
     """
     end = as_of.date()
     start = end - timedelta(days=history_days)
@@ -245,6 +317,15 @@ def perceive(
     volatility = summarise_volatility(
         implied, closes, observations, minimum=minimum_history
     )
+    # `rank`/`percentile` are recomputed on `observations`' own current
+    # reading rather than left as `iv_rank(implied, observations)` above — see
+    # `_vendor_rank` and `VolatilityRead`'s own docstring for why `implied` and
+    # the rank's current value are allowed to be two different numbers.
+    # `ratio` (iv_vs_hv, already inside `volatility`) keeps using `implied`.
+    vendor_rank, vendor_percentile = _vendor_rank(
+        observations, history_as_of, as_of=end, minimum=minimum_history
+    )
+    volatility = replace(volatility, rank=vendor_rank, percentile=vendor_percentile)
     # Realised volatility ranked against its own trailing range. Needs only
     # stock bars, so unlike `iv_rank` it is available today.
     hv_series = _hv_series(closes)

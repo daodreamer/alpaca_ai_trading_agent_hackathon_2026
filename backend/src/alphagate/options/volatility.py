@@ -137,6 +137,19 @@ class VolatilityRead:
     Every field is optional and each `None` is a distinct, recorded fact. A read
     that could not compute a rank is different from one that computed a low
     rank, and the journal must be able to tell a judge which.
+
+    **`implied` is not always the value `rank`/`percentile` were computed
+    against.** This module stays generic — `iv_rank`/`iv_percentile` take
+    whatever "current" and "history" they are handed — but a caller combining a
+    live chain with a vendor-seeded history (`agent/perceive.py` is the one
+    that does) may need to rank a *different* current reading than the one it
+    reports as `implied`: the option book's threshold was fitted against the
+    vendor's own current-vs-its-own-history comparison, and ranking a live
+    chain's ATM greek against that series would compare two measurements under
+    one name. `implied` stays whatever answers `ratio` (`iv_vs_hv`) correctly,
+    which is always today's own chain; `rank`/`percentile` may come from
+    somewhere else. See `agent/perceive.py`'s `_vendor_rank` for the one place
+    that split is made.
     """
 
     implied: float | None

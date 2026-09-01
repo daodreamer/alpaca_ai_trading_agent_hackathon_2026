@@ -114,12 +114,21 @@ def run_cycle(
     proposer: Proposer = DEFAULT_PROPOSER,
     sequence: int = 0,
     intent: Intent = Intent.OPEN,
+    screen_reason: str = "",
 ) -> CycleRecord:
     """Steps 4 through 8. Returns a record on every path.
 
     `mcp=None` is dry-run: the Gate still runs and the verdict is still recorded,
     but nothing is submitted. That is the mode the pre-open check uses, and it is
     a first-class outcome rather than a flag threaded through the trading path.
+
+    `screen_reason` is the screen's own explanation for a `None` setup —
+    specs/07 D1. It is threaded through rather than re-derived here because
+    only the screen that actually ran knows whether the `None` meant "the rule
+    said no" or "a feature was unmeasured", and a `BookScreen`'s `explain`
+    carries exactly that distinction (`agent/screen.py`). Left empty, the
+    `NO_SETUP` note falls back to the generic text — which is what every caller
+    that has not been taught to supply a reason still gets, unchanged.
     """
     cycle_id = cycle_id_for(as_of, str(read.underlying), sequence)
     menu = tuple(candidates)
@@ -151,7 +160,9 @@ def run_cycle(
 
     # -- 2. screen ------------------------------------------------------ #
     if setup is None:
-        return record(Stage.NO_SETUP, note="the screen found nothing to trade")
+        return record(
+            Stage.NO_SETUP, note=screen_reason or "the screen found nothing to trade"
+        )
 
     # -- 3. enumerate --------------------------------------------------- #
     if not menu:

@@ -20,9 +20,11 @@ from pathlib import Path
 import pytest
 
 from alphagate.agent import SessionResult, Slot, Stage, session_slots
+from alphagate.agent.iv_store import IvHistoryStore
+from alphagate.core.identifiers import ticker
 from alphagate.journal import Journal
 from alphagate.live import cli
-from alphagate.live.cli import _free_sequence, _slot_now, build_parser, main
+from alphagate.live.cli import _adhoc_slot, _free_sequence, _slot_now, build_parser, main
 from alphagate.live.wiring import LiveContext, SessionState
 from tests.journal.conftest import at_stage
 
@@ -32,7 +34,9 @@ SLOTS = session_slots(OPEN, CLOSE)
 
 
 class TestTheParser:
-    @pytest.mark.parametrize("command", ["preflight", "once", "run", "show", "serve"])
+    @pytest.mark.parametrize(
+        "command", ["preflight", "once", "run", "show", "serve", "iv-seed"]
+    )
     def test_every_command_parses(self, command: str) -> None:
         assert build_parser().parse_args([command]).command == command
 
@@ -70,6 +74,39 @@ class TestWhichSlotThisIs:
         assert _slot_now(SLOTS, CLOSE).sequence == SLOTS[-1].sequence
 
 
+class TestTheAdHocSlotIsEvaluatedNow:
+    """`once` fetches a chain *now* and must judge its freshness against
+    *now* -- not against the next scheduled slot, which is up to fifteen
+    minutes away and would fail every quote on `max_quote_age` regardless of
+    the market. See `_adhoc_slot`'s own docstring for the live bug this
+    guards against.
+    """
+
+    def test_its_timestamp_is_now_not_the_next_scheduled_slot(self) -> None:
+        now = datetime(2026, 8, 26, 15, 3, 34, tzinfo=UTC)
+        scheduled = _slot_now(SLOTS, now)
+        assert scheduled.at > now, "the fixture must actually be in the future"
+
+        adhoc = _adhoc_slot(SLOTS, now)
+        assert adhoc.at == now
+
+    def test_its_identity_still_comes_from_the_schedule(self) -> None:
+        """Only `.at` is corrected -- `kind` and `sequence` keep the identity
+        `_slot_now` chose, which is what keeps `cycle_id` collision-free
+        across repeated manual runs in one morning."""
+        now = datetime(2026, 8, 26, 15, 3, 34, tzinfo=UTC)
+        scheduled = _slot_now(SLOTS, now)
+        adhoc = _adhoc_slot(SLOTS, now)
+        assert adhoc.kind == scheduled.kind
+        assert adhoc.sequence == scheduled.sequence
+
+    def test_run_directly_at_a_slot_boundary_is_unaffected(self) -> None:
+        """When `now` lands exactly on a scheduled slot there is no gap to
+        close, and the fix must be a no-op rather than shifting anything."""
+        on_the_dot = SLOTS[5].at
+        assert _adhoc_slot(SLOTS, on_the_dot).at == on_the_dot
+
+
 class TestSequencesDoNotCollide:
     def test_a_free_day_uses_the_slots_own_sequence(self, tmp_path: Path) -> None:
         context = _context(tmp_path)
@@ -98,6 +135,79 @@ class TestSequencesDoNotCollide:
 def test_an_unknown_command_exits_nonzero() -> None:
     with pytest.raises(SystemExit):
         main(["nonsense"])
+
+
+class TestIvSeed:
+    """`iv-seed` — the other way into `iv_rank` inside a four-day window."""
+
+    def _csv(self, tmp_path: Path, rows: str) -> Path:
+        path = tmp_path / "vendor.csv"
+        path.write_text(
+            "date,act_symbol,iv_current\n" + rows, encoding="utf-8"
+        )
+        return path
+
+    def test_it_seeds_the_store_and_reports_the_count(self, tmp_path: Path) -> None:
+        csv_path = self._csv(
+            tmp_path,
+            "2026-08-26,SPY,0.12\n2026-08-27,SPY,0.13\n2026-08-28,SPY,0.11\n",
+        )
+        args = build_parser().parse_args(
+            ["--iv", str(tmp_path / "iv"), "iv-seed", "--from", str(csv_path)]
+        )
+        assert cli.cmd_iv_seed(args) == 0
+        store = IvHistoryStore(directory=tmp_path / "iv")
+        assert store.observations(ticker("SPY")) == [0.12, 0.13, 0.11]
+
+    def test_the_window_defaults_to_a_trailing_year(self, tmp_path: Path) -> None:
+        """`--days` is load-bearing, not a convenience — a row far outside the
+        vendor's own one-year range must not be seeded by default."""
+        rows = "2019-01-01,SPY,0.90\n2026-08-28,SPY,0.11\n"
+        csv_path = self._csv(tmp_path, rows)
+        args = build_parser().parse_args(
+            ["--iv", str(tmp_path / "iv"), "iv-seed", "--from", str(csv_path)]
+        )
+        assert cli.cmd_iv_seed(args) == 0
+        store = IvHistoryStore(directory=tmp_path / "iv")
+        assert store.observations(ticker("SPY")) == [0.11]
+
+    def test_a_wider_days_window_reaches_further_back(self, tmp_path: Path) -> None:
+        rows = "2019-01-01,SPY,0.90\n2026-08-28,SPY,0.11\n"
+        csv_path = self._csv(tmp_path, rows)
+        args = build_parser().parse_args(
+            [
+                "--iv", str(tmp_path / "iv"),
+                "iv-seed", "--from", str(csv_path), "--days", "3000",
+            ]
+        )
+        assert cli.cmd_iv_seed(args) == 0
+        store = IvHistoryStore(directory=tmp_path / "iv")
+        assert store.observations(ticker("SPY")) == [0.90, 0.11]
+
+    def test_a_missing_file_is_reported_not_a_traceback(self, tmp_path: Path) -> None:
+        args = build_parser().parse_args(
+            ["--iv", str(tmp_path / "iv"), "iv-seed", "--from", str(tmp_path / "absent.csv")]
+        )
+        assert cli.cmd_iv_seed(args) == 1
+
+    def test_re_running_is_idempotent(self, tmp_path: Path) -> None:
+        csv_path = self._csv(tmp_path, "2026-08-28,SPY,0.11\n2026-08-27,SPY,0.12\n")
+        args = build_parser().parse_args(
+            ["--iv", str(tmp_path / "iv"), "iv-seed", "--from", str(csv_path)]
+        )
+        assert cli.cmd_iv_seed(args) == 0
+        assert cli.cmd_iv_seed(args) == 0
+        store = IvHistoryStore(directory=tmp_path / "iv")
+        assert len(store.observations(ticker("SPY"))) == 2
+
+    def test_the_default_from_path_points_at_the_sibling_projects_data(self) -> None:
+        """Overridable, but the default is a real file this repo ships, not a
+        placeholder — see `DEFAULT_VOLATILITY_HISTORY`'s own docstring for why
+        this is a path and not an import."""
+        args = build_parser().parse_args(["iv-seed"])
+        assert "ai_quant_researcher" in args.frm
+        assert args.symbol == "SPY"
+        assert args.days == 365
 
 
 def _context(tmp_path: Path) -> LiveContext:

@@ -181,9 +181,10 @@ def run_session(
             result.stopped_early = "kill switch latched on the incoming snapshot"
             return result
 
+        setup = chosen_screen.screen(inputs.read)
         record = run_cycle(
             read=inputs.read,
-            setup=chosen_screen.screen(inputs.read),
+            setup=setup,
             candidates=inputs.candidates,
             portfolio=inputs.portfolio,
             limits=limits,
@@ -192,6 +193,7 @@ def run_session(
             proposer=proposer,
             sequence=slot.sequence,
             intent=Intent.OPEN,
+            screen_reason="" if setup is not None else chosen_screen.explain(inputs.read),
         )
         journal.append(record)
         result.records.append(record)

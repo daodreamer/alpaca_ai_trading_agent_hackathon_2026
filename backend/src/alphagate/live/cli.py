@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from alphagate.agent import (
-    DefaultScreen,
+    OptionBook,
     SessionResult,
     Slot,
     Stage,
@@ -58,6 +58,7 @@ from alphagate.agent import (
     tradeable_today,
 )
 from alphagate.agent.iv_store import IvHistoryStore
+from alphagate.core.errors import InvariantViolation
 from alphagate.execution import ExecutionError, load_env_file, require_paper_account
 from alphagate.interface.status import STALE_AFTER, _age_of, read_status
 from alphagate.journal import Journal, trust_report
@@ -68,6 +69,10 @@ from alphagate.live.wiring import (
     SessionState,
     build_market_data,
     gather_for,
+    load_pinned_option_book,
+    publish_startup_status,
+    right_for_structure,
+    screen_for,
 )
 from alphagate.live.wiring import mcp_session as open_mcp
 from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
@@ -113,7 +118,100 @@ between the two projects, and `tests/test_boundaries.py` guard 9 fails the build
 if either ever imports the other. Overridable with `--books` or
 `ALPHAGATE_TARGET_BOOKS`, so the two can live anywhere relative to each other."""
 
+DEFAULT_OPTION_BOOKS = str(ROOT / "ai_quant_researcher" / "runs" / "option_books")
+"""Where `aqr option-book` writes — the options sleeve's twin of
+`DEFAULT_TARGET_BOOKS` above, for the same reason: a path, not an import.
+Overridable with `--books` or `ALPHAGATE_OPTION_BOOKS`."""
+
+DEFAULT_VOLATILITY_HISTORY = str(
+    ROOT / "ai_quant_researcher" / "data-options-sealed" / "volatility_history" / "SPY.csv"
+)
+"""The vendor volatility table `iv-seed` reads by default.
+
+Also a path, not an import (CLAUDE.md §2b, specs/09 D0): `iv-seed` opens this
+file with the stdlib `csv` module and hands parsed rows to
+`IvHistoryStore.seed_from_vendor_history`, so this process never imports
+anything under `ai_quant_researcher/src/aqr` — `tests/test_boundaries.py`
+guard 9 has nothing to catch here because there is nothing for it to catch."""
+
 _MODEL_KEY_NOTE = "a cycle with no model declines rather than trades (--no-model)"
+
+
+# ------------------------------------------------------------------ #
+# the option book — specs/07 D1: no book, no orders
+# ------------------------------------------------------------------ #
+
+
+def _option_fingerprint(args: argparse.Namespace, env: dict[str, str]) -> str:
+    """The pinned option rule, or a refusal to proceed at all.
+
+    Mirrors `equity_cli._fingerprint` exactly: the pin is what makes "only the
+    rule the research validated" a checkable statement rather than a hope, and
+    there is deliberately no default. An unset pin is a configuration error
+    severe enough to abort the whole command, the same way an unset
+    `ALPHAGATE_STRATEGY_FINGERPRINT` aborts the equity side.
+    """
+    pinned = args.option_fingerprint or env.get("ALPHAGATE_OPTION_FINGERPRINT", "")
+    if not pinned:
+        raise SystemExit(
+            "no option rule pinned. Set ALPHAGATE_OPTION_FINGERPRINT in the env "
+            "file, or pass --option-fingerprint. specs/07 D1: the pin is what "
+            "makes 'only the rule the research validated' a checkable statement, "
+            "so there is deliberately no default."
+        )
+    return pinned
+
+
+def _option_books_dir(args: argparse.Namespace, env: dict[str, str]) -> Path:
+    return Path(args.books or env.get("ALPHAGATE_OPTION_BOOKS") or DEFAULT_OPTION_BOOKS)
+
+
+def _add_option_book_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument(
+        "--option-fingerprint",
+        default=None,
+        help="option rule to execute; defaults to ALPHAGATE_OPTION_FINGERPRINT",
+    )
+    parser.add_argument(
+        "--books", default=None, help="directory of option books from aqr"
+    )
+    return parser
+
+
+def _print_option_book(book: OptionBook) -> None:
+    """The rule this session executes, and the caveat that governs it.
+
+    Printed in full at every preflight — a book is not a gate you pass once
+    and forget, it is the thing being executed, and specs/10 D8's "this window
+    can refute and cannot confirm" is the sentence a demo or a judge is most
+    likely to ask about.
+    """
+    rule = book.rule
+    sealed = book.sealed
+    low, high = rule.dte_window()
+    print()
+    print(f"[{OK}] option rule — {book.name} [{book.fingerprint}] as of {book.as_of}")
+    print(f"        structure        {rule.structure}")
+    print(f"        entry            {rule.entry.expression}")
+    print(
+        f"        dte              target {rule.dte_target} +/-{rule.dte_tolerance} "
+        f"-> window {low}-{high}d"
+    )
+    print(f"        anchor delta     {rule.anchor_delta} +/-{rule.anchor_tolerance}")
+    print(f"        width delta      {rule.width_delta}")
+    print(
+        f"        cadence          >= {rule.min_sessions_between_entries} "
+        "session(s) between entries"
+    )
+    print(
+        f"        sizing           {rule.risk_per_trade:.2%} per trade, "
+        f"{rule.max_concurrent} concurrent"
+    )
+    print(
+        f"        sealed run       alpha {sealed.alpha:+.2%}/yr  "
+        f"t {sealed.t_alpha:+.2f}  looks {sealed.looks}  refuted {sealed.refuted}"
+    )
+    print("        this window can refute this rule and cannot confirm it (specs/10 D8)")
 
 
 # ------------------------------------------------------------------ #
@@ -167,7 +265,26 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     except Exception as exc:
         check("market data (REST)", False, f"{type(exc).__name__}: {exc}")
 
-    # -- 4. HARD GATES 1 & 2: the Trading API, over MCP --------------- #
+    # -- 4. the option rule — specs/07 D1: no book, no orders ---------- #
+    option_fingerprint = _option_fingerprint(args, env)
+    option_books = _option_books_dir(args, env)
+    option_book, refusal = load_pinned_option_book(option_books, option_fingerprint)
+    check(
+        "the option book may be executed",
+        option_book is not None,
+        (
+            f"{option_book.name} as of {option_book.as_of}"
+            if option_book is not None
+            else refusal.replace("\n", " ")
+        ),
+    )
+    if option_book is not None:
+        _print_option_book(option_book)
+    elif refusal:
+        print()
+        print(refusal)
+
+    # -- 5. HARD GATES 1 & 2: the Trading API, over MCP --------------- #
     try:
         with open_mcp(env, timeout=args.timeout) as mcp:
             tools = mcp.list_tools()
@@ -198,7 +315,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     except Exception as exc:
         check("MCP server (hard gate 2)", False, f"{type(exc).__name__}: {exc}")
 
-    # -- 5. HARD GATE 4, second half: is it a *dedicated new* account? - #
+    # -- 6. HARD GATE 4, second half: is it a *dedicated new* account? - #
     check(
         "dedicated new paper account (hard gate 4)",
         args.confirm_dedicated,
@@ -208,10 +325,10 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         fatal=True,
     )
 
-    # -- 6. the model key --------------------------------------------- #
+    # -- 7. the model key --------------------------------------------- #
     check("model key present", _model_key_present(env), _MODEL_KEY_NOTE, fatal=False)
 
-    # -- 7. the sleeve, in dollars ------------------------------------ #
+    # -- 8. the sleeve, in dollars ------------------------------------ #
     #
     # Not a gate. `limits.py` says of itself that "a risk limit nobody can read
     # is a risk limit nobody is enforcing", and these are the numbers that
@@ -269,13 +386,32 @@ def _model_key_present(env: dict[str, str]) -> bool:
 
 
 def _context(args: argparse.Namespace, mcp: Any) -> LiveContext:
+    """Assemble one live session — and refuse before it starts if there is no
+    rule to run.
+
+    specs/07 D1: a missing, unpinned, or otherwise unusable book means this
+    session places no orders, said as a clear exit rather than discovered as a
+    `NO_CANDIDATES` line every cycle for the rest of the day. There is
+    deliberately no hand-written fallback rule to trade instead.
+    """
     env = load_env_file(Path(args.env))
+    book, refusal = load_pinned_option_book(
+        _option_books_dir(args, env), _option_fingerprint(args, env)
+    )
+    if book is None:
+        raise SystemExit(f"no usable option book: {refusal}")
+    try:
+        right = right_for_structure(book.rule.structure)
+    except InvariantViolation as exc:
+        raise SystemExit(f"no usable option book: {exc}") from exc
     return LiveContext(
         data=build_market_data(env, feed=args.feed),
         mcp=mcp,
         journal=Journal(directory=Path(args.journal)),
         iv=IvHistoryStore(directory=Path(args.iv)),
         state=SessionState.load(Path(args.state), basis=OPTIONS_SLEEVE_BASIS),
+        option_book=book,
+        right=right,
     )
 
 
@@ -295,6 +431,31 @@ def _proposer(args: argparse.Namespace) -> Any:
     return DeepSeekProposer.from_env(load_env_file(Path(args.env)))
 
 
+def _adhoc_slot(slots: Sequence[Slot], now: datetime) -> Slot:
+    """The slot an ad-hoc cycle should gather against: the *identity* of the
+    next scheduled slot, evaluated as of *now* rather than as of a scheduled
+    time that has not happened yet.
+
+    `_slot_now` picks by the clock for a good reason -- see its own docstring
+    -- a stable, non-colliding `cycle_id` across repeated manual runs in one
+    morning. But the slot it returns is the *next scheduled* one, which is up
+    to a full slot interval (15 minutes) in the future, and `gather_for`'s
+    closure judges quote freshness against `slot.at` throughout: the chain,
+    the account read, the exit re-pricing, all of it. Handing that closure a
+    future timestamp means every quote fetched *now* is graded against a time
+    that has not happened yet and fails `max_quote_age` regardless of the
+    market -- found by running it: a live gap of 85 seconds between `now` and
+    the next slot turned a market with real candidates into `NO_CANDIDATES`
+    every single time.
+
+    Only `.at` is corrected here. `kind` and `sequence` still come from the
+    schedule, and `_free_sequence` refines `sequence` afterwards against the
+    journal -- neither of those needed `.at` to be right, only the freshness
+    checks inside `gather` did.
+    """
+    return replace(_slot_now(slots, now), at=now)
+
+
 def cmd_once(args: argparse.Namespace) -> int:
     """One cycle, now. Dry unless `--submit` is passed."""
     submit = bool(args.submit)
@@ -304,7 +465,7 @@ def cmd_once(args: argparse.Namespace) -> int:
         context = _context(args, mcp)
         now = datetime.now(UTC)
         slots = session_slots(*_session_bounds(args, now))
-        slot = _slot_now(slots, now)
+        slot = _adhoc_slot(slots, now)
         gather = gather_for(context, slots=slots)
         inputs = gather(slot)
         slot = replace(slot, sequence=_free_sequence(context, slot, inputs.read.underlying))
@@ -315,9 +476,11 @@ def cmd_once(args: argparse.Namespace) -> int:
             for leg in book.unexplained:
                 print(f"    {leg.contract}  qty {leg.quantity}")
 
+        screen = screen_for(context)
+        setup = screen.screen(inputs.read)
         record = run_cycle(
             read=inputs.read,
-            setup=DefaultScreen().screen(inputs.read),
+            setup=setup,
             candidates=inputs.candidates,
             portfolio=inputs.portfolio,
             limits=context.limits,
@@ -325,6 +488,7 @@ def cmd_once(args: argparse.Namespace) -> int:
             mcp=mcp if submit else None,
             proposer=_proposer(args),
             sequence=slot.sequence,
+            screen_reason="" if setup is not None else screen.explain(inputs.read),
         )
         context.journal.append(record)
         _print_cycle(record)
@@ -465,12 +629,21 @@ def _one_session(args: argparse.Namespace, slots: Sequence[Slot]) -> SessionResu
     env = load_env_file(Path(args.env))
     with open_mcp(env, timeout=args.timeout) as mcp:
         context = _context(args, mcp)
+        # Before waiting for the first slot: publish a full status snapshot
+        # now, so the dashboard says *running* from the moment this session
+        # actually is, rather than for up to a full `CYCLE_INTERVAL` after --
+        # see `publish_startup_status`'s own docstring for the live symptom
+        # this closes. Runs again on every supervised restart, which is
+        # correct: each restart opens a fresh session and the page should say
+        # so as promptly as the first one did.
+        publish_startup_status(context, as_of=datetime.now(UTC), slots=slots)
         return run_session(
             slots,
             gather_for(context, submit_exits=not args.dry_run, slots=slots),
             limits=context.limits,
             journal=context.journal,
             proposer=_proposer(args),
+            screen=screen_for(context),
             mcp=None if args.dry_run else mcp,
             sleep=time.sleep,
             now=lambda: datetime.now(UTC),
@@ -658,6 +831,84 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 # ------------------------------------------------------------------ #
+# iv-seed
+# ------------------------------------------------------------------ #
+
+
+def cmd_iv_seed(args: argparse.Namespace) -> int:
+    """Back-fill the IV history from a vendor CSV — `agent/iv_store.py`.
+
+    `iv_rank` is `None` until the store holds
+    `options.volatility.MIN_HISTORY` sessions, and inside a four-day
+    competition window it would never get there from live observation alone.
+    This command is the other way in: the vendor's own implied-volatility
+    series, read as plain CSV rows with the stdlib `csv` module and handed to
+    `IvHistoryStore.seed_from_vendor_history` — the only contact this process
+    has with anything `ai_quant_researcher` produced. No `aqr` import, no
+    `sys.path` reach into its source; the seam stays a file, both directions
+    (CLAUDE.md §2b, `tests/test_boundaries.py` guard 9).
+
+    **The trailing window is load-bearing, not a convenience default.**
+    `options/volatility.py` ranks the current reading against *every*
+    observation the store holds, and the researched rule meant the vendor's
+    own one-year range — `(iv_current - iv_year_low) / (iv_year_high -
+    iv_year_low)`. The vendor table in this repository runs back to 2019;
+    seeding the whole thing would rank against a window containing March 2020
+    and answer a different question under the name `iv_rank`, which is exactly
+    the substitution specs/07 D3 refuses for a feature this account cannot
+    measure and must equally refuse for one it can. `--days` defaults to 365
+    for that reason, not because a year is a round number.
+    """
+    import csv
+    from datetime import date as _date
+    from datetime import timedelta as _timedelta
+
+    from alphagate.core.identifiers import ticker
+    from alphagate.options.volatility import MIN_HISTORY, iv_rank
+
+    path = Path(args.frm)
+    if not path.is_file():
+        print(f"! {path} does not exist — nothing to seed")
+        return 1
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        print(f"! {path} has no rows")
+        return 1
+
+    latest = max(
+        (_date.fromisoformat(row["date"]) for row in rows if row.get("date")),
+        default=None,
+    )
+    since = latest - _timedelta(days=args.days) if latest is not None else None
+
+    symbol = ticker(args.symbol)
+    store = IvHistoryStore(directory=Path(args.iv))
+    added = store.seed_from_vendor_history(symbol, rows, since=since)
+    history = store.observations(symbol)
+
+    print(f"{path.name}: {len(rows)} rows read, {added} observation(s) added")
+    print(
+        f"{symbol}: {len(history)} observation(s) on file"
+        + (f", trailing {args.days}d since {since.isoformat()}" if since else "")
+    )
+    if len(history) >= 2:
+        # Mirrors `perceive.py`'s own `hv_rank`: the latest reading ranked
+        # against everything recorded before it, not against itself.
+        rank = iv_rank(history[-1], history[:-1])
+        print(
+            f"current iv_rank: {rank:.4f}"
+            if rank is not None
+            else f"current iv_rank: unmeasured ({len(history) - 1} prior observation(s), "
+            f"needs {MIN_HISTORY})"
+        )
+    else:
+        print(f"current iv_rank: unmeasured (0 prior observations, needs {MIN_HISTORY})")
+    return 0
+
+
+# ------------------------------------------------------------------ #
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -679,6 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="you have verified this is a new, dedicated paper account (hard gate 4)",
     )
+    _add_option_book_args(pre)
     pre.set_defaults(func=cmd_preflight)
 
     once = sub.add_parser("once", help="run one cycle now (dry by default)")
@@ -686,6 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
     once.add_argument("--no-model", action="store_true", help="deterministic proposer")
     once.add_argument("--open", default=None, help="session open, HH:MM UTC")
     once.add_argument("--close", default=None, help="session close, HH:MM UTC")
+    _add_option_book_args(once)
     once.set_defaults(func=cmd_once)
 
     run = sub.add_parser("run", help="run a whole session on the schedule")
@@ -698,6 +951,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-model", action="store_true", help="deterministic proposer")
     run.add_argument("--open", default=None, help="session open, HH:MM UTC")
     run.add_argument("--close", default=None, help="session close, HH:MM UTC")
+    _add_option_book_args(run)
     run.set_defaults(func=cmd_run)
 
     status = sub.add_parser("status", help="what the agent is doing right now")
@@ -712,6 +966,31 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(func=cmd_serve)
+
+    seed = sub.add_parser(
+        "iv-seed",
+        help="back-fill the IV history from a vendor CSV (see agent/iv_store.py)",
+    )
+    seed.add_argument(
+        "--from",
+        dest="frm",
+        default=DEFAULT_VOLATILITY_HISTORY,
+        help="vendor volatility CSV (date, iv_current, ... columns)",
+    )
+    seed.add_argument("--symbol", default="SPY", help="underlying to seed")
+    seed.add_argument(
+        "--days",
+        type=int,
+        default=365,
+        help=(
+            "trailing window in days, ending at the CSV's own latest date. "
+            "Load-bearing, not a convenience default: options/volatility.py "
+            "ranks against the whole window it is given, and the researched "
+            "rule meant the vendor's own one-year range — seeding more would "
+            "rank iv_rank() against a different range under the same name"
+        ),
+    )
+    seed.set_defaults(func=cmd_iv_seed)
 
     add_equity_commands(
         sub,

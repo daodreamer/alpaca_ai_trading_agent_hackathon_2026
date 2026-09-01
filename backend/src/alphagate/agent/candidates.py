@@ -47,7 +47,7 @@ adversarially selecting the Gate's refusals.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Final
 
@@ -72,6 +72,7 @@ __all__ = [
     "SHORTLIST_SPREAD_PCT",
     "build_candidates",
     "net_return_on_risk",
+    "spreads_by_delta",
     "summarise_menu",
     "vertical_credit_spreads",
 ]
@@ -128,6 +129,125 @@ def vertical_credit_spreads(
             )
         )
     return built
+
+
+def spreads_by_delta(
+    quotes: Mapping[OptionContract, OptionQuote],
+    *,
+    right: Right,
+    anchor_delta: float,
+    anchor_tolerance: float,
+    width_delta: float,
+    as_of: datetime,
+) -> list[tuple[OptionStructure, Mapping[OptionContract, OptionQuote]]]:
+    """Credit spreads whose wings are chosen by delta rather than by points.
+
+    specs/07 D1's rule names both legs by delta: sell the strike nearest
+    `anchor_delta`, buy protection nearest `width_delta` further out. A live
+    chain reshapes every session — the strike nearest 0.16 delta today is not
+    the strike nearest it tomorrow — so this is the resolution step the option
+    book's own `consumer_must_supply` asks for (`agent/option_book.py`), and it
+    is a second function rather than a `width` argument bolted onto
+    `vertical_credit_spreads` above: that one scans every strike for a *fixed*
+    points width, and there is no fixed width here to scan for.
+
+    Resolved once per expiry in the window, not once for the whole chain. A
+    14-DTE anchor and a 24-DTE anchor do not share a strike, and folding them
+    into one search would pick whichever expiry's skew happened to be closest
+    to the target — the nearest-to-target strike for neither.
+
+    **Absence is not zero.** A contract with no `greeks` on its quote is not a
+    candidate for either leg (specs/02 D2): a strike nobody can rank by delta
+    must not be silently ranked at delta zero, which would make it look like
+    the money strike and win every tie against a strike that is actually
+    measured.
+
+    **No fallback to a points wing.** If nothing beyond the anchor clears
+    `width_delta`, that expiry produces no structure. A chain thin enough that
+    no wing exists is a chain this rule was not researched to trade, and
+    substituting a points width would execute a different structure under the
+    name of this one — exactly what `option_book.py` refuses at load time for a
+    book that names `width_points` at all.
+    """
+    by_expiry: dict[date, list[OptionContract]] = {}
+    for contract in quotes:
+        if contract.right is right:
+            by_expiry.setdefault(contract.expiry, []).append(contract)
+
+    built: list[tuple[OptionStructure, Mapping[OptionContract, OptionQuote]]] = []
+    for expiry in sorted(by_expiry):
+        contracts = by_expiry[expiry]
+        short_contract = _nearest_by_delta(
+            contracts, quotes, target=anchor_delta, tolerance=anchor_tolerance
+        )
+        if short_contract is None:
+            continue
+        wings = [c for c in contracts if _further_otm(c, short_contract, right)]
+        long_contract = _nearest_by_delta(wings, quotes, target=width_delta, tolerance=None)
+        if long_contract is None:
+            continue
+        try:
+            structure = OptionStructure(
+                StructureKind.VERTICAL_CREDIT,
+                (Leg(short_contract, Side.SELL), Leg(long_contract, Side.BUY)),
+            )
+        except InvariantViolation:
+            # A shape the domain refuses is not a candidate — same discipline as
+            # `vertical_credit_spreads` above.
+            continue
+        built.append(
+            (
+                structure,
+                {
+                    short_contract: quotes[short_contract],
+                    long_contract: quotes[long_contract],
+                },
+            )
+        )
+    return built
+
+
+def _nearest_by_delta(
+    contracts: Sequence[OptionContract],
+    quotes: Mapping[OptionContract, OptionQuote],
+    *,
+    target: float,
+    tolerance: float | None,
+) -> OptionContract | None:
+    """The contract whose `|delta|` is closest to `target`, or `None`.
+
+    Ties broken by strike rather than left to dict order, so the choice is
+    total and reproducible (specs/05 D7) — two contracts equidistant from the
+    target must not pick differently between the run that journals a cycle and
+    the run that replays it.
+    """
+    best: OptionContract | None = None
+    best_key: tuple[float, int] | None = None
+    for contract in contracts:
+        quote = quotes.get(contract)
+        if quote is None or quote.greeks is None:
+            continue  # absence is not zero — specs/02 D2
+        distance = abs(abs(quote.greeks.delta) - target)
+        if tolerance is not None and distance > tolerance:
+            continue
+        key = (distance, contract.strike_thousandths)
+        if best_key is None or key < best_key:
+            best_key, best = key, contract
+    return best
+
+
+def _further_otm(candidate: OptionContract, anchor: OptionContract, right: Right) -> bool:
+    """Whether `candidate` sits further out of the money than `anchor`.
+
+    A put moves further OTM as its strike falls; a call, as its strike rises.
+    Getting this backwards would let the "protective" leg sit inside the
+    anchor, which is the same not-defined-risk shape `option_book.py` already
+    refuses at the book level (CLAUDE.md §3.6) — this is that rule applied to a
+    live chain instead of a sealed one.
+    """
+    if right is Right.PUT:
+        return candidate.strike < anchor.strike
+    return candidate.strike > anchor.strike
 
 
 def build_candidates(

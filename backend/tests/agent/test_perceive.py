@@ -54,6 +54,14 @@ SPY: Ticker = ticker("SPY")
 AS_OF = datetime(2026, 8, 26, 18, 0, tzinfo=UTC)
 EQUITY = Decimal(100_000)
 
+REAL_VOLATILITY_CSV = (
+    Path(__file__).resolve().parents[3]
+    / "ai_quant_researcher"
+    / "data-options-sealed"
+    / "volatility_history"
+    / "SPY.csv"
+)
+
 
 @pytest.fixture
 def data() -> RecordedMarketData:
@@ -243,6 +251,20 @@ class TestIvHistoryStore:
         assert not store.record(SPY, date(2026, 8, 26), 0.0)
         assert not store.record(SPY, date(2026, 8, 26), float("nan"))
 
+    def test_latest_is_none_on_an_empty_store(self, tmp_path: Path) -> None:
+        assert IvHistoryStore(directory=tmp_path).latest(SPY) is None
+
+    def test_latest_is_the_most_recent_day_not_the_last_one_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        """Recording order and calendar order need not agree, and `latest`
+        must answer for the calendar, not the write order."""
+        store = IvHistoryStore(directory=tmp_path)
+        store.record(SPY, date(2026, 8, 20), 0.11)
+        store.record(SPY, date(2026, 8, 26), 0.13)
+        store.record(SPY, date(2026, 8, 24), 0.12)
+        assert store.latest(SPY) == (date(2026, 8, 26), 0.13)
+
     def test_a_truncated_tail_is_skipped(self, tmp_path: Path) -> None:
         store = IvHistoryStore(directory=tmp_path)
         store.record(SPY, date(2026, 8, 26), 0.12)
@@ -272,10 +294,34 @@ class TestIvHistoryStore:
     def test_perception_uses_the_history_once_it_exists(
         self, tmp_path: Path, data: RecordedMarketData
     ) -> None:
-        """The path that lights up the moment OPRA is signed."""
+        """The path that lights up the moment OPRA is signed, or the vendor
+        seed is fresh — a rank needs both a history and a recent reading."""
         store = IvHistoryStore(directory=tmp_path)
         for day in range(1, 25):
-            store.record(SPY, date(2026, 7, day), 0.10 + 0.005 * day)
+            store.record(SPY, date(2026, 8, day), 0.10 + 0.005 * day)
+        latest = store.latest(SPY)
+        assert latest is not None
+        result = perceive(
+            data,
+            SPY,
+            as_of=AS_OF,
+            chain=chain(data),
+            history=store.observations(SPY),
+            history_as_of=latest[0],
+        )
+        assert result.read.iv_rank is not None
+        assert 0 <= result.read.iv_rank <= 100
+        assert result.volatility.observations == 24
+
+    def test_a_history_with_no_known_date_stays_unmeasured(
+        self, tmp_path: Path, data: RecordedMarketData
+    ) -> None:
+        """A caller that has not been taught to supply `history_as_of` must get
+        the safe answer — `None` — never the old behaviour of ranking against
+        `implied` regardless of how stale (or from where) the history is."""
+        store = IvHistoryStore(directory=tmp_path)
+        for day in range(1, 25):
+            store.record(SPY, date(2026, 8, day), 0.10 + 0.005 * day)
         result = perceive(
             data,
             SPY,
@@ -283,9 +329,96 @@ class TestIvHistoryStore:
             chain=chain(data),
             history=store.observations(SPY),
         )
-        assert result.read.iv_rank is not None
-        assert 0 <= result.read.iv_rank <= 100
-        assert result.volatility.observations == 24
+        assert result.read.iv_rank is None
+
+    def test_a_stale_vendor_reading_is_unmeasured_not_a_live_chain_fallback(
+        self, tmp_path: Path, data: RecordedMarketData
+    ) -> None:
+        """specs/07 D3, the bug this guards against: a live chain always has
+        *some* implied volatility, and a stale vendor row must not be quietly
+        replaced by it. The rule declines instead."""
+        store = IvHistoryStore(directory=tmp_path)
+        for day in range(1, 25):
+            store.record(SPY, date(2026, 7, day), 0.10 + 0.005 * day)
+        latest = store.latest(SPY)
+        assert latest is not None
+        assert (AS_OF.date() - latest[0]).days > 5, "the fixture must actually be stale"
+        result = perceive(
+            data,
+            SPY,
+            as_of=AS_OF,
+            chain=chain(data),
+            history=store.observations(SPY),
+            history_as_of=latest[0],
+        )
+        assert result.read.iv_rank is None
+        # The live chain's own ATM IV is real and available -- proving a
+        # fallback to it would have been *possible*, and confirming the code
+        # declined instead of reaching for it.
+        assert atm_implied_volatility(chain(data), result.read.spot) is not None
+
+    def test_iv_vs_hv_still_uses_the_live_chain_regardless(
+        self, tmp_path: Path, data: RecordedMarketData
+    ) -> None:
+        """The rank and the ratio answer different questions. A stale or
+        missing vendor history must not blind `iv_vs_hv`, which is correctly
+        computed from today's own chain either way."""
+        without_history = perceive(data, SPY, as_of=AS_OF, chain=chain(data))
+        store = IvHistoryStore(directory=tmp_path)
+        for day in range(1, 25):
+            store.record(SPY, date(2026, 7, day), 0.10 + 0.005 * day)
+        latest = store.latest(SPY)
+        assert latest is not None
+        with_stale_history = perceive(
+            data,
+            SPY,
+            as_of=AS_OF,
+            chain=chain(data),
+            history=store.observations(SPY),
+            history_as_of=latest[0],
+        )
+        assert with_stale_history.read.iv_rank is None
+        assert with_stale_history.read.iv_vs_hv is not None
+        assert with_stale_history.read.iv_vs_hv == without_history.read.iv_vs_hv
+
+
+@pytest.mark.skipif(
+    not REAL_VOLATILITY_CSV.exists(), reason="vendor volatility CSV not checked out"
+)
+def test_the_vendor_arithmetic_is_reproduced_exactly(tmp_path: Path) -> None:
+    """Regression pin for the exact defect this fix closes.
+
+    A live cycle read `iv_rank()=19.38` from the chain on 2026-08-28; the
+    vendor's own arithmetic on the same day says `4.36` — opposite sides of
+    the rule's threshold of 15. This seeds the real trailing year from the
+    committed vendor CSV and checks `options.volatility.iv_rank` reproduces
+    the vendor's own `(iv_current - iv_year_low) / (iv_year_high -
+    iv_year_low)` for its own latest row, to the precision the CSV itself
+    carries.
+    """
+    import csv
+    from datetime import timedelta as _timedelta
+
+    from alphagate.options.volatility import iv_rank
+
+    with REAL_VOLATILITY_CSV.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    latest_row = max(rows, key=lambda r: r["date"])
+    latest_day = date.fromisoformat(latest_row["date"])
+
+    store = IvHistoryStore(directory=tmp_path)
+    added = store.seed_from_vendor_history(SPY, rows, since=latest_day - _timedelta(days=365))
+    assert added > 0
+
+    history = store.observations(SPY)
+    current = float(latest_row["iv_current"])
+    vendor_low = float(latest_row["iv_year_low"])
+    vendor_high = float(latest_row["iv_year_high"])
+    expected_pct = (current - vendor_low) / (vendor_high - vendor_low) * 100
+
+    actual = iv_rank(current, history)
+    assert actual is not None
+    assert actual * 100 == pytest.approx(expected_pct, abs=0.05)
 
 
 class TestReplay:

@@ -33,7 +33,7 @@ rank would be measuring the lunch lull.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -65,6 +65,18 @@ class IvHistoryStore:
     def observations(self, symbol: Ticker) -> list[float]:
         """The history, oldest first. Missing file means no history, not zero."""
         return [value for _, value in self._entries(symbol)]
+
+    def latest(self, symbol: Ticker) -> tuple[date, float] | None:
+        """The most recent observation, with its date. `None` when there is none.
+
+        `observations()` drops the date because most callers only want the
+        series; the staleness check `agent/perceive.py` runs before trusting a
+        rank against this series needs the date back — a vendor row seeded two
+        months ago is not "no history", but it is not current either, and
+        `iv_rank` must be able to tell the two apart (specs/07 D3).
+        """
+        entries = self._entries(symbol)
+        return entries[-1] if entries else None
 
     def record(self, symbol: Ticker, day: date, implied: float) -> bool:
         """Append one observation. Returns False if the day is already recorded.
@@ -132,6 +144,60 @@ class IvHistoryStore:
                 rate=rate,
             )
             if vol is not None and self.record(symbol, bar.session_date, vol):
+                added += 1
+        return added
+
+    def seed_from_vendor_history(
+        self,
+        symbol: Ticker,
+        rows: Iterable[Mapping[str, str]],
+        *,
+        column: str = "iv_current",
+        since: date | None = None,
+    ) -> int:
+        """Back-fill from a vendor volatility table. Returns observations added.
+
+        The other way out of the OPRA problem, and the one that is actually
+        available: the free DoltHub table behind `ai_quant_researcher`'s research
+        cache carries one at-the-money implied volatility per session for SPY
+        back to 2019, which is exactly what this store wants and needs no
+        entitlement at all.
+
+        **Why this does not breach CLAUDE.md §2b.** It takes parsed rows, not a
+        path and not a researcher object: the caller reads a CSV and hands over
+        mappings, so the seam between the two projects stays a file in this
+        direction too. Nothing here imports `aqr`, and `tests/test_boundaries.py`
+        guard 9 still holds.
+
+        **Why the window matters, and why `since` is not optional in practice.**
+        `options/volatility.py` ranks against the whole history it is given, so
+        seeding a trailing *year* makes `iv_rank` mean what the researched rule
+        meant by it — current IV against its own one-year range, the vendor's
+        own `(iv_current - iv_year_low) / (iv_year_high - iv_year_low)`. Seeding
+        seven years would rank against a range containing March 2020 and answer
+        a different question under the same name, which is the failure specs/07
+        D3 refuses for unmeasurable features and must equally refuse here.
+
+        Idempotent per day, through `record`. Re-running after a data refresh
+        adds only the sessions that are new.
+        """
+        added = 0
+        for row in rows:
+            raw_day = str(row.get("date", "")).strip()
+            raw_iv = str(row.get(column, "")).strip()
+            if not raw_day or not raw_iv:
+                continue
+            try:
+                day = date.fromisoformat(raw_day)
+                implied = float(raw_iv)
+            except ValueError:
+                # A vendor blank is a missing observation, not a zero. Skipping
+                # it leaves a gap the rank tolerates; recording 0.0 would put an
+                # impossible low into the range and flatter every later rank.
+                continue
+            if since is not None and day < since:
+                continue
+            if self.record(symbol, day, implied):
                 added += 1
         return added
 

@@ -21,6 +21,7 @@ from alphagate.agent.earnings import (
     earnings_within,
 )
 from alphagate.agent.model import MarketRead
+from alphagate.agent.option_book import EntryRule, OptionRule
 from alphagate.agent.schedule import (
     CYCLE_INTERVAL,
     FIRST_CYCLE_DELAY,
@@ -29,7 +30,13 @@ from alphagate.agent.schedule import (
     next_slot,
     session_slots,
 )
-from alphagate.agent.screen import BIAS_BEARISH, BIAS_BULLISH, BIAS_NEUTRAL, DefaultScreen
+from alphagate.agent.screen import (
+    BIAS_BEARISH,
+    BIAS_BULLISH,
+    BIAS_NEUTRAL,
+    BookScreen,
+    DefaultScreen,
+)
 from alphagate.core.errors import InvariantViolation
 from alphagate.core.identifiers import ticker
 from tests.agent.conftest import SPY, read
@@ -194,6 +201,76 @@ class TestScreen:
         read_ = complete_read()
         first, second = DefaultScreen().screen(read_), DefaultScreen().screen(read_)
         assert first == second
+
+
+def option_rule(
+    expression: str = "iv_rank() < 15",
+    clauses: tuple[tuple[str, str, float], ...] = (("iv_rank", "<", 15.0),),
+) -> OptionRule:
+    """A rule shaped like the real book's, built directly rather than through
+    `load_option_book` — `test_option_book.py` already covers parsing; this
+    file only needs a validated rule to hand `BookScreen`."""
+    return OptionRule(
+        underlying=SPY,
+        structure="put_credit_spread",
+        entry=EntryRule(expression=expression, clauses=clauses),
+        dte_target=14,
+        dte_tolerance=10,
+        anchor_delta=0.16,
+        anchor_tolerance=0.06,
+        width_delta=0.08,
+        min_sessions_between_entries=1,
+        risk_per_trade=Decimal("0.02"),
+        max_concurrent=3,
+    )
+
+
+class TestBookScreen:
+    """specs/07 D1: the screen is the book's entry rule, verbatim."""
+
+    def test_it_produces_a_setup_when_the_entry_fires(self) -> None:
+        screen = BookScreen(option_rule())
+        setup = screen.screen(complete_read(iv_rank=Decimal("10")))
+        assert setup is not None
+        assert setup.bias == BIAS_NEUTRAL, "a regime filter argues for neither side"
+        assert setup.name == "put_credit_spread"
+
+    def test_it_declines_when_the_entry_does_not_fire(self) -> None:
+        screen = BookScreen(option_rule())
+        assert screen.screen(complete_read(iv_rank=Decimal("50"))) is None
+
+    def test_the_decline_reason_distinguishes_no_from_unmeasured(self) -> None:
+        """The whole point: a reader of the journal must be able to tell "the
+        rule said no" apart from "the feature was unmeasured"."""
+        screen = BookScreen(option_rule())
+        said_no = screen.explain(complete_read(iv_rank=Decimal("50")))
+        unmeasured = screen.explain(complete_read(iv_rank=None))
+        assert "not <" in said_no
+        assert "unmeasured" in unmeasured
+        assert said_no != unmeasured
+
+    def test_it_reads_no_trend_at_all(self) -> None:
+        """The researched entry is a volatility-regime filter, not a direction
+        call, so an unmeasured trend must not block it the way it blocks
+        `DefaultScreen`."""
+        screen = BookScreen(option_rule())
+        setup = screen.screen(complete_read(iv_rank=Decimal("5"), trend=None))
+        assert setup is not None
+
+    def test_it_is_deterministic(self) -> None:
+        screen = BookScreen(option_rule())
+        read_ = complete_read(iv_rank=Decimal("5"))
+        assert screen.screen(read_) == screen.screen(read_)
+
+    def test_a_multi_clause_entry_still_declines_as_one_reason(self) -> None:
+        rule = option_rule(
+            expression="iv_rank() < 15 and hv_rank() >= 20",
+            clauses=(("iv_rank", "<", 15.0), ("hv_rank", ">=", 20.0)),
+        )
+        screen = BookScreen(rule)
+        read_ = complete_read(iv_rank=Decimal("5"), hv_rank=Decimal("3"))
+        assert screen.screen(read_) is None
+        assert "hv_rank" in screen.explain(read_)
 
 
 class TestEarnings:

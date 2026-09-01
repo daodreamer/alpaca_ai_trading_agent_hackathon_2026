@@ -28,9 +28,10 @@ from alphagate.agent import MENU_LIMIT, build_candidates, size_for
 from alphagate.agent.candidates import (
     SHORTLIST_SPREAD_PCT,
     net_return_on_risk,
+    spreads_by_delta,
     vertical_credit_spreads,
 )
-from alphagate.options import OptionContract, OptionQuote, OptionStructure, Right
+from alphagate.options import Greeks, OptionContract, OptionQuote, OptionStructure, Right, Side
 from alphagate.risk import DEFAULT_LIMITS, RiskLimits
 from tests.agent.conftest import EQUITY, NOW, contract, menu, put_chain, quote, risk_for
 
@@ -306,3 +307,134 @@ class TestDeltaBudget:
         """"Silently filtering it out here would hide a data-quality problem
         behind an empty menu." `known_greeks` should veto it, visibly."""
         assert len(menu(greeks=None)) > 0
+
+
+class TestSpreadsByDelta:
+    """specs/07 D5's wing selection: the book names deltas, not points.
+
+    Every quote here is built by hand, at one expiry, so each test controls
+    exactly the deltas the selection has to choose between rather than
+    inheriting the ladder `put_chain` was shaped for a points-width scan.
+    """
+
+    ANCHOR = 0.16
+    TOLERANCE = 0.06
+    WIDTH = 0.08
+
+    @staticmethod
+    def _quote(
+        strike: str, delta: float | None, *, right: Right = Right.PUT
+    ) -> tuple[OptionContract, OptionQuote]:
+        c = contract(strike, right)
+        greeks = None if delta is None else Greeks(delta, 0.01, -0.02, 0.05, -0.01, 0.18)
+        return c, quote(c, "1.00", "1.05", greeks=greeks)
+
+    def _chain(
+        self, *pairs: tuple[str, float | None], right: Right = Right.PUT
+    ) -> dict[OptionContract, OptionQuote]:
+        return dict(self._quote(strike, delta, right=right) for strike, delta in pairs)
+
+    def _select(
+        self, quotes: dict[OptionContract, OptionQuote], *, right: Right = Right.PUT
+    ) -> list[tuple[OptionStructure, object]]:
+        return spreads_by_delta(
+            quotes,
+            right=right,
+            anchor_delta=self.ANCHOR,
+            anchor_tolerance=self.TOLERANCE,
+            width_delta=self.WIDTH,
+            as_of=NOW,
+        )
+
+    def test_exact_anchor_match_wins_the_short_leg(self) -> None:
+        quotes = self._chain(("760", -0.16), ("755", -0.30), ("745", -0.08))
+        built = self._select(quotes)
+        assert len(built) == 1
+        structure, _ = built[0]
+        short = next(leg for leg in structure.legs if leg.side is Side.SELL)
+        assert short.contract.strike == Decimal("760")
+
+    def test_nearest_within_tolerance_beats_a_farther_candidate(self) -> None:
+        """0.20 is 0.04 from the anchor; 0.10 is 0.06 from it — both inside
+        tolerance, but 0.20 is the nearer one and must win."""
+        quotes = self._chain(("760", -0.20), ("758", -0.10), ("745", -0.08))
+        built = self._select(quotes)
+        short = next(leg for leg in built[0][0].legs if leg.side is Side.SELL)
+        assert short.contract.strike == Decimal("760")
+
+    def test_outside_tolerance_produces_no_structure(self) -> None:
+        """0.30 is 0.14 from a 0.16 anchor with a 0.06 tolerance — too far, and
+        there is nothing else to anchor on."""
+        quotes = self._chain(("760", -0.30), ("745", -0.08))
+        assert self._select(quotes) == []
+
+    def test_missing_greeks_are_not_ranked_at_delta_zero(self) -> None:
+        """A `None`-greeks quote must not win by being mistaken for the money
+        strike. The nearest strike that actually carries a delta must be
+        chosen instead of the one with no greeks at all."""
+        quotes = self._chain(("760", None), ("758", -0.17), ("745", -0.08))
+        built = self._select(quotes)
+        short = next(leg for leg in built[0][0].legs if leg.side is Side.SELL)
+        assert short.contract.strike == Decimal("758")
+
+    def test_a_wing_with_no_greeks_yields_no_structure(self) -> None:
+        """The short leg resolves fine; the only possible wing has no delta to
+        rank it by, so there is no fallback to a points width — nothing."""
+        quotes = self._chain(("760", -0.16), ("745", None))
+        assert self._select(quotes) == []
+
+    def test_the_wing_must_be_strictly_further_out_of_the_money(self) -> None:
+        """765 is a dead-on 0.08 match — closer than any real wing could be —
+        but it sits *above* the anchor, which for a put is nearer the money,
+        not further from it. It must be excluded regardless of how good the
+        delta match is, and the genuine (if imperfect) wing must win instead."""
+        quotes = self._chain(
+            ("760", -0.16),  # anchor
+            ("765", -0.08),  # exact width match, wrong side of the anchor
+            ("745", -0.03),  # the only legitimate, further-OTM wing
+        )
+        built = self._select(quotes)
+        long_leg = next(leg for leg in built[0][0].legs if leg.side is Side.BUY)
+        assert long_leg.contract.strike == Decimal("745")
+
+    def test_calls_select_the_higher_strike_as_the_wing(self) -> None:
+        """The put case moves OTM downward; calls move OTM upward, and the same
+        selection has to hold with the direction reversed."""
+        quotes = self._chain(
+            ("760", 0.16), ("770", 0.08), ("750", 0.30), right=Right.CALL
+        )
+        built = self._select(quotes, right=Right.CALL)
+        assert len(built) == 1
+        structure, _ = built[0]
+        short = next(leg for leg in structure.legs if leg.side is Side.SELL)
+        long_leg = next(leg for leg in structure.legs if leg.side is Side.BUY)
+        assert short.contract.strike == Decimal("760")
+        assert long_leg.contract.strike == Decimal("770")
+
+    def test_the_menu_feeds_build_candidates_unchanged(self) -> None:
+        """The output shape must be exactly what `vertical_credit_spreads`
+        produces, since both are handed straight to `build_candidates`."""
+        short_c = contract("760")
+        long_c = contract("745")
+        # Priced like a genuine credit: the near-the-money short leg costs more
+        # than the further-OTM long leg, which is what makes the net premium
+        # positive and lets sizing put at least one contract on the menu.
+        quotes = {
+            short_c: quote(
+                short_c, "3.20", "3.25", greeks=Greeks(-0.16, 0.01, -0.02, 0.05, -0.01, 0.18)
+            ),
+            long_c: quote(
+                long_c, "1.25", "1.29", greeks=Greeks(-0.08, 0.01, -0.02, 0.05, -0.01, 0.18)
+            ),
+        }
+        built = self._select(quotes)
+        # A 15-wide spread costs more than 1% of `EQUITY` to fund one contract
+        # of; a larger account is used here purely so sizing does not zero the
+        # candidate out before this test gets to look at it.
+        funded_equity = Decimal(500_000)
+        candidates = build_candidates(built, limits=DEFAULT_LIMITS, equity=funded_equity, as_of=NOW)
+        assert len(candidates) == 1
+        assert candidates[0].structure.legs[0].contract.strike in {
+            Decimal("760"),
+            Decimal("745"),
+        }

@@ -40,6 +40,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Final
 
@@ -47,18 +48,24 @@ from alphagate.agent import (
     CycleInputs,
     IvHistoryStore,
     MarketRead,
+    OptionBook,
+    OptionRule,
     Slot,
     Underlying,
+    UnusableOptionBook,
     build_candidates,
+    load_option_book,
     next_slot,
     perceive,
     session_slots,
+    spreads_by_delta,
     tradeable_today,
     vertical_credit_spreads,
 )
 from alphagate.agent.book import BookRead, HeldPosition, read_book
 from alphagate.agent.cycle import CycleRecord, run_exit_cycle
 from alphagate.agent.exits import DEFAULT_EXIT_POLICY, ExitPolicy
+from alphagate.agent.screen import BookScreen, DefaultScreen, Screen
 from alphagate.core.bar import Feed
 from alphagate.core.errors import InvariantViolation
 from alphagate.core.identifiers import Ticker
@@ -70,6 +77,7 @@ from alphagate.execution import (
     require_paper_account,
 )
 from alphagate.journal import Journal
+from alphagate.live.equity import UnpinnedBook, find_latest_book, unpinned_books
 from alphagate.live.status import build_status, write_status
 from alphagate.marketdata import MarketData
 from alphagate.marketdata.alpaca import AlpacaMarketData
@@ -83,8 +91,13 @@ __all__ = [
     "build_market_data",
     "expiry_window",
     "gather_for",
+    "load_pinned_option_book",
     "market_session",
     "mcp_session",
+    "option_book_window",
+    "publish_startup_status",
+    "right_for_structure",
+    "screen_for",
 ]
 
 EXIT_SEQUENCE_BASE = 500
@@ -96,12 +109,149 @@ would collapse two decisions into one journal line (specs/06 D2)."""
 
 DTE_MIN = 3
 DTE_MAX = 21
-"""The expiry window candidates are drawn from — specs/07 D5.
+"""The expiry window candidates are drawn from, absent a book — specs/07 D5.
 
 Wider than the Gate's own window on purpose: the chain request should return
 everything the Gate might accept, and let the Gate refuse. A request narrower
 than the rule would hide candidates from the menu and call it a risk decision.
-"""
+
+Once a book is loaded, `option_book_window` below replaces this with the
+book's own window intersected against the Gate's — the book is the rule the
+research validated, and this pair is only the fallback for a context built
+with no book at all (offline tests, and any caller that pre-dates one)."""
+
+
+def right_for_structure(structure: str) -> Right:
+    """Which side of the chain a rule's structure trades — specs/07 D5.
+
+    Only the two verticals `agent/candidates.py` actually builds.
+    `option_book.py`'s loader also admits `iron_condor` — it is defined risk on
+    its own terms, and refusing it there would be refusing a shape this
+    executor might one day build rather than one it cannot represent. But
+    nothing here builds one: `spreads_by_delta` resolves a single vertical, not
+    two. A book naming `iron_condor` is therefore refused here, at the one
+    place that would otherwise silently trade half of it and call the other
+    half a quiet market.
+    """
+    if structure == "put_credit_spread":
+        return Right.PUT
+    if structure == "call_credit_spread":
+        return Right.CALL
+    raise InvariantViolation(
+        f"structure {structure!r} has no vertical-spread executor in this build "
+        "(agent/candidates.py builds put_credit_spread and call_credit_spread "
+        "only); refusing rather than resolving half of it"
+    )
+
+
+def option_book_window(rule: OptionRule, limits: RiskLimits) -> tuple[int, int]:
+    """The chain request's DTE window: the book's own, intersected with the
+    Gate's `dte_range`.
+
+    Requesting the book's window unmodified is a live bug waiting to happen.
+    This book's tolerance reaches 24 DTE (14 target, ±10 — `rule.dte_window()`)
+    and `SLEEVE_LIMITS.dte_range` stops at 21 (specs/03 D5): a 24-DTE candidate
+    would price, size and rank onto the menu only to be vetoed by the Gate
+    every single cycle — exactly the "menu whose ranking fights the Gate"
+    failure `agent/candidates.py`'s own module docstring describes, just
+    arriving from the expiry axis instead of the delta one. The book is not
+    wrong to want 24; the account's own risk limit is simply narrower than the
+    researched window on this one edge, and the chain request should ask for
+    what the Gate can actually approve rather than for what would be vetoed.
+
+    This is the mirror image of `DTE_MIN`/`DTE_MAX`, which asks *wider* than
+    the Gate on purpose so the Gate does the refusing. Here the *book* is the
+    wider side, so the request narrows to match — the Gate's own range is
+    never widened to accommodate the book (CLAUDE.md rule: do not widen the
+    Gate).
+    """
+    book_low, book_high = rule.dte_window()
+    gate_low, gate_high = limits.dte_range
+    return max(book_low, gate_low), min(book_high, gate_high)
+
+
+def load_pinned_option_book(
+    directory: Path, pinned_fingerprint: str
+) -> tuple[OptionBook | None, str]:
+    """The pinned option rule, or the reason there is none — specs/07 D1.
+
+    Mirrors `equity.find_latest_book` plus `equity.read_book`, adapted to
+    return a reason instead of raising: `preflight`, `once` and `run` each
+    report a missing or unusable book in their own voice, and there is
+    deliberately no hand-written fallback rule on any of these paths — a book
+    that cannot be loaded means the agent places no orders this session, said
+    plainly, never a quieter strategy standing in for the one the research
+    validated.
+
+    Digested over the file's own **bytes**, not a re-serialised mapping, for
+    the reason `equity.py` gives: the pin is a claim about one specific file,
+    and hashing a copy re-encoded by this process's JSON settings would hash
+    this process rather than the artefact `aqr option-book` wrote.
+    """
+    path = find_latest_book(directory, pinned_fingerprint)
+    if path is None:
+        advice = _option_pin_advice(unpinned_books(directory, pinned_fingerprint))
+        return None, (
+            f"no option book for {pinned_fingerprint} in {directory}; "
+            + (advice or "run `aqr option-book` first")
+        )
+    try:
+        raw_bytes = path.read_bytes()
+        payload = json.loads(raw_bytes.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise UnusableOptionBook(
+                f"{path.name} is a {type(payload).__name__}, expected an object"
+            )
+        book = load_option_book(
+            payload,
+            pinned_fingerprint=pinned_fingerprint,
+            digest=sha256(raw_bytes).hexdigest(),
+        )
+    except (UnusableOptionBook, OSError, UnicodeDecodeError, ValueError) as failure:
+        return None, f"{path.name}: {failure}"
+    return book, ""
+
+
+def _option_pin_advice(found: Sequence[UnpinnedBook]) -> str:
+    """The option-sleeve twin of `equity.changed_pin_advice`.
+
+    Not reused verbatim: that function's own wording names
+    `ALPHAGATE_STRATEGY_FINGERPRINT` and specs/09 D1, and printing the wrong
+    environment variable at the moment an operator is trying to fix a stale pin
+    is worse than printing nothing.
+    """
+    if not found:
+        return ""
+    return "\n".join(
+        [
+            "No book for the pinned option rule, but these are on disk:",
+            *(
+                f"  {book.name or '(unnamed)'} [{book.fingerprint}] "
+                f"as of {book.as_of or '?'}  — {book.path.name}"
+                for book in found
+            ),
+            "If this account should be executing one of them, change "
+            "ALPHAGATE_OPTION_FINGERPRINT in .env.local to that fingerprint "
+            "and restart. Until then the pin stands and these are ignored — "
+            "specs/07 D1.",
+        ]
+    )
+
+
+def screen_for(context: LiveContext) -> Screen:
+    """The screen this session runs — specs/07 D1.
+
+    `BookScreen` once a rule is loaded. `DefaultScreen` is only reachable from
+    a `LiveContext` built with no book at all — `cli.py`'s composition root
+    never produces one of those for `once` or `run` (a missing book exits
+    before a session forms, see `_context` there) — but offline tests of this
+    module, and any future caller that has not adopted a book yet, still build
+    one routinely, and `DefaultScreen`'s fail-closed default is the right thing
+    to fall back to rather than a screen that trades with no rule at all.
+    """
+    if context.option_book is not None:
+        return BookScreen(context.option_book.rule)
+    return DefaultScreen()
 
 
 def build_market_data(env: dict[str, str], *, feed: str | None = None) -> AlpacaMarketData:
@@ -254,7 +404,26 @@ class LiveContext:
 
     A single default rather than a switch: the direction the strategy takes is
     a strategy decision (07 D4), and threading it through the wiring as an
-    option would put it somewhere nobody reads."""
+    option would put it somewhere nobody reads. Once a book is loaded, `cli.py`
+    sets this from `right_for_structure(option_book.rule.structure)` rather
+    than leaving the two free to disagree about which side of the chain is
+    being traded."""
+
+    option_book: OptionBook | None = None
+    """The validated rule this session executes — specs/07 D1.
+
+    Named `option_book` rather than `book` because `LiveContext.book()` above
+    is already a method — the broker/journal read the rest of this module
+    calls "the book" in a different sense (positions and P&L, not a rule), and
+    reusing the word for both would make every reference to either ambiguous
+    at the call site.
+
+    `None` only for a context built with no book at all: the offline tests of
+    this module, and nothing `cli.py`'s composition root produces for `once` or
+    `run` — a book that fails to load exits before a `LiveContext` exists
+    (specs/07 D1's "no book, no orders"). `screen_for` and `gather_for` both
+    read this to decide whether to run the researched rule or fall back to the
+    pre-book defaults."""
 
     last_book: BookRead | None = None
     """The most recent book read, kept for the caller's reporting."""
@@ -320,9 +489,19 @@ class LiveContext:
         return book
 
 
-def expiry_window(as_of: datetime) -> tuple[date, date]:
+def expiry_window(
+    as_of: datetime, *, dte_window: tuple[int, int] = (DTE_MIN, DTE_MAX)
+) -> tuple[date, date]:
+    """The chain request's date range, `dte_window` days out from `as_of`.
+
+    Defaults to the pre-book fallback so every existing caller and test is
+    unchanged; `gather_for` passes `option_book_window(...)` once a book is
+    loaded, which is a *narrower* pair than the default on the high end (the
+    Gate's `dte_range` tops out at 21 where a book may reach further).
+    """
     today = as_of.date()
-    return today + timedelta(days=DTE_MIN), today + timedelta(days=DTE_MAX)
+    low, high = dte_window
+    return today + timedelta(days=low), today + timedelta(days=high)
 
 
 def gather_for(
@@ -353,7 +532,12 @@ def gather_for(
         one."""
         underlying = context.underlying_for(slot)
         symbol = underlying.symbol
-        low, high = expiry_window(slot.at)
+        window = (
+            option_book_window(context.option_book.rule, context.limits)
+            if context.option_book is not None
+            else (DTE_MIN, DTE_MAX)
+        )
+        low, high = expiry_window(slot.at, dte_window=window)
 
         chain = context.data.option_chain(
             symbol,
@@ -361,12 +545,14 @@ def gather_for(
             expiry_to=high,
             right=_api_right(context.right),
         )
+        latest_iv = context.iv.latest(symbol)
         perception = perceive(
             context.data,
             symbol,
             as_of=slot.at,
             chain=chain,
             history=context.iv.observations(symbol),
+            history_as_of=latest_iv[0] if latest_iv is not None else None,
         )
         upcoming = next_slot(schedule, slot.at) if schedule else None
         context.next_slot_at = upcoming.at if upcoming else None
@@ -375,9 +561,20 @@ def gather_for(
         if account is None:  # pragma: no cover - book() always sets it
             raise RuntimeError('book() did not record an account read')
 
-        structures = vertical_credit_spreads(
-            chain, right=context.right, width=underlying.spread_width, as_of=slot.at
-        )
+        if context.option_book is not None:
+            rule = context.option_book.rule
+            structures = spreads_by_delta(
+                chain,
+                right=context.right,
+                anchor_delta=rule.anchor_delta,
+                anchor_tolerance=rule.anchor_tolerance,
+                width_delta=rule.width_delta,
+                as_of=slot.at,
+            )
+        else:
+            structures = vertical_credit_spreads(
+                chain, right=context.right, width=underlying.spread_width, as_of=slot.at
+            )
         candidates = build_candidates(
             structures,
             limits=context.limits,
@@ -555,6 +752,67 @@ def _publish_status(
         write_status(snapshot, directory=context.journal.directory)
     except Exception:
         return
+
+
+def publish_startup_status(
+    context: LiveContext, *, as_of: datetime, slots: Sequence[Slot]
+) -> None:
+    """A status snapshot the instant a session starts, before any slot runs.
+
+    `_publish_status` above is only ever called from inside `gather_for`'s
+    per-slot closure, so a session that only just started publishes nothing
+    until its first slot fires -- up to a full `CYCLE_INTERVAL` (15 minutes)
+    later. `interface/status.py`'s staleness rule reads whatever snapshot was
+    already on disk in the meantime, so a freshly started, perfectly healthy
+    `run` reports **not running** on the dashboard for that whole gap. Measured
+    live: 30 minutes of "not running" while the process was alive throughout,
+    and the moment an operator who just typed the command is watching most
+    closely.
+
+    **A full snapshot, not a bare "alive" marker.** Building one means reading
+    the account and the sleeve the same way a slot would (`context.book`), and
+    that read is most of the value here: a bad credential, a blocked account or
+    a dead MCP subprocess shows up now, at startup, instead of silently inside
+    the first slot's own `except Exception: return` fifteen minutes later.
+
+    **Decides and journals nothing** (specs/06). No screen, no proposer, no
+    Gate runs, and no `Slot` from `slots` is consumed or advanced past --
+    `slot_sequence` is written as `-1` because no cycle has run to have one,
+    and there is nothing here for a journal line to record. `_stages_today`
+    still runs, so the page's today-so-far counts are right from the first
+    paint rather than empty until the first slot writes them.
+
+    Never raises to the caller -- `supervised_run` restarts a session that
+    threw, and a startup publish that could itself kill the session it is
+    trying to make visible would be a strange kind of fix. But a swallowed
+    failure here reproduces exactly the bug this function exists to close --
+    the page silently not appearing -- so unlike `_publish_status`, a failure
+    is printed to the operator's console rather than passed over in silence.
+    """
+    try:
+        book = context.book(as_of=as_of)
+        account = context.last_account
+        if account is None:  # pragma: no cover - book() always sets it
+            raise RuntimeError("book() did not record an account read")
+        upcoming = next_slot(tuple(slots), as_of)
+        context.next_slot_at = upcoming.at if upcoming else None
+        snapshot = build_status(
+            account=account,
+            book=book,
+            limits=context.limits,
+            policy=context.exit_policy,
+            marks={},
+            as_of=as_of,
+            next_slot=context.next_slot_at,
+            slot_sequence=-1,
+            universe=tuple(str(u.symbol) for u in context.universe),
+            peak_equity=context.state.peak_equity,
+            stage_counts=_stages_today(context, as_of),
+            note="session starting -- no cycle has run yet",
+        )
+        write_status(snapshot, directory=context.journal.directory)
+    except Exception as exc:
+        print(f"! could not publish a startup status: {type(exc).__name__}: {exc}")
 
 
 def _stages_today(context: LiveContext, as_of: datetime) -> dict[str, int]:

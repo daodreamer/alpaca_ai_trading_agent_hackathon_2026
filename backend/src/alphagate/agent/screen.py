@@ -31,8 +31,16 @@ from decimal import Decimal
 from typing import Final, Protocol, runtime_checkable
 
 from alphagate.agent.model import MarketRead, Setup
+from alphagate.agent.option_book import OptionRule, measurable_read
 
-__all__ = ["BIAS_BEARISH", "BIAS_BULLISH", "BIAS_NEUTRAL", "DefaultScreen", "Screen"]
+__all__ = [
+    "BIAS_BEARISH",
+    "BIAS_BULLISH",
+    "BIAS_NEUTRAL",
+    "BookScreen",
+    "DefaultScreen",
+    "Screen",
+]
 
 BIAS_BULLISH: Final = "bullish"
 BIAS_BEARISH: Final = "bearish"
@@ -44,9 +52,18 @@ _BEARISH_PHASES: Final = frozenset({"STRONG_BEARISH", "BEARISH", "WATCH_BEAR"})
 
 @runtime_checkable
 class Screen(Protocol):
-    """Turn a read into a setup, or decline to. Pure."""
+    """Turn a read into a setup, or decline to. Pure.
+
+    `explain` is part of the protocol, not an afterthought bolted onto one
+    implementation: a `None` from `screen` is either "the rule said no" or "a
+    feature was unmeasured", and only the screen that made the decision knows
+    which. `run_cycle`'s `NO_SETUP` note needs that distinction (specs/07 D1),
+    so every screen must be able to say it, not just the one that happens to.
+    """
 
     def screen(self, read: MarketRead) -> Setup | None: ...
+
+    def explain(self, read: MarketRead) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +137,51 @@ class DefaultScreen:
         if phase in _BEARISH_PHASES:
             return BIAS_BEARISH
         return BIAS_NEUTRAL
+
+
+@dataclass(frozen=True, slots=True)
+class BookScreen:
+    """The screen specs/07 D1 hands the runner once a rule is loaded.
+
+    Where `DefaultScreen` reads a bias off the trend engine because it has
+    nothing else to offer, this one does not have to guess: the researched
+    entry — `iv_rank() < 15` — is a regime filter, not a direction call, so it
+    never argues bullish or bearish. Every setup this screen produces is
+    neutral, and the structure to build comes from `rule.structure`, which is
+    already `put_credit_spread` or `call_credit_spread` by the time a book has
+    loaded (`option_book.py` refuses anything else).
+
+    Decides by asking the rule, once, and nothing here re-implements the
+    parsing or the comparison `EntryRule.decide` already owns — a second
+    evaluation of the same expression, however small, is a second place the two
+    could someday disagree.
+    """
+
+    rule: OptionRule
+    name: str = "book-screen-v1"
+
+    def screen(self, read: MarketRead) -> Setup | None:
+        fires, why = self.rule.entry.decide(measurable_read(read))
+        if not fires:
+            return None
+        return Setup(
+            underlying=read.underlying,
+            name=self.rule.structure,
+            bias=BIAS_NEUTRAL,
+            reason=why,
+        )
+
+    def explain(self, read: MarketRead) -> str:
+        """The rule's own `(fires, why)` reason, verbatim.
+
+        This is the whole point of the type: `run_cycle`'s `NO_SETUP` note
+        would otherwise read "the screen found nothing to trade" regardless of
+        *why*, and "iv_rank() < 15 not satisfied" and "iv_rank unmeasured, so
+        `iv_rank() < 15` cannot be decided" are different situations that call
+        for different mornings' worth of attention.
+        """
+        _fires, why = self.rule.entry.decide(measurable_read(read))
+        return why
 
 
 def _phase_name(trend: object) -> str:
