@@ -26,15 +26,37 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
 from aqr.backtest.engine import BacktestResult, Trade
 from aqr.backtest.metrics import Metrics, periods_per_year
-from aqr.dsl.schema import StrategySpec
 
-__all__ = ["OverfittingReport", "Signal", "deflated_sharpe", "detect_overfitting"]
+__all__ = [
+    "HasParameterCount",
+    "OverfittingReport",
+    "Signal",
+    "deflated_sharpe",
+    "detect_overfitting",
+]
+
+
+class HasParameterCount(Protocol):
+    """The only thing this module ever asked of a spec.
+
+    It was annotated ``StrategySpec`` while there was one kind of spec, and that
+    read as a dependency on the equity schema when it never was one: the single
+    use is ``spec.parameter_count()``, and an ``OptionSpec`` answers that
+    question about its own knobs (specs/10 D5 -- a delta target, a width and a
+    DTE are three numbers chosen by search exactly like a lookback is). Naming
+    the requirement instead of the type lets both search programs share one
+    overfitting detector, which is the point: a degrees-of-freedom penalty that
+    counted equity parameters one way and option parameters another would make
+    the two campaigns' scores incomparable.
+    """
+
+    def parameter_count(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +134,7 @@ def _clip(value: float) -> float:
 
 
 def detect_overfitting(
-    spec: StrategySpec,
+    spec: HasParameterCount,
     result: BacktestResult,
     metrics: Metrics,
     *,

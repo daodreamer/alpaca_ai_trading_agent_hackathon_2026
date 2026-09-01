@@ -34,6 +34,14 @@ ROOT = Path(__file__).resolve().parents[1]
 CHAIN = ROOT / "data-options" / "option_chain" / "SPY.csv"
 VOLATILITY = ROOT / "data-options" / "volatility_history" / "SPY.csv"
 UNDERLYING = ROOT / "data-options-underlying" / "1D" / "SPY.csv"
+SEALED_CHAIN = ROOT / "data-options-sealed" / "option_chain" / "SPY.csv"
+SEALED_UNDERLYING = ROOT / "data-options-underlying-sealed" / "1D" / "SPY.csv"
+
+PARITY_TOLERANCE = 0.02
+"""D2a's measured bound. On the research cache with the raw series the implied
+spot agrees with the bar close to a median of 0.14% and p99 0.61%; under the
+dividend-adjusted series it was out by ten percent. Anything between about 1%
+and 5% draws the same line, and 2% is where the spec drew it."""
 
 pytestmark = pytest.mark.skipif(
     not CHAIN.exists(),
@@ -294,22 +302,37 @@ def test_the_chain_and_the_underlying_agree_on_what_spy_costs() -> None:
     """
     if not UNDERLYING.exists():
         pytest.skip("no underlying cache")
+    errors = _parity_errors(CHAIN, UNDERLYING)
+
+    assert len(errors) > 700, f"only {len(errors)} sessions could be checked"
+    worst = max(abs(e) for e in errors)
+    assert worst < PARITY_TOLERANCE, _parity_failure(worst, UNDERLYING)
+
+
+def _parity_errors(chain: Path, underlying: Path) -> list[float]:
+    """Relative disagreement between the chain's implied spot and the bar close.
+
+    One per session that has both a call and a put at some strike and a trading
+    day within four days. Split out of the test above so the sealed roots can be
+    held to the identical arithmetic -- a sealed cache checked by a slightly
+    different calculation would be checked by a calculation nobody had validated.
+    """
     closes = {
         datetime.fromisoformat(row["timestamp"]).date(): float(row["close"])
-        for row in _rows(UNDERLYING)
+        for row in _rows(underlying)
     }
     trading_days = sorted(closes)
 
     pairs: dict[date, dict[tuple[str, str], dict[str, float]]] = defaultdict(
         lambda: defaultdict(dict)
     )
-    for row in _rows(CHAIN):
+    for row in _rows(chain):
         session = date.fromisoformat(row["date"])
         key = (row["expiration"], row["strike"])
         mid = (float(row["bid"]) + float(row["ask"])) / 2
         pairs[session][key]["call" if row["call_put"] == "Call" else "put"] = mid
 
-    errors = []
+    errors: list[float] = []
     for session, strikes in pairs.items():
         at = bisect_right(trading_days, session) - 1
         if at < 0 or (session - trading_days[at]).days > 4:
@@ -326,14 +349,46 @@ def test_the_chain_and_the_underlying_agree_on_what_spy_costs() -> None:
             continue
         strike, quotes = min(both, key=lambda pair: abs(pair[0] - spot))
         errors.append((quotes["call"] - quotes["put"] + strike) / spot - 1)
+    return errors
 
-    assert len(errors) > 700, f"only {len(errors)} sessions could be checked"
-    worst = max(abs(e) for e in errors)
-    assert worst < 0.02, (
-        f"the chain's implied spot and the bar close disagree by up to {worst:.1%}. "
-        "The two caches are in different price spaces -- most likely the underlying "
-        "was pulled with a dividend adjustment. Re-pull with `--adjustment raw`."
+
+def _parity_failure(worst: float, underlying: Path) -> str:
+    return (
+        f"the chain's implied spot and {underlying.parent.parent.name}'s close "
+        f"disagree by up to {worst:.1%}. The two caches are in different price "
+        "spaces -- most likely the underlying was pulled with a dividend "
+        "adjustment. Re-pull with `--adjustment raw`."
     )
+
+
+def test_the_sealed_chain_and_the_sealed_underlying_are_in_the_same_price_space() -> None:
+    """The same check, on the roots the sealed option run reads (PLAN O5.1).
+
+    The sealed chain has existed since the embargo split; its underlying is a
+    separate pull and is the one that is easy to get wrong, because the obvious
+    place to reach for is ``data-sp500-sealed`` -- which is dividend-adjusted and
+    correct for equity research. There is no arithmetic that notices: the sealed
+    run completes, reports plausible numbers and spends the one shot. This is the
+    only check that can see it, so it runs before the seal is spent rather than
+    after.
+
+    Skipped rather than failed while the root does not exist. Building it::
+
+        uv run python -m aqr.cli_sealed pull --symbols SPY --adjustment raw \
+            --csv-root data-options-underlying-sealed --timeframe 1D
+    """
+    if not SEALED_CHAIN.exists():
+        pytest.skip("no sealed option chain; `aqr options-embargo` builds it")
+    if not SEALED_UNDERLYING.exists():
+        pytest.skip(
+            "no sealed underlying cache -- the sealed option run cannot settle "
+            "without it. See this test's docstring for the pull command."
+        )
+    errors = _parity_errors(SEALED_CHAIN, SEALED_UNDERLYING)
+
+    assert len(errors) > 1_000, f"only {len(errors)} sealed sessions could be checked"
+    worst = max(abs(e) for e in errors)
+    assert worst < PARITY_TOLERANCE, _parity_failure(worst, SEALED_UNDERLYING)
 
 
 # --------------------------------------------------------------------------- #

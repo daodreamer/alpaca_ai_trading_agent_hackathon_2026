@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
+
+import yaml
 
 from aqr.dsl.expr import Expr, feature_keys, parse, tokenize
 from aqr.features.engine import FeatureKey
@@ -42,6 +45,10 @@ __all__ = [
     "OptionSizing",
     "OptionSpec",
     "StructureSpec",
+    "dumps_option_spec",
+    "loads_option_spec",
+    "option_spec_from_dict",
+    "spec_to_dict",
 ]
 
 _SPREAD_KINDS = frozenset(
@@ -293,3 +300,137 @@ def spec_to_dict(spec: OptionSpec, *, canonical: bool = False) -> dict[str, Any]
     out["hypothesis"] = spec.hypothesis
     out["parent"] = spec.parent
     return out
+
+
+# --------------------------------------------------------------------------- #
+# YAML round trip
+# --------------------------------------------------------------------------- #
+#
+# The registry stores a spec as text, so an option rule needs the same round
+# trip ``dsl/loader.py`` gives an equity one. It lives here rather than there
+# for the reason the two spec types are separate at all: ``dsl/`` is the equity
+# DSL's home and importing ``options`` into it would put the option vocabulary
+# inside the module an equity ``StrategySpec`` is parsed by, which is exactly
+# the mixing ``options/features.py`` documents avoiding.
+#
+# Strings in, strings out. Nothing here opens a file -- ``options/`` is a pure
+# layer (tests/test_boundaries.py) and the one caller that needs a path is the
+# CLI, which already has one.
+
+_TOP_LEVEL_KEY = "option_strategy"
+"""Not ``strategy``. A file that could be loaded by either loader would be
+loaded by whichever one the caller happened to reach for, and the two produce
+rules with different exits, different sizing and different verdicts."""
+
+
+def option_spec_from_dict(raw: Mapping[str, Any]) -> OptionSpec:
+    """Rebuild a spec from its plain-dict form. The inverse of :func:`spec_to_dict`.
+
+    Accepts the artefact with or without its ``option_strategy`` wrapper, so a
+    caller holding the inner mapping (the registry, which stored exactly what
+    ``spec_to_dict`` produced) does not have to re-wrap it to read it back.
+    """
+    body = raw.get(_TOP_LEVEL_KEY, raw)
+    if not isinstance(body, Mapping):
+        raise ValueError(f"{_TOP_LEVEL_KEY} must be a mapping, got {type(body).__name__}")
+
+    structure_raw = body.get("structure")
+    if not isinstance(structure_raw, Mapping):
+        raise ValueError("structure is required and must be a mapping")
+
+    def _anchor(value: Any) -> Anchor | None:
+        if not isinstance(value, Mapping):
+            return None
+        return Anchor(
+            delta=float(value.get("delta", 0.16)),
+            tolerance=float(value.get("tolerance", 0.06)),
+        )
+
+    dte_raw = structure_raw.get("dte")
+    dte = (
+        DteTarget(
+            target=int(dte_raw.get("target", 28)),
+            tolerance=int(dte_raw.get("tolerance", 10)),
+        )
+        if isinstance(dte_raw, Mapping)
+        else DteTarget()
+    )
+    structure = StructureSpec(
+        type=str(structure_raw.get("type", "")),  # type: ignore[arg-type]
+        dte=dte,
+        anchor=_anchor(structure_raw.get("anchor")) or Anchor(),
+        width_delta=_optional_float(structure_raw.get("width_delta")),
+        width_points=_optional_float(structure_raw.get("width_points")),
+        call_anchor=_anchor(structure_raw.get("call_anchor")),
+        call_width_delta=_optional_float(structure_raw.get("call_width_delta")),
+        call_width_points=_optional_float(structure_raw.get("call_width_points")),
+    )
+
+    sizing_raw = body.get("sizing")
+    sizing = (
+        OptionSizing(
+            risk_per_trade=float(sizing_raw.get("risk_per_trade", 0.01)),
+            max_concurrent=int(sizing_raw.get("max_concurrent", 3)),
+        )
+        if isinstance(sizing_raw, Mapping)
+        else OptionSizing()
+    )
+    cadence_raw = body.get("cadence")
+    cadence = (
+        Cadence(
+            min_sessions_between_entries=int(
+                cadence_raw.get("min_sessions_between_entries", 5)
+            )
+        )
+        if isinstance(cadence_raw, Mapping)
+        else Cadence()
+    )
+    return OptionSpec(
+        name=str(body.get("name", "")),
+        underlying=str(body.get("underlying", "")),
+        entry=str(body.get("entry", "")),
+        structure=structure,
+        sizing=sizing,
+        cadence=cadence,
+        version=int(body.get("version", 1)),
+        hypothesis=str(body.get("hypothesis") or ""),
+        parent=(str(body["parent"]) if body.get("parent") else None),
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    """``None`` for absent *and* for zero.
+
+    A width of zero is not a width, and the dataclass would refuse it with a
+    message about a positive number when what the caller meant was "there is no
+    wing on this structure". The proposer writes 0 for an absent width because a
+    JSON schema cannot express "omit this field", so the two spellings have to
+    mean the same thing by the time they reach ``StructureSpec``.
+    """
+    if value is None:
+        return None
+    number = float(value)
+    return number or None
+
+
+def dumps_option_spec(spec: OptionSpec) -> str:
+    """The spec as YAML, provenance included."""
+    return yaml.safe_dump(
+        {_TOP_LEVEL_KEY: spec_to_dict(spec)},
+        sort_keys=False,
+        allow_unicode=True,
+        width=100,
+    )
+
+
+def loads_option_spec(text: str) -> OptionSpec:
+    """Parse YAML text into a spec, with the source problem kept in the error."""
+    try:
+        raw: Any = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"option strategy YAML is malformed: {exc}") from exc
+    if raw is None:
+        raise ValueError("option strategy YAML is empty")
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"expected a mapping, got {type(raw).__name__}")
+    return option_spec_from_dict(raw)

@@ -27,8 +27,12 @@ from typing import Any, Literal
 
 from aqr.dsl.loader import dumps
 from aqr.dsl.schema import StrategySpec
+from aqr.options.spec import OptionSpec, dumps_option_spec
 
 __all__ = [
+    "EQUITY",
+    "FAMILIES",
+    "OPTION",
     "ExperimentRecord",
     "Preregistration",
     "PreregistrationError",
@@ -156,7 +160,38 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("experiments", "costs", "TEXT"),
     ("strategies", "sealed_run_at", "TEXT"),
     ("strategies", "sealed_result", "TEXT"),
+    # specs/10 D8: the option search's multiplicity denominator must not be the
+    # equity search's. Added as a migration rather than a schema change so the
+    # 414 equity hypotheses already recorded survive -- they read back as NULL
+    # and ``_family`` resolves that to 'equity', which is what they were.
+    ("experiments", "family", "TEXT"),
+    ("strategies", "family", "TEXT"),
+    ("target_books", "family", "TEXT"),
 )
+
+EQUITY = "equity"
+OPTION = "option"
+FAMILIES = (EQUITY, OPTION)
+"""The two search programs, kept apart everywhere a denominator is counted.
+
+specs/10 D8 states the reason plainly: the equity search spent 414 hypotheses
+against a universe of 600 names and deflated its Sharpe accordingly, while the
+option search is capped at 20 against 71 independent cycles. A Bonferroni bar
+computed on 434 would be far too strict for the option side and a bar computed
+on either alone would understate the other, so the count is per family and the
+two are never summed.
+
+``NULL`` in either column means a row written before this split existed, and
+every one of those is an equity experiment: the option pipeline did not exist.
+:func:`_family` resolves it that way rather than inventing an 'unknown' bucket
+that every caller would then have to decide what to do with.
+"""
+
+
+def _family(value: object) -> str:
+    """A stored family, defaulting rows older than the column to ``equity``."""
+    text = str(value or EQUITY).strip().lower()
+    return text if text in FAMILIES else EQUITY
 
 
 class PreregistrationError(RuntimeError):
@@ -188,6 +223,7 @@ class StrategyRecord:
     score: float | None
     created_at: str
     updated_at: str
+    family: str = EQUITY
 
 
 @dataclass(slots=True)
@@ -202,6 +238,12 @@ class ExperimentRecord:
     data_end: str
     dataset_version: str
     hypothesis: str = ""
+    family: str = EQUITY
+    """Which search program this experiment belongs to: ``equity`` or ``option``.
+
+    Defaulted rather than required so every existing caller is unchanged and
+    still records an equity experiment. The option pipeline passes it
+    explicitly, which is the only way a row gets the other value."""
     train_metrics: dict[str, Any] | None = None
     oos_metrics: dict[str, Any] | None = None
     robustness: dict[str, Any] | None = None
@@ -350,8 +392,8 @@ class Registry:
             now = _now()
             conn.execute(
                 "INSERT INTO strategies (fingerprint, name, version, parent, status, "
-                "hypothesis, spec_yaml, score, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                "hypothesis, spec_yaml, score, family, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
                 (
                     fingerprint,
                     spec.name,
@@ -360,6 +402,7 @@ class Registry:
                     status,
                     spec.hypothesis,
                     dumps(spec),
+                    EQUITY,
                     now,
                     now,
                 ),
@@ -367,6 +410,57 @@ class Registry:
             conn.execute(
                 "INSERT INTO status_log (fingerprint, from_status, to_status, reason, created_at) "
                 "VALUES (?, NULL, ?, 'registered', ?)",
+                (fingerprint, status, now),
+            )
+        return fingerprint
+
+    def upsert_option_strategy(
+        self, spec: OptionSpec, status: Status = "CANDIDATE"
+    ) -> str:
+        """Record an option rule. The sibling of :meth:`upsert_strategy`.
+
+        Same table, same lifecycle, same content-addressed key -- the only
+        differences are the serialisation (``dumps_option_spec``, so the row can
+        be read back into the right type) and the ``family`` stamp, which is
+        what every per-family count downstream reads. A second method rather
+        than a union-typed parameter: the two specs have no common supertype and
+        one function branching on ``isinstance`` would have to be right in three
+        places, of which the YAML dump is the one that fails silently -- an
+        option rule written with the equity dumper reads back as a spec with no
+        entry condition rather than as an error.
+        """
+        fingerprint = spec.fingerprint()
+        with self._tx() as conn:
+            existing = conn.execute(
+                "SELECT status FROM strategies WHERE fingerprint = ?", (fingerprint,)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE strategies SET updated_at = ?, family = ? WHERE fingerprint = ?",
+                    (_now(), OPTION, fingerprint),
+                )
+                return fingerprint
+            now = _now()
+            conn.execute(
+                "INSERT INTO strategies (fingerprint, name, version, parent, status, "
+                "hypothesis, spec_yaml, score, family, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+                (
+                    fingerprint,
+                    spec.name,
+                    spec.version,
+                    spec.parent,
+                    status,
+                    spec.hypothesis,
+                    dumps_option_spec(spec),
+                    OPTION,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO status_log (fingerprint, from_status, to_status, reason, created_at) "
+                "VALUES (?, NULL, ?, 'registered (option)', ?)",
                 (fingerprint, status, now),
             )
         return fingerprint
@@ -412,20 +506,29 @@ class Registry:
         return _strategy_from_row(row) if row else None
 
     def strategies(
-        self, status: Status | None = None, limit: int = 100
+        self, status: Status | None = None, limit: int = 100, family: str | None = None
     ) -> list[StrategyRecord]:
+        """Known strategies, newest-best first.
+
+        ``family`` filters to one search program. ``None`` returns both, which
+        is right for a listing a person reads and wrong for anything that
+        counts -- see :meth:`distinct_hypotheses`.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
         if status:
-            rows = self._conn.execute(
-                "SELECT * FROM strategies WHERE status = ? "
-                "ORDER BY COALESCE(score, -1) DESC, updated_at DESC LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM strategies ORDER BY COALESCE(score, -1) DESC, updated_at DESC "
-                "LIMIT ?",
-                (limit,),
-            ).fetchall()
+            clauses.append("status = ?")
+            params.append(status)
+        if family:
+            clauses.append("COALESCE(family, ?) = ?")
+            params += [EQUITY, _family(family)]
+        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM strategies {where}"
+            "ORDER BY COALESCE(score, -1) DESC, updated_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
         return [_strategy_from_row(r) for r in rows]
 
     # ----------------------------------------------------------------- #
@@ -553,7 +656,14 @@ class Registry:
     # ----------------------------------------------------------------- #
 
     def record_target_book(
-        self, fingerprint: str, *, as_of: str, path: str, digest: str, book: dict[str, Any]
+        self,
+        fingerprint: str,
+        *,
+        as_of: str,
+        path: str,
+        digest: str,
+        book: dict[str, Any],
+        family: str = EQUITY,
     ) -> int:
         """Record a target book against the strategy that produced it.
 
@@ -565,6 +675,11 @@ class Registry:
         Refused for an unknown fingerprint. A book whose strategy is not in the
         registry cannot be traced back to a hypothesis, which is the only reason
         this table exists.
+
+        ``family`` says which artefact this is. The two are not
+        interchangeable -- an equity book carries weights and an option book
+        carries a rule (specs/10 D10) -- and a listing that mixed them would
+        hand somebody an option rule where they expected a set of weights.
         """
         row = self._conn.execute(
             "SELECT 1 FROM strategies WHERE fingerprint = ?", (fingerprint,)
@@ -577,26 +692,32 @@ class Registry:
         with self._tx() as conn:
             cursor = conn.execute(
                 "INSERT INTO target_books (fingerprint, as_of, path, digest, book, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (fingerprint, as_of, path, digest, _json(book), _now()),
+                "family, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (fingerprint, as_of, path, digest, _json(book), _family(family), _now()),
             )
             return int(cursor.lastrowid or 0)
 
     def target_books(
-        self, fingerprint: str | None = None, limit: int = 50
+        self,
+        fingerprint: str | None = None,
+        limit: int = 50,
+        family: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Books handed off, newest first."""
+        """Books handed off, newest first. ``family`` filters to one artefact kind."""
+        clauses: list[str] = []
+        params: list[Any] = []
         if fingerprint:
-            rows = self._conn.execute(
-                "SELECT * FROM target_books WHERE fingerprint = ? "
-                "ORDER BY created_at DESC, id DESC LIMIT ?",
-                (fingerprint, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM target_books ORDER BY created_at DESC, id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            clauses.append("fingerprint = ?")
+            params.append(fingerprint)
+        if family:
+            clauses.append("COALESCE(family, ?) = ?")
+            params += [EQUITY, _family(family)]
+        where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT * FROM target_books " + where + "ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
             record = dict(row)
@@ -604,7 +725,7 @@ class Registry:
             out.append(record)
         return out
 
-    def sealed_looks(self) -> int:
+    def sealed_looks(self, family: str | None = None) -> int:
         """How many candidates the embargoed window has screened so far.
 
         The one-shot rule is per candidate, not per window: a genuinely new
@@ -615,9 +736,22 @@ class Registry:
         being made. Nothing here refuses the seventh look; counting it is the
         defence.
         """
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM strategies WHERE sealed_run_at IS NOT NULL"
-        ).fetchone()
+        if family is None:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM strategies WHERE sealed_run_at IS NOT NULL"
+            ).fetchone()
+        else:
+            # Per family, because the two sealed *windows* are different data:
+            # the equity one is S&P 500 bars past 2024-09-01, the option one is
+            # SPY chains past the same boundary. A candidate screened against
+            # one has not consumed a look at the other, and charging it as
+            # though it had would raise the option side's bar for readings that
+            # never touched its data.
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM strategies WHERE sealed_run_at IS NOT NULL "
+                "AND COALESCE(family, ?) = ?",
+                (EQUITY, _family(family)),
+            ).fetchone()
         return int(row["n"]) if row else 0
 
     def sealed_look(self, fingerprint: str) -> int | None:
@@ -628,9 +762,11 @@ class Registry:
         """
         row = self._conn.execute(
             "SELECT COUNT(*) AS n FROM strategies WHERE sealed_run_at IS NOT NULL "
+            "AND COALESCE(family, ?) = (SELECT COALESCE(family, ?) FROM strategies "
+            "WHERE fingerprint = ?) "
             "AND sealed_run_at <= (SELECT sealed_run_at FROM strategies WHERE "
             "fingerprint = ?)",
-            (fingerprint,),
+            (EQUITY, EQUITY, fingerprint, fingerprint),
         ).fetchone()
         ordinal = int(row["n"]) if row else 0
         return ordinal or None
@@ -687,10 +823,11 @@ class Registry:
         with self._tx() as conn:
             cursor = conn.execute(
                 "INSERT INTO experiments (fingerprint, strategy_name, hypothesis, symbols, "
-                "timeframe, data_start, data_end, dataset_version, train_metrics, oos_metrics, "
-                "robustness, overfitting, evaluation, verdict, score, backtests_run, llm_model, "
-                "prompt_hash, code_hash, error, seal, costs, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "timeframe, data_start, data_end, dataset_version, family, train_metrics, "
+                "oos_metrics, robustness, overfitting, evaluation, verdict, score, "
+                "backtests_run, llm_model, prompt_hash, code_hash, error, seal, costs, "
+                "created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.fingerprint,
                     record.strategy_name,
@@ -700,6 +837,7 @@ class Registry:
                     record.data_start,
                     record.data_end,
                     record.dataset_version,
+                    _family(record.family),
                     _json(record.train_metrics),
                     _json(record.oos_metrics),
                     _json(record.robustness),
@@ -719,31 +857,48 @@ class Registry:
             )
         return int(cursor.lastrowid or 0)
 
-    def experiments(self, limit: int = 50, fingerprint: str | None = None) -> list[dict[str, Any]]:
+    def experiments(
+        self,
+        limit: int = 50,
+        fingerprint: str | None = None,
+        family: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
         if fingerprint:
-            rows = self._conn.execute(
-                "SELECT * FROM experiments WHERE fingerprint = ? ORDER BY id DESC LIMIT ?",
-                (fingerprint, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM experiments ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
+            clauses.append("fingerprint = ?")
+            params.append(fingerprint)
+        if family:
+            clauses.append("COALESCE(family, ?) = ?")
+            params += [EQUITY, _family(family)]
+        where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT * FROM experiments " + where + "ORDER BY id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
         return [dict(r) for r in rows]
 
-    def total_backtests(self) -> int:
+    def total_backtests(self, family: str | None = None) -> int:
         """Every backtest ever run against this database.
 
         This is the *compute* spent, not the multiple-comparisons denominator --
         see :meth:`distinct_hypotheses` for that. It grows monotonically and is
         never reset.
         """
-        row = self._conn.execute(
-            "SELECT COALESCE(SUM(backtests_run), 0) AS total FROM experiments"
-        ).fetchone()
+        if family is None:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(backtests_run), 0) AS total FROM experiments"
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(backtests_run), 0) AS total FROM experiments "
+                "WHERE COALESCE(family, ?) = ?",
+                (EQUITY, _family(family)),
+            ).fetchone()
         return int(row["total"])
 
-    def distinct_hypotheses(self) -> int:
+    def distinct_hypotheses(self, family: str | None = None) -> int:
         """Distinct rules ever evaluated: the multiple-comparisons denominator.
 
         Not :meth:`total_backtests`. One hypothesis costs around 57 backtests
@@ -757,10 +912,24 @@ class Registry:
         went nowhere is the mechanism by which a search looks luckier than it
         was. Re-evaluating one rule does not count twice -- rediscovering your
         own last idea is not a fresh place to have got lucky.
+
+        ``family`` is what specs/10 D8 requires: the option search is capped at
+        20 hypotheses against 71 independent cycles and the equity search spent
+        414 against a 600-name universe. A denominator mixing the two makes both
+        multiplicity bars wrong -- far too strict for the option side, far too
+        loose for the equity side -- so every *counting* caller passes one.
+        ``None`` is the combined figure and is for display only.
         """
-        row = self._conn.execute(
-            "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments"
-        ).fetchone()
+        if family is None:
+            row = self._conn.execute(
+                "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments"
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(DISTINCT fingerprint) AS total FROM experiments "
+                "WHERE COALESCE(family, ?) = ?",
+                (EQUITY, _family(family)),
+            ).fetchone()
         return int(row["total"])
 
     def has_tried(self, fingerprint: str) -> bool:
@@ -774,22 +943,38 @@ class Registry:
         ).fetchone()
         return row is not None
 
-    def memory(self, limit: int = 20) -> list[dict[str, Any]]:
+    def memory(self, limit: int = 20, family: str | None = None) -> list[dict[str, Any]]:
         """Compact history for the LLM prompt (architecture section 28).
 
         Deliberately small and deliberately includes rejects: the failures are
         the part that stops the next hypothesis repeating the last one.
+
+        ``family`` scopes it to one search program, and an option campaign
+        always passes one. Showing an option proposer the equity campaign's 414
+        hypotheses would fill its context with rules it cannot express and crowd
+        out the handful it needs in order not to repeat itself; showing an
+        equity proposer a credit spread would invite it to propose one it has no
+        field for.
         """
-        rows = self._conn.execute(
-            "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, overfitting, "
-            "timeframe, error "
-            "FROM experiments ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if family is None:
+            rows = self._conn.execute(
+                "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, "
+                "overfitting, robustness, timeframe, family, error "
+                "FROM experiments ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT strategy_name, hypothesis, verdict, score, oos_metrics, "
+                "overfitting, robustness, timeframe, family, error "
+                "FROM experiments WHERE COALESCE(family, ?) = ? ORDER BY id DESC LIMIT ?",
+                (EQUITY, _family(family), limit),
+            ).fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
             oos = json.loads(row["oos_metrics"]) if row["oos_metrics"] else {}
             over = json.loads(row["overfitting"]) if row["overfitting"] else {}
+            robust = json.loads(row["robustness"]) if row["robustness"] else {}
             out.append(
                 {
                     "name": row["strategy_name"],
@@ -797,8 +982,15 @@ class Registry:
                     "verdict": row["verdict"] or ("ERROR" if row["error"] else "UNKNOWN"),
                     "score": row["score"],
                     "timeframe": row["timeframe"],
+                    "family": _family(row["family"]),
                     "oos_sharpe": oos.get("sharpe"),
                     "oos_trades": oos.get("num_trades"),
+                    # Present only for an option experiment, and the number the
+                    # option evaluator actually gates on (specs/10 D8). A prompt
+                    # showing the trade count alone would invite the model to
+                    # propose something that trades more, when the binding
+                    # constraint is how many of those trades were independent.
+                    "oos_cycles": robust.get("independent_cycles"),
                     "overfitting": over.get("verdict"),
                     "error": row["error"],
                 }
@@ -842,4 +1034,5 @@ def _strategy_from_row(row: sqlite3.Row) -> StrategyRecord:
         score=row["score"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        family=_family(row["family"] if "family" in row.keys() else None),  # noqa: SIM118
     )

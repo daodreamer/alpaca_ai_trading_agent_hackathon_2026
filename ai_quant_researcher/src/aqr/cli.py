@@ -11,6 +11,13 @@
     aqr target-book FINGERPRINT      write the book. Nothing here places it
     aqr costs                        what an order costs, under each schedule
 
+Options research lives beside it, with its own vocabulary and its own search
+budget (specs/10 D8 -- the two denominators must not be mixed):
+
+    aqr option-features              structures and features an option rule may name
+    aqr option-research              the option research loop, capped at 20 hypotheses
+    aqr option-book FINGERPRINT      write the rule. Strikes are resolved by the executor
+
 Every command that touches data takes ``--source`` (synthetic or yahoo) plus a
 window, so a result can be reproduced from the command line that produced it.
 """
@@ -26,6 +33,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from aqr.agent.option_prompt import STRUCTURE_CATALOGUE
+from aqr.agent.option_proposer import OptionProposer
+from aqr.agent.option_research import (
+    OPTION_SEARCH_BUDGET,
+    OptionResearchConfig,
+    OptionResearchLoop,
+)
 from aqr.agent.proposer import Proposer
 from aqr.agent.research import ResearchConfig, ResearchLoop
 from aqr.backtest.costs import PRESETS, CostModel, preset
@@ -75,8 +89,23 @@ from aqr.dsl.schema import StrategySpec
 from aqr.dsl.validator import validate_against
 from aqr.features.regime import regime_series
 from aqr.features.registry import REGISTRY
+from aqr.option_book import build_option_book, write_option_book
+from aqr.option_data import (
+    DEFAULT_UNDERLYING_ROOT,
+    research_option_market,
+)
+from aqr.options.costs import PRESETS as OPTION_PRESETS
+from aqr.options.engine import OptionBacktestConfig
+from aqr.options.features import OPTION_FEATURES
+from aqr.options.spec import loads_option_spec
 from aqr.pipeline import evaluate_candidate
-from aqr.registry.db import PreregistrationError, Registry, StrategyRecord
+from aqr.registry.db import (
+    EQUITY,
+    OPTION,
+    PreregistrationError,
+    Registry,
+    StrategyRecord,
+)
 from aqr.seal import CANARY_SYMBOL, EMBARGO_START
 from aqr.seal import current as current_seal
 from aqr.target_book import build_target_book, write_book
@@ -798,13 +827,19 @@ def preregister(
 
     console.print(
         f"[green]pre-registered[/green] {strategy.name} [{fingerprint}]\n"
+        f"family   {strategy.family}\n"
         f"declared {declared.declared_at}\n"
         f"rule     {declared.selection_rule}\n"
         f"seal     {declared.seal_digest[:16]}"
     )
+    # The two sealed runs read different windows, charge different costs and are
+    # counted as different denominators, so naming the wrong one here would send
+    # somebody to a command that refuses -- or, worse, would have read as the
+    # right one before ``option-run`` existed.
+    command = "option-run" if strategy.family == OPTION else "run"
     console.print(
         "\nNothing has been read yet. Spend the seal with:\n"
-        f"  python -m aqr.cli_sealed run {fingerprint}"
+        f"  python -m aqr.cli_sealed {command} {fingerprint}"
     )
 
 
@@ -818,7 +853,9 @@ def preregistered(
         if not rows:
             console.print("[yellow]nothing pre-registered[/yellow]")
             return
-        table = Table("fingerprint", "strategy", "declared", "sealed run", "look", "rule")
+        table = Table(
+            "fingerprint", "strategy", "family", "declared", "sealed run", "look", "rule"
+        )
         for row in rows:
             strategy = registry.get_strategy(row.fingerprint)
             spent = registry.sealed_run(row.fingerprint)
@@ -826,6 +863,7 @@ def preregistered(
             table.add_row(
                 row.fingerprint,
                 strategy.name if strategy else "?",
+                strategy.family if strategy else "?",
                 row.declared_at[:19],
                 spent["sealed_run_at"][:19] if spent else "[green]unspent[/green]",
                 str(look) if look else "-",
@@ -835,12 +873,20 @@ def preregistered(
         # The count is the multiple-comparisons denominator for the sealed
         # window, the way `distinct_hypotheses` is for the search. Printed here
         # because this is the table somebody reads before believing a result.
-        total = registry.sealed_looks()
-        if total:
-            console.print(
-                f"\nthe sealed window has screened {total} candidate(s); the bar "
-                f"for an alpha at that count is t >= {multiplicity_bar(total):.2f}"
-            )
+        #
+        # Per window, and the two windows are different data: the equity one is
+        # S&P 500 bars past the embargo, the option one is SPY chains past it. A
+        # candidate screened against one has not consumed a look at the other,
+        # and charging it as though it had would raise a bar for a reading that
+        # never touched the data.
+        for name in (EQUITY, OPTION):
+            total = registry.sealed_looks(family=name)
+            if total:
+                console.print(
+                    f"\nthe sealed {name} window has screened {total} candidate(s); "
+                    f"the bar for an alpha at that count is "
+                    f"t >= {multiplicity_bar(total):.2f}"
+                )
 
 
 @app.command("seal-check")
@@ -1325,51 +1371,89 @@ def _selected_sharpe(registry: Registry, fingerprint: str) -> float | None:
 def registry_cmd(
     db: Path = typer.Option(Path("runs/research.sqlite")),
     status: str = typer.Option("", help="Filter: CANDIDATE, PAPER, LIVE, REJECTED, ..."),
+    family: str = typer.Option(
+        "", help=f"Filter to one search program: {EQUITY} or {OPTION}."
+    ),
     limit: int = typer.Option(20),
 ) -> None:
-    """List known strategies and their lifecycle state."""
+    """List known strategies and their lifecycle state.
+
+    The family column is not decoration. An equity fingerprint and an option
+    fingerprint are handed off by different commands to different executors, and
+    the two spec formats are not interchangeable -- reading one with the other's
+    loader produces a rule with no entry condition rather than an error.
+    """
     with Registry(db) as reg:
-        rows = reg.strategies(status or None, limit)  # type: ignore[arg-type]
+        rows = reg.strategies(status or None, limit, family=family or None)  # type: ignore[arg-type]
+        counts = {name: reg.distinct_hypotheses(family=name) for name in (EQUITY, OPTION)}
     if not rows:
         console.print("no strategies recorded yet")
         return
-    table = Table("fingerprint", "name", "status", "score", "updated")
+    table = Table("fingerprint", "name", "family", "status", "score", "updated")
     for row in rows:
         table.add_row(
             row.fingerprint,
             row.name,
+            row.family,
             row.status,
             f"{row.score:.0f}" if row.score is not None else "-",
             row.updated_at[:19],
         )
     console.print(table)
+    console.print(
+        f"\ndistinct hypotheses: {counts[EQUITY]} equity, {counts[OPTION]} option "
+        "(counted separately -- specs/10 D8: one multiplicity denominator across "
+        "both searches would make both bars wrong)"
+    )
 
 
 @app.command()
 def experiments(
     db: Path = typer.Option(Path("runs/research.sqlite")),
+    family: str = typer.Option(
+        "", help=f"Filter to one search program: {EQUITY} or {OPTION}."
+    ),
     limit: int = typer.Option(20),
 ) -> None:
-    """The research log, most recent first. Failures included."""
+    """The research log, most recent first. Failures included.
+
+    ``cycles`` is filled for an option experiment and empty for an equity one,
+    because it is the number the option evaluator gates on: a structure held to
+    expiry produces evidence when it closes, so thirty overlapping spreads can
+    be eight independent bets (specs/10 D8).
+    """
     with Registry(db) as reg:
-        rows = reg.memory(limit)
-        total = reg.total_backtests()
+        rows = reg.memory(limit, family=family or None)
+        totals = {name: reg.total_backtests(family=name) for name in (EQUITY, OPTION)}
+        distinct = {name: reg.distinct_hypotheses(family=name) for name in (EQUITY, OPTION)}
     if not rows:
         console.print("no experiments recorded yet")
         return
-    table = Table("strategy", "verdict", "score", "OOS Sharpe", "trades", "note")
+    table = Table(
+        "strategy", "family", "verdict", "score", "OOS Sharpe", "trades", "cycles", "note"
+    )
     for row in rows:
         sharpe = row.get("oos_sharpe")
+        cycles = row.get("oos_cycles")
         table.add_row(
             str(row.get("name")),
+            str(row.get("family")),
             str(row.get("verdict")),
             f"{row['score']:.0f}" if row.get("score") is not None else "-",
             f"{sharpe:.2f}" if sharpe is not None else "-",
             str(row.get("oos_trades") or "-"),
+            str(cycles) if cycles is not None else "-",
             (row.get("error") or row.get("overfitting") or "")[:60],
         )
     console.print(table)
-    console.print(f"\ncumulative backtests: {total} (the multiple-comparisons denominator)")
+    console.print(
+        f"\ncumulative backtests: {totals[EQUITY]} equity, {totals[OPTION]} option"
+    )
+    console.print(
+        f"multiple-comparisons denominators: {distinct[EQUITY]} equity hypotheses, "
+        f"{distinct[OPTION]} option hypotheses of {OPTION_SEARCH_BUDGET} "
+        "(never summed -- specs/10 D8)"
+    )
 
 
 @app.command()
@@ -1879,6 +1963,335 @@ def options_embargo(
             f"         {state}"
             + (f", canary in {', '.join(audit.canary_tables)}" if audit.canary_present else "")
         )
+
+
+# --------------------------------------------------------------------------- #
+# Options — specs/10-options-research.md
+# --------------------------------------------------------------------------- #
+
+
+def _option_proposer(provider: str, model: str) -> OptionProposer:
+    """Build the option proposer for ``--provider``.
+
+    Imported lazily and per-branch, like ``_proposer``: the offline loop never
+    needs an LLM SDK installed, and a missing API key surfaces here rather than
+    as an exception ten iterations into a campaign that has a budget of twenty.
+    """
+    from aqr.agent.option_proposer import (
+        AnthropicOptionProposer,
+        DeepSeekOptionProposer,
+        TemplateOptionProposer,
+    )
+
+    choice = provider.strip().lower()
+    if choice == "offline":
+        return TemplateOptionProposer()
+    if choice == "deepseek":
+        return DeepSeekOptionProposer(model or "deepseek-chat")
+    if choice == "anthropic":
+        return AnthropicOptionProposer(model or "claude-opus-5")
+    raise typer.BadParameter(
+        f"unknown provider {provider!r}; use offline, deepseek or anthropic"
+    )
+
+
+@app.command("option-features")
+def option_features() -> None:
+    """The option research vocabulary: structures, then features.
+
+    Separate from ``aqr features`` because the two vocabularies are separate
+    (CLAUDE.md §2b). This one is the union an option entry expression parses
+    against -- specs/10 D6's table *and* the unchanged bar registry -- so a rule
+    may say ``iv_rank() > 50 and close > sma(200)`` in one expression.
+    """
+    table = Table("structure", "what it is", title=f"{len(STRUCTURE_CATALOGUE)} structures")
+    for kind, note in STRUCTURE_CATALOGUE:
+        table.add_row(kind, note)
+    console.print(table)
+    console.print()
+    features_table = Table(
+        "feature", "arity", "description", title=f"{len(OPTION_FEATURES)} option features"
+    )
+    for name in sorted(OPTION_FEATURES):
+        spec = OPTION_FEATURES[name]
+        features_table.add_row(name, str(spec.arity), spec.doc)
+    console.print(features_table)
+    console.print()
+    console.print(
+        f"[dim]plus every feature in `aqr features` ({len(REGISTRY)} of them), read "
+        "off the underlying's daily bars. There is no exit vocabulary and its "
+        "absence is the design: specs/10 D1 -- a contract is re-quoted on 1-3% of "
+        "later sessions, so a stop, a target or a roll cannot be priced.[/dim]"
+    )
+
+
+@app.command("option-research")
+def option_research(
+    iterations: int = typer.Option(
+        8,
+        help=f"Hypotheses to test. Hard-capped at {OPTION_SEARCH_BUDGET} (specs/10 D8): "
+        "the window holds about 71 independent 28-DTE cycles and a wider search "
+        "produces a winner indistinguishable from the luckiest draw.",
+    ),
+    underlying: str = typer.Option("SPY", help="The one underlying. The cache holds SPY."),
+    chain_root: str = typer.Option(DEFAULT_OPTIONS_ROOT, help="Option chain cache root."),
+    underlying_root: str = typer.Option(
+        DEFAULT_UNDERLYING_ROOT,
+        help="Raw-adjusted bar cache for the underlying. Not data-sp500: option "
+        "strikes are raw and an adjusted close reports a moneyness the trade "
+        "never had (specs/10 D0).",
+    ),
+    risk_per_trade: float = typer.Option(
+        0.02,
+        help="Fraction of equity risked against the structure's maximum loss. 2% "
+        "rather than 1% because at 1% the median put spread is unaffordable on "
+        "most sessions and the run measures the account, not the rule (D8a).",
+    ),
+    max_concurrent: int = typer.Option(3, help="Structures open at once."),
+    equity: float = typer.Option(100_000.0, help="Account the run is sized against."),
+    costs: str = typer.Option(
+        "IBKR_OPTIONS",
+        help=f"Per-contract schedule: {', '.join(sorted(OPTION_PRESETS))}. The spread "
+        "is charged from the quotes regardless (D2, D7).",
+    ),
+    db: Path = typer.Option(Path("runs/research.sqlite")),
+    provider: str = typer.Option(
+        "offline", help="Who proposes: offline | deepseek | anthropic."
+    ),
+    model: str = typer.Option("", help="Model id. Defaults to the provider's usual one."),
+    save_to: str = typer.Option(
+        "strategies/options", help="Where surviving rules are written."
+    ),
+) -> None:
+    """Run the option research loop: propose, test, record, repeat.
+
+    A separate command from ``aqr research`` and a separate budget from it. The
+    equity campaign spent 414 hypotheses against a 600-name universe; this one
+    is capped at twenty against 71 independent cycles, and the two denominators
+    are kept apart in the registry so neither multiplicity bar is computed
+    against the other's count.
+    """
+    try:
+        schedule = OPTION_PRESETS[costs.strip().upper()]
+    except KeyError as exc:
+        raise typer.BadParameter(
+            f"unknown option cost schedule {costs!r}; use one of "
+            f"{', '.join(sorted(OPTION_PRESETS))}"
+        ) from exc
+
+    market, version = research_option_market(
+        underlying.upper(), chain_root=chain_root, underlying_root=underlying_root
+    )
+    console.print(
+        f"{len(market.chain.sessions)} chain sessions "
+        f"{market.chain.sessions[0]} -> {market.chain.sessions[-1]}, "
+        f"{len(market.underlying)} underlying bars, "
+        f"{len(market.volatility) if market.volatility else 0} volatility rows"
+    )
+    console.print(f"[dim]{version}[/dim]")
+
+    try:
+        config = OptionResearchConfig(
+            underlying=underlying.upper(),
+            iterations=iterations,
+            risk_per_trade=risk_per_trade,
+            max_concurrent=max_concurrent,
+            dataset_version=version,
+            save_accepted_to=save_to,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    with Registry(db) as registry:
+        spent = registry.distinct_hypotheses(family=OPTION)
+        console.print(
+            f"option hypotheses already recorded: {spent} of {OPTION_SEARCH_BUDGET} "
+            f"(the equity search's {registry.distinct_hypotheses(family=EQUITY)} are "
+            "counted separately and do not raise this bar)"
+        )
+        loop = OptionResearchLoop(
+            market=market,
+            registry=registry,
+            config=config,
+            proposer=_option_proposer(provider, model),
+            backtest_config=OptionBacktestConfig(initial_equity=equity, costs=schedule),
+        )
+        for step in loop.run():
+            colour = {"ACCEPT": "green", "PAPER": "cyan", "REVIEW": "yellow"}.get(
+                step.verdict, "red"
+            )
+            console.print(f"[{colour}]{step}[/{colour}]")
+        console.print()
+        best = loop.best()
+        if best and best.outcome:
+            console.print(best.outcome.summary())
+        console.print(
+            f"\noption hypotheses in this database: "
+            f"{registry.distinct_hypotheses(family=OPTION)} of {OPTION_SEARCH_BUDGET}"
+        )
+
+
+@app.command("option-book")
+def option_book_cmd(
+    strategy: str = typer.Argument(
+        ...,
+        help="A registered option fingerprint. Not a path: a file is editable "
+        "between the sealed run and the handoff and a fingerprint is not.",
+    ),
+    db: Path = typer.Option(Path("runs/research.sqlite"), help="Experiment database."),
+    chain_root: str = typer.Option(
+        DEFAULT_OPTIONS_ROOT,
+        help="Option chain cache root. The research root by default -- the book "
+        "carries a rule, not strikes, so it does not need the sealed sessions.",
+    ),
+    underlying_root: str = typer.Option(DEFAULT_UNDERLYING_ROOT),
+    equity: float = typer.Option(100_000.0, help="Account the evidence run is sized against."),
+    out: Path = typer.Option(Path("runs/option_books"), help="Where to write the book."),
+) -> None:
+    """Write the option book for a validated rule. It is not placed anywhere.
+
+    There is no ``--dry-run`` because there is nothing to be dry about: no code
+    path in this project sends an order to anything. The output is a file, and
+    executing it is a different system's job -- one that still needs the live
+    chain, the delta selection, the options-shaped risk gate, the kill switch
+    and the fill journal the artefact lists under ``consumer_must_supply``.
+
+    The refusals come first and they are the point, and they are the same three
+    ``target-book`` makes: the registry must know the rule, its seal must have
+    been spent, and its sealed run must not have refuted it. Producing one for
+    an undeclared candidate would hand off a rule whose out-of-sample verdict is
+    still owed, which is the loophole the pre-registration protocol exists to
+    close.
+    """
+    with Registry(db) as reg:
+        record = reg.get_strategy(strategy)
+        if record is None:
+            raise typer.BadParameter(
+                f"no strategy {strategy!r} in the registry. An option book that cannot "
+                "be traced back to a recorded hypothesis is a rule from nowhere; run "
+                "`aqr option-research` first."
+            )
+        if record.family != OPTION:
+            raise typer.BadParameter(
+                f"{record.name} [{strategy}] is an {record.family} strategy. Its "
+                "handoff is `aqr target-book`, which writes weights; an option book "
+                "carries a structure and a delta and the two are not interchangeable."
+            )
+        spec = loads_option_spec(record.spec_yaml)
+
+        sealed = reg.sealed_run(strategy)
+        if sealed is None:
+            raise typer.BadParameter(
+                f"{record.name} [{strategy}] has no sealed run. A book handed off "
+                "before the seal is spent would trade a rule whose out-of-sample "
+                "verdict is still owed. Declare it with `aqr preregister` and spend "
+                "it with `python -m aqr.cli_sealed option-run`."
+            )
+        measurement = dict(sealed["result"].get("measurement", {}))
+        if measurement.get("refuted"):
+            raise typer.BadParameter(
+                f"{record.name} was refuted by its sealed run on "
+                f"{sealed['sealed_run_at'][:19]}: negative alpha, significant in the "
+                "wrong direction. There is nothing to hand off."
+            )
+
+        declaration = reg.preregistration(strategy)
+        provenance: dict[str, object] = {
+            "database": str(db),
+            "status": record.status,
+            "score": record.score,
+            "hypothesis": record.hypothesis,
+            # The option search's own denominators, never the combined ones
+            # (specs/10 D8). A book that carried the equity campaign's 414 would
+            # overstate what this rule survived by a factor of twenty.
+            "distinct_option_hypotheses": reg.distinct_hypotheses(family=OPTION),
+            "sealed_look": reg.sealed_look(strategy),
+            "sealed_looks_total": reg.sealed_looks(family=OPTION),
+            "sealed_run_at": sealed["sealed_run_at"],
+            "sealed_measurement": measurement,
+            "sealed_seal": sealed["result"].get("seal", {}),
+            "sealed_window_can_refute_not_confirm": (
+                "about 25 independent 28-DTE cycles: entitled to say this stopped "
+                "working, never entitled to say it works (specs/10 D8)"
+            ),
+            "preregistration": (
+                {
+                    "declared_at": declaration.declared_at,
+                    "selection_rule": declaration.selection_rule,
+                    "seal_digest": declaration.seal_digest,
+                }
+                if declaration
+                else None
+            ),
+        }
+
+        market, version = research_option_market(
+            spec.underlying, chain_root=chain_root, underlying_root=underlying_root
+        )
+        try:
+            book = build_option_book(
+                spec,
+                market,
+                generated_at=datetime.now(UTC),
+                dataset_version=version,
+                provenance=provenance,
+                seal=current_seal().certificate(),
+                config=OptionBacktestConfig(initial_equity=equity),
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
+        path = out / f"{spec.name}-{spec.fingerprint()}-{book.as_of}.json"
+        digest = write_option_book(book, path)
+        reg.record_target_book(
+            strategy,
+            as_of=book.as_of,
+            path=str(path),
+            digest=digest,
+            book=book.as_dict(),
+            family=OPTION,
+        )
+
+    console.print()
+    console.print(book.summary())
+    console.print()
+    console.print(f"[green]{path}[/green]")
+    console.print(f"[dim]sha256 {digest[:16]}  recorded against {strategy}[/dim]")
+    console.print(
+        "[dim]the rule only, deliberately without strikes: a strike named from "
+        "yesterday's close is wrong by today's open. Resolving it against a live "
+        "chain, sizing, an options risk gate, a kill switch and a fill journal "
+        "belong to whatever executes this.[/dim]"
+    )
+
+
+@app.command("option-books")
+def option_books_cmd(
+    fingerprint: str = typer.Argument("", help="Filter to one rule."),
+    db: Path = typer.Option(Path("runs/research.sqlite")),
+    limit: int = typer.Option(20),
+) -> None:
+    """Every option book handed off, newest first."""
+    with Registry(db) as reg:
+        rows = reg.target_books(fingerprint or None, limit, family=OPTION)
+    if not rows:
+        console.print("no option books recorded yet")
+        return
+    table = Table("as of", "rule", "fingerprint", "structure", "DTE", "delta", "sha256", "path")
+    for row in rows:
+        book = row["book"]
+        rule = book.get("rule", {})
+        table.add_row(
+            row["as_of"],
+            str(book.get("spec_name", "?")),
+            row["fingerprint"],
+            str(rule.get("structure", "-")),
+            str(rule.get("dte", {}).get("target", "-")),
+            str(rule.get("anchor", {}).get("delta", "-")),
+            row["digest"][:16],
+            row["path"],
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":  # pragma: no cover

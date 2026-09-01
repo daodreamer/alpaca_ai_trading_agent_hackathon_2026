@@ -89,6 +89,15 @@ uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
 uv run aqr target-book FINGERPRINT           # the handoff. Nothing here places it
 ```
 
+There is a second search, on SPY option structures, with its own vocabulary and
+its own budget — see [Options](#options-a-second-search-with-its-own-budget):
+
+```bash
+uv run aqr option-features                   # structures and features an option rule may name
+uv run aqr option-research --iterations 8    # capped at 20 hypotheses, and the cap is a gate
+uv run aqr option-book FINGERPRINT           # the rule, without strikes. Nothing here places it
+```
+
 Everything runs offline by default against a seeded regime-switching price
 simulator. To research on real bars, pull them into the cache once:
 
@@ -1230,6 +1239,132 @@ at the next open acts one session later than the backtest did. Reporting the
 decision made *at* the final session instead would mean re-implementing the
 selection outside the engine, which is the one thing the handoff exists not to
 do.
+
+
+---
+
+## Options: a second search, with its own budget
+
+The equity loop asks which names to own. There is a second one, on the same
+machinery and the same seal, asking a different question: does a defined-risk
+SPY option structure get paid a premium worth the risk? The apparatus is
+[specs/10-options-research.md](../specs/10-options-research.md); what follows is
+how to run it and the three places it deliberately differs.
+
+```bash
+uv run aqr option-features                      # structures and features an option rule may name
+uv run aqr option-research --iterations 8       # the loop, offline, no API key
+uv run aqr option-research --iterations 20 --provider deepseek
+uv run aqr experiments --family option          # what has been tried, with cycle counts
+uv run aqr preregister --rule "..." FINGERPRINT
+uv run python -m aqr.cli_sealed option-run FINGERPRINT
+uv run aqr option-book FINGERPRINT              # the handoff. Nothing here places it
+```
+
+**The search is capped at twenty hypotheses, and the cap is a gate.** The window
+holds **71** non-overlapping 28-DTE cycles across 5.55 years. The equity campaign
+spent 414 hypotheses and deflated its Sharpe to 0.74 for it; 400 trials against
+71 cycles produces a winner that cannot be told apart from the luckiest draw. So
+`OptionResearchConfig` refuses `iterations > 20` outright, and the loop stops
+when the *registry's* count of distinct option hypotheses reaches it — a cap
+enforced per run is not a cap, because the multiple-comparisons problem does not
+reset when a process exits.
+
+**The two searches are counted separately, everywhere a denominator appears.**
+`distinct_hypotheses(family=...)`, `total_backtests(family=...)`,
+`sealed_looks(family=...)` and `memory(family=...)` all take one, and nothing
+sums them. A Bonferroni bar computed on 434 would be far too strict for the
+option side and far too loose for the equity side. `aqr registry` and
+`aqr experiments` print both counts side by side and never a total, and
+`test_option_research_loop.py` asserts they never merge.
+
+**The verdict gates on independent cycles, not on trades.** A structure held to
+expiry produces new evidence only when it closes, so thirty overlapping credit
+spreads can be eight independent bets. `evaluate_option_strategy` counts cycles
+and reports the affordability-bound fraction beside them on every run, passing or
+failing — because a low cycle count is often a fact about the account rather than
+the rule, and specs/10 D8a measured the same rule producing 21 cycles at 1% of
+equity and 57 at 2% with nothing about the rule changed. The default
+`risk_per_trade` here is therefore 2%, stated rather than hidden.
+
+### The handoff is a rule, not a book of legs
+
+`aqr option-book` writes the same shape of artefact `target-book` does and
+refuses for the same three reasons — registered, seal spent, not refuted — but
+what travels is different, and it is the one design decision worth arguing over:
+
+```json
+"rule": {
+  "entry": "close > sma(200)",
+  "structure": "put_credit_spread",
+  "dte": {"target": 28, "tolerance": 10},
+  "anchor": {"delta": 0.16, "tolerance": 0.06},
+  "width_delta": 0.06,
+  "cadence": {"min_sessions_between_entries": 5},
+  "sizing": {"risk_per_trade": 0.02, "max_concurrent": 3}
+}
+```
+
+**There are no strikes in it, and that is not an omission.** The vendor resamples
+about 24 rungs around the money every session and the expiries roll with the
+observation date, so a strike is a fact about one snapshot: a book written from a
+Tuesday close naming strike 5480 is wrong by Wednesday's open. The executor gets
+the *rule* and resolves it against a live chain, which is also why the executor
+needs its own delta-selection code and cannot import `aqr.options.chain` — the
+seam is a file, in both directions. `validate_option_book` refuses a `strike`,
+`expiration`, `contracts`, `premium` or `limit_price` field by name, and refuses
+any structure whose maximum loss is unbounded even though this project cannot
+construct one, because that validator also reads books it did not write.
+
+What it *does* carry beyond the rule is the evidence: the trade count, the
+independent-cycle count and the skip census of the run that produced it. An
+executor opening ten structures a week from a rule whose research produced four
+cycles a year is running something else, and that is the only number in the file
+that lets anyone notice.
+
+### The sealed option window can refute and cannot confirm
+
+`python -m aqr.cli_sealed option-run` is `run`'s counterpart and returns the same
+`SealedMeasurement`, with the same `can_confirm` of `False`. Two things about it
+are options-specific and both are refusals:
+
+- **The settlement boundary moves.** `OptionBacktestConfig.settle_before`
+  defaults to the research embargo, which refuses any entry expiring inside the
+  reserved window. In the sealed phase that window is what is being measured, so
+  the boundary becomes the sealed chain's own end — left at the default, the
+  command would refuse every entry in the years it came to read and spend the
+  seal on nothing.
+- **The sizing may not drift.** `--risk-per-trade` is refused unless it matches
+  what was pre-registered. A sealed run at another size is a different experiment
+  wearing the first one's declaration.
+
+2024-09-01 → 2026-08-28 is about **25** independent 28-DTE cycles. It is entitled
+to say "this stopped working" and is not entitled to say "this works", and no
+artefact this system writes words it otherwise.
+
+### The underlying must be pulled raw
+
+The one mistake that costs a day. Option strikes are set in raw terms and do not
+move for an ordinary dividend, so a dividend-adjusted close compared against a
+strike reports a moneyness the trade never had — SPY's real close on 2019-11-22
+was 311.02 and the adjusted series says 282.10. Nothing raises: the backtest
+completes and reports plausible numbers, and the only thing that can see it is
+the put-call parity check in `tests/test_option_cache_claims.py`, which compares
+the chain's own implied spot against the bar close on all 753 sessions.
+
+So the option underlying has its own cache roots, and both are pulled with
+`--adjustment raw`:
+
+```bash
+uv run aqr pull --symbols SPY --adjustment raw \
+    --csv-root data-options-underlying --timeframe 1D
+
+uv run python -m aqr.cli_sealed pull --symbols SPY --adjustment raw \
+    --csv-root data-options-underlying-sealed --timeframe 1D
+```
+
+The choice travels in the dataset version recorded with every experiment, and
+the parity check runs against whichever roots exist.
 
 ---
 

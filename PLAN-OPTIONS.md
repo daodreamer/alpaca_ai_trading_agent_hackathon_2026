@@ -108,11 +108,21 @@ verify it holds under a real drawdown, do not assume).
 
 ## Phase O4 — The LLM proposes option hypotheses
 
+**Built 2026-09-01. `ai_quant_researcher`: 1397 tests, ruff + mypy clean.** No
+campaign has been run against `runs/research.sqlite` yet — the budget is
+untouched at 0 of 20, which is a one-way door and is the user's to spend.
+
 Everything below is in `ai_quant_researcher/`. Commands run from that directory.
 `uv run --extra dev pytest` / `ruff check .` / `mypy` must be green at the end of
 every step.
 
-### O4.1 — The proposer
+### O4.1 — The proposer — **done**
+
+`src/aqr/agent/option_prompt.py`, `option_proposer.py`, `option_research.py`,
+plus `src/aqr/option_pipeline.py` (the option `evaluate_candidate`) and
+`src/aqr/option_data.py` (the one place a market is assembled from the cache).
+`TemplateOptionProposer` is the offline baseline and its first six templates are
+the hand-written structures whose results are in the table above.
 
 New `src/aqr/agent/option_proposer.py` and `option_prompt.py`, alongside the
 equity `proposer.py` — **not inside it**. The two vocabularies are deliberately
@@ -136,7 +146,12 @@ data cannot price:
 Acceptance: an offline proposer run produces valid, varied `OptionSpec`s with no
 API key; every rejection is recorded with its reason.
 
-### O4.2 — The campaign, capped at 20 hypotheses
+### O4.2 — The campaign, capped at 20 hypotheses — **built, not spent**
+
+`OptionResearchConfig` refuses `iterations > 20` outright and the loop stops
+when the *registry's* count of distinct option hypotheses reaches it — a cap
+enforced per run is not a cap, because the problem does not reset when a
+process exits.
 
 ```bash
 uv run aqr option-research --iterations 20 --provider deepseek
@@ -147,7 +162,13 @@ non-overlapping cycles in 5.55 years. The equity search spent 414 hypotheses and
 deflated its Sharpe to 0.74 for it; 400 trials against 71 cycles produces a
 number with no information in it.
 
-### O4.3 — Keep the search denominators apart
+### O4.3 — Keep the search denominators apart — **done**
+
+`experiments.family` / `strategies.family` / `target_books.family`, added by
+migration so the 414 recorded equity rows survive and read back as `equity`.
+`distinct_hypotheses`, `total_backtests`, `sealed_looks`, `memory`,
+`experiments`, `strategies` and `target_books` all take a `family`; nothing sums
+them. `aqr registry` and `aqr experiments` print both counts and never a total.
 
 The registry must count option trials **separately** from the 414 equity ones.
 The multiplicity bar (`multiplicity_bar`, Bonferroni on a 5% family-wise rate)
@@ -161,7 +182,15 @@ a test asserts the two counts never merge.
 
 ## Phase O5 — Pre-registration and the one sealed run
 
-### O5.1 — The sealed option cache
+### O5.1 — The sealed option cache — **plumbing done, the pull is not**
+
+`cli_sealed pull` now takes `--symbols` and `--adjustment`, and
+`test_option_sealed_run.py` asserts the adjustment reaches the provider rather
+than being validated and dropped. **The pull itself still has to be run** — it
+needs the network and an Alpaca key. Once it exists,
+`test_the_sealed_chain_and_the_sealed_underlying_are_in_the_same_price_space`
+in `tests/test_option_cache_claims.py` stops skipping and checks parity to
+within 2%.
 
 The sealed roots exist (`data-options-sealed/`, 1,260 sessions to 2026-08-28)
 but **the sealed underlying does not**. Settlement needs SPY's raw closes past
@@ -180,13 +209,25 @@ If `cli_sealed pull` does not accept `--adjustment`, add it there the same way
 `tests/test_option_cache_claims.py` pointed at the sealed roots: implied spot
 must agree with the close to within 2%.
 
-### O5.2 — Pre-registration for option specs
+### O5.2 — Pre-registration for option specs — **done**
+
+The `preregistration` table is keyed by fingerprint and needed no change;
+`upsert_option_strategy` stores the rule as YAML (`dumps_option_spec`) under
+`family = 'option'`, and `aqr preregister` now prints the family and points at
+`cli_sealed option-run` rather than `run`. Ancestry taint is unchanged — it was
+already by campaign.
 
 Extend `registry/db.py`'s `preregistration` table and `aqr preregister` to
 option fingerprints. Ancestry taint is checked by campaign, as on the equity
 side.
 
-### O5.3 — Spend one shot
+### O5.3 — Spend one shot — **built, not spent**
+
+`aqr.cli_sealed option-run` exists, with `options/sealed.py` returning the same
+`SealedMeasurement` the equity run returns. Two option-specific refusals: the
+settlement boundary moves to the sealed chain's own end (D3 would otherwise
+refuse every entry in the window it came to measure), and `--risk-per-trade` is
+refused unless it matches what was pre-registered (D8a).
 
 ```bash
 uv run aqr preregister --rule "..." <FINGERPRINT>
@@ -202,7 +243,14 @@ confirm; no artefact may word it otherwise.
 
 ---
 
-## Phase O6 — The handoff artefact
+## Phase O6 — The handoff artefact — **done**
+
+`src/aqr/option_book.py` and `aqr option-book` / `aqr option-books`. Verified
+end to end against the real cache on a scratch database: refuses an unregistered
+fingerprint, an equity fingerprint, an unspent seal and a refuted sealed run;
+writes the rule with no strikes; `validate_option_book` refuses `strike`,
+`expiration`, `contracts`, `premium`, `limit_price` and any unbounded structure
+by name. `backend/tests/test_boundaries.py` guard 9 still passes.
 
 New `src/aqr/option_book.py`, modelled on `target_book.py` but **not** an
 extension of it: an option book is a list of legs, not a vector of weights, and

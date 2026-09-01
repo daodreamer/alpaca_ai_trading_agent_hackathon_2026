@@ -3,6 +3,7 @@
     aqr-sealed audit                     what the sealed cache holds
     aqr-sealed pull                      build the sealed cache
     aqr-sealed run FINGERPRINT           spend the seal, once
+    aqr-sealed option-run FINGERPRINT    the same, on the sealed option chain
 
 This is the only module in the project that may read the embargoed years, and
 almost everything about it is a restriction:
@@ -59,7 +60,12 @@ from aqr.data.universes import (
     load_point_in_time,
 )
 from aqr.dsl.loader import loads as loads_spec
-from aqr.registry.db import PreregistrationError, Registry
+from aqr.option_data import sealed_option_market
+from aqr.options.costs import IBKR_OPTIONS, OptionCostModel
+from aqr.options.engine import OptionBacktestConfig
+from aqr.options.sealed import measure_sealed_option_window
+from aqr.options.spec import loads_option_spec
+from aqr.registry.db import OPTION, PreregistrationError, Registry
 from aqr.seal import EMBARGO_START, current, enter_sealed_phase
 from aqr.validation.sealed import measure_sealed_window, multiplicity_bar
 
@@ -75,6 +81,21 @@ console = Console()
 
 SEALED_SP500_ROOT = "data-sp500-sealed"
 """Where the sealed S&P 500 cache lives. The mirror of ``data-sp500``."""
+
+SEALED_OPTIONS_ROOT = "data-options-sealed"
+SEALED_UNDERLYING_ROOT = "data-options-underlying-sealed"
+"""The option pair, and the second one is the easy mistake.
+
+The sealed option chain has a mirror on disk already. Its *underlying* does not
+come from ``data-sp500-sealed``: specs/10 D0 requires the bars a strike is
+compared against to be pulled raw, and the equity cache is dividend-adjusted.
+SPY's real close on 2019-11-22 was 311.02 and the adjusted series says 282.10 --
+a ten percent error that no arithmetic notices, because nothing is wrong with the
+arithmetic. Build this root with::
+
+    python -m aqr.cli_sealed pull --symbols SPY --adjustment raw \\
+        --csv-root data-options-underlying-sealed --timeframe 1D
+"""
 
 # Enough history before the embargo that every feature is warm on the first
 # sealed session. ``rs_rank(126)`` is the longest lookback the DSL offers and
@@ -159,6 +180,20 @@ def pull(
         "is the point: the names that left are exactly the ones whose absence "
         "creates survivorship bias.",
     ),
+    symbols: str = typer.Option(
+        "",
+        help="Comma-separated symbols to pull instead of the universe file. For "
+        "the option underlying, which is one name and is not an index member "
+        "list: `--symbols SPY`.",
+    ),
+    adjustment: str = typer.Option(
+        "all",
+        help="Alpaca price adjustment: all, split, dividend or raw. 'all' is right "
+        "for equity research and WRONG for the option underlying -- strikes are "
+        "set in raw terms and do not move for a dividend, so an adjusted close "
+        "compared against a strike reports a moneyness the trade never had "
+        "(specs/10 D0). Pull data-options-underlying-sealed with 'raw'.",
+    ),
     start: str = typer.Option("2016-01-01", help="First bar to request."),
     end: str = typer.Option(
         "", help="Last bar. Default: yesterday -- the tape is served on a delay."
@@ -179,18 +214,27 @@ def pull(
     turned it off would put both behaviours in the process that also runs
     ``research``.
     """
+    if adjustment not in ("all", "split", "dividend", "raw"):
+        raise typer.BadParameter(
+            f"unknown adjustment {adjustment!r}; use all, split, dividend or raw"
+        )
     _promote()
     window = (_parse_date(start), _parse_date(end) if end else _latest_available())
-    symbols = _tickers(Path(universe_file))
+    # An explicit list wins outright rather than being merged with the universe
+    # file: the option underlying is one name pulled into its own root, and
+    # quietly adding 600 tickers to that root would make it a second equity
+    # cache pulled with the wrong adjustment for equity research.
+    wanted = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    tickers = wanted or _tickers(Path(universe_file))
     console.print(
-        f"{len(symbols)} tickers, {window[0].date()} -> {window[1].date()}, "
-        f"feed {feed} -> {csv_root}/{timeframe}"
+        f"{len(tickers)} tickers, {window[0].date()} -> {window[1].date()}, "
+        f"feed {feed}, adjustment {adjustment} -> {csv_root}/{timeframe}"
     )
 
-    provider = _sealed(AlpacaProvider(feed=feed), "alpaca")
+    provider = _sealed(AlpacaProvider(feed=feed, adjustment=adjustment), "alpaca")
     cache = CsvProvider(csv_root)
     fetched, skipped, failed, suspect = 0, 0, [], 0
-    for symbol in symbols:
+    for symbol in tickers:
         target = cache.path_for(symbol, timeframe)
         if target.exists() and not force:
             skipped += 1
@@ -546,6 +590,230 @@ def _load_sealed(
             f"no symbol returned sealed bars from {csv_root}; run `aqr-sealed pull` first"
         )
     return data
+
+
+# --------------------------------------------------------------------------- #
+# The option sealed run — specs/10-options-research.md D3, D8
+# --------------------------------------------------------------------------- #
+
+
+@app.command("option-run")
+def option_run(
+    fingerprint: str = typer.Argument(..., help="The pre-registered option candidate."),
+    db: Path = typer.Option(Path("runs/research.sqlite"), help="Experiment database."),
+    chain_root: str = typer.Option(
+        SEALED_OPTIONS_ROOT, help="Sealed option chain cache to read."
+    ),
+    underlying_root: str = typer.Option(
+        SEALED_UNDERLYING_ROOT,
+        help="Sealed raw-adjusted bar cache for the underlying. Not the sealed "
+        "equity cache: option strikes are set in raw terms and an adjusted "
+        "close reports a moneyness the trade never had (specs/10 D0, D2a).",
+    ),
+    timeframe: str = typer.Option("1D"),
+    equity: float = typer.Option(
+        100_000.0,
+        help="Account the measurement is sized against. Must be the size the "
+        "research used, or the cycle count is a different experiment (D8a).",
+    ),
+    risk_per_trade: float = typer.Option(
+        0.0,
+        help="Override the spec's own risk fraction. Refused unless it matches "
+        "what was pre-registered -- see the command's help.",
+    ),
+    allow_unrecorded_ancestry: bool = typer.Option(
+        False,
+        help="Proceed when experiments in the ancestry predate the seal column. "
+        "Their state is unknown, not clean, and the report says so.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Spend the seal on one pre-registered option rule.
+
+    The order of the checks is the protocol, exactly as in ``run``: declared,
+    then untainted, then read. Reading first and checking after would already
+    have spent the thing the checks protect.
+
+    Two things are specific to options and both are refusals rather than
+    conveniences.
+
+    **The settlement boundary moves.** ``OptionBacktestConfig.settle_before``
+    defaults to the research embargo, which refuses any entry expiring inside
+    the reserved window (D3). In the sealed phase the reserved window is the
+    part being measured, so the boundary becomes the sealed chain's own end --
+    otherwise this command would refuse every entry in the years it came to
+    read, report zero trades, and spend the seal on nothing.
+
+    **The sizing may not drift.** specs/10 D8a measured the same rule producing
+    21 independent cycles at 1% of equity and 57 at 2%, with nothing about the
+    rule changed. A sealed run at a different size than the research is a
+    different experiment wearing the pre-registration of the first, so
+    ``--risk-per-trade`` is refused unless it matches the spec.
+    """
+    with Registry(db) as registry:
+        declaration = registry.preregistration(fingerprint)
+        if declaration is None:
+            raise typer.BadParameter(
+                f"{fingerprint} is not pre-registered. Declare it first with "
+                "`aqr preregister`, before any sealed session is read."
+            )
+        spent_run = registry.sealed_run(fingerprint)
+        if spent_run is not None:
+            raise typer.BadParameter(
+                f"the seal was spent on {spent_run['sealed_run_at']} and there is no "
+                "second one. The first result stands."
+            )
+        strategy = registry.get_strategy(fingerprint)
+        if strategy is None:
+            raise typer.BadParameter(f"no strategy {fingerprint!r} in {db}")
+        if strategy.family != OPTION:
+            raise typer.BadParameter(
+                f"{strategy.name} [{fingerprint}] is an {strategy.family} strategy; "
+                "spend its seal with `python -m aqr.cli_sealed run`. The two measure "
+                "different windows and are counted as different denominators."
+            )
+
+        taint = registry.ancestry_taint(fingerprint)
+        console.print(f"[dim]{taint}[/dim]")
+        if not taint.clean:
+            raise typer.BadParameter(
+                f"{fingerprint} is disqualified: {len(taint.tainted)} experiment(s) in "
+                "its ancestry ran under a tainted seal. A rule selected with the "
+                "answer in view cannot be validated against the answer."
+            )
+        if taint.unrecorded and not allow_unrecorded_ancestry:
+            raise typer.BadParameter(
+                f"{taint.unrecorded} experiment(s) in the ancestry predate the seal "
+                "column, so their state is unknown rather than clean. Pass "
+                "--allow-unrecorded-ancestry to proceed with that on the record."
+            )
+
+        spec = loads_option_spec(strategy.spec_yaml)
+        if risk_per_trade and abs(risk_per_trade - spec.sizing.risk_per_trade) > 1e-12:
+            raise typer.BadParameter(
+                f"--risk-per-trade {risk_per_trade} but {spec.name} was pre-registered "
+                f"at {spec.sizing.risk_per_trade}. specs/10 D8a: the same rule produced "
+                "21 independent cycles at 1% and 57 at 2% with nothing about the rule "
+                "changed, so a sealed run at another size is a different experiment "
+                "wearing this one's declaration."
+            )
+        console.print(
+            f"running [bold]{spec.name}[/bold] [{fingerprint}]\n"
+            f"{spec.structure.type} on {spec.underlying}, "
+            f"{spec.structure.dte.target} DTE, anchor delta {spec.structure.anchor.delta}\n"
+            f"declared {declaration.declared_at[:19]} under seal "
+            f"{declaration.seal_digest[:16]}\n"
+            f"rule: {declaration.selection_rule}"
+        )
+
+        # Promoted only now: every refusal above happens in a process that has
+        # still read nothing, so a rejected candidate costs no seal at all.
+        _promote()
+
+        market, dataset_version = sealed_option_market(
+            spec.underlying,
+            provider=_sealed(CsvProvider(underlying_root), "csv"),
+            chain_root=chain_root,
+            timeframe=timeframe,
+            since=EMBARGO_START.date(),
+        )
+        sessions = market.chain.sessions
+        if not sessions:
+            raise typer.BadParameter(
+                f"no sealed chain sessions in {chain_root}; run `aqr options-pull` "
+                "and `aqr options-embargo` first."
+            )
+        embargoed = [s for s in sessions if s >= EMBARGO_START.date()]
+        console.print(
+            f"{len(sessions)} chain sessions {sessions[0]} -> {sessions[-1]}, "
+            f"{len(embargoed)} of them past the embargo; "
+            f"{len(market.underlying)} underlying bars from {underlying_root}"
+        )
+        console.print(f"[dim]{dataset_version}[/dim]")
+        if not embargoed:
+            raise typer.BadParameter(
+                f"the sealed chain stops at {sessions[-1]}, before the embargo at "
+                f"{EMBARGO_START.date()}. There is nothing to measure, and spending "
+                "the seal on it would spend it on the research window twice."
+            )
+
+        # D3, in the sealed phase: the boundary is the sealed root's own end, not
+        # the research embargo. Left at the default this run would refuse every
+        # entry expiring after 2024-09-01 -- which is all of them.
+        settle_before = sessions[-1] + timedelta(days=1)
+        config = OptionBacktestConfig(
+            initial_equity=equity,
+            costs=spec_costs(),
+            settle_before=settle_before,
+        )
+
+        # This reading's ordinal within the option family. The equity sealed
+        # window is different data and a candidate screened against it has not
+        # consumed a look at this one.
+        looks = registry.sealed_looks(family=OPTION) + 1
+        if looks > 1:
+            console.print(
+                f"[yellow]look {looks} at the sealed option window[/yellow] — "
+                f"{looks - 1} candidate(s) were screened against it before this one, "
+                f"so the bar for the alpha is t >= {multiplicity_bar(looks):.2f}"
+            )
+
+        measurement = measure_sealed_option_window(
+            spec, market, since=EMBARGO_START, config=config, looks=looks
+        )
+        record = {
+            "measurement": measurement.as_dict(),
+            "seal": current().certificate(),
+            "declaration": {
+                "declared_at": declaration.declared_at,
+                "selection_rule": declaration.selection_rule,
+                "seal_digest": declaration.seal_digest,
+            },
+            "looks": looks,
+            "ancestry": {
+                "experiments": taint.experiments,
+                "campaigns": list(taint.campaigns),
+                "unrecorded": taint.unrecorded,
+            },
+            "chain_root": chain_root,
+            "underlying_root": underlying_root,
+            "dataset_version": dataset_version,
+            "settle_before": settle_before.isoformat(),
+            "initial_equity": equity,
+            "risk_per_trade": spec.sizing.risk_per_trade,
+            "family": OPTION,
+        }
+        try:
+            stamp = registry.record_sealed_run(fingerprint, result=record)
+        except PreregistrationError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
+    if as_json:
+        console.print_json(json.dumps(record, default=str))
+    else:
+        console.print()
+        console.print(measurement.summary())
+        console.print()
+        console.print(
+            "[dim]about 25 independent 28-DTE cycles: this window is entitled to say "
+            "the rule stopped working and is not entitled to say it works "
+            "(specs/10 D8). No artefact reading this result may word it "
+            "otherwise.[/dim]"
+        )
+        console.print(f"[dim]recorded at {stamp}; the seal for {fingerprint} is spent[/dim]")
+    raise typer.Exit(1 if measurement.refuted else 0)
+
+
+def spec_costs() -> OptionCostModel:
+    """The schedule a sealed option run is charged under.
+
+    ``IBKR_OPTIONS`` -- the same default ``OptionBacktestConfig`` carries, so the
+    sealed window is charged what the search window was charged. Named in its own
+    function rather than inlined because the alternative, a ``--costs`` option,
+    would let a sealed run be re-charged more cheaply than the research that
+    selected the rule, and that is a way to turn a refutation into a pass.
+    """
+    return IBKR_OPTIONS
 
 
 def main() -> None:
