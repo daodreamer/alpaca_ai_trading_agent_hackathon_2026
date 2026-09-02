@@ -103,8 +103,14 @@ class TestOutcomesAreAmendments:
             )
         )
         line = journal.read(DAY)[0]
-        assert line["stage"] == "submitted", "the stage records what we knew then"
         assert line["outcome"]["status"] == "filled", "the outcome records what happened"
+        assert line["stage"] == "filled", (
+            "the final state is the broker's last word, not its first -- "
+            "see `_with_final_stage`"
+        )
+        assert journal.raw_lines(DAY)[0]["stage"] == "submitted", (
+            "the line on disk still records what we knew when we wrote it"
+        )
 
     def test_the_original_line_never_learns_the_fill(self, journal: Journal) -> None:
         """The one that would be trivially easy to get wrong and impossible to

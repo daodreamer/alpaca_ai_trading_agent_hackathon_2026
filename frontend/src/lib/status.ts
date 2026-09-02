@@ -17,6 +17,8 @@
  * renders an em dash instead.
  */
 
+import type { EquityCycle } from "@/lib/equity"
+
 export type PositionStatus = {
   cycle_id: string
   underlying: string
@@ -117,6 +119,29 @@ export type Check = {
   observed: string | null
   limit: string | null
   detail?: string
+}
+
+/**
+ * One line of `/api/day/{day}` — which is a *day*, not a sleeve.
+ *
+ * Both agents journal into the same daily file (see `live/equity.py`'s
+ * `CYCLE_KIND`: the question "what happened on 2026-09-02" is about the
+ * account, not about which process asked), so this route hands back both and
+ * the reader has to tell them apart.
+ *
+ * That is not a formatting nicety. Every field on `JournalCycle` is the
+ * options sleeve's vocabulary — `iv_rank`, a menu of candidates, one structure,
+ * one verdict — and an equity pass has none of them. Rendered as an options
+ * cycle it does not come out mislabelled, it comes out invented: no spot, an
+ * `iv_rank` of "unmeasured", a menu of zero, and no checks, which the card
+ * words as "the cycle never reached the Gate" about a pass carrying twelve
+ * passed checks per order.
+ */
+export type DayRecord = JournalCycle | EquityCycle
+
+/** Which agent wrote this line. The `kind` the backend stamps, nothing else. */
+export function isEquityPass(record: DayRecord): record is EquityCycle {
+  return (record as EquityCycle).kind === "equity"
 }
 
 /** Parse for arithmetic only — never for display. See the module note. */

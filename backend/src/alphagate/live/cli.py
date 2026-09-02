@@ -60,6 +60,7 @@ from alphagate.agent import (
 from alphagate.agent.iv_store import IvHistoryStore
 from alphagate.core.errors import InvariantViolation
 from alphagate.execution import ExecutionError, load_env_file, require_paper_account
+from alphagate.interface.read import is_equity_record, stage_tally
 from alphagate.interface.status import STALE_AFTER, _age_of, read_status
 from alphagate.journal import Journal, trust_report
 from alphagate.live.equity_cli import add_equity_commands
@@ -796,7 +797,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    """Print a day from the journal. No server, no browser."""
+    """Print a day from the journal. No server, no browser.
+
+    Both agents write to the day's file, so both are listed — each marked with
+    the sleeve that wrote it, and the tally at the end counts this agent's own
+    stages. `submitted` on a rebalance pass and `submitted` on an options cycle
+    are two different agents' words, and adding them up produces a number about
+    neither (`interface/read.stage_tally`).
+    """
     journal = Journal(directory=Path(args.journal))
     day = date.fromisoformat(args.day) if args.day else datetime.now(UTC).date()
     records = journal.read(day)
@@ -804,10 +812,15 @@ def cmd_show(args: argparse.Namespace) -> int:
         print(f"nothing journalled for {day}")
         return 0
 
-    print(f"{day} — {len(records)} cycles\n")
+    passes = [record for record in records if is_equity_record(record)]
+    tail = "" if not passes else (
+        f", {len(passes)} equity pass" + ("es" if len(passes) != 1 else "")
+    )
+    print(f"{day} — {len(records) - len(passes)} options cycles{tail}\n")
     for record in records:
         stage = str(record.get("stage", "?")).upper()
-        print(f"{record['cycle_id']}  {stage:<14} {record.get('note', '')}")
+        sleeve = "equity " if is_equity_record(record) else "options"
+        print(f"{sleeve}  {record['cycle_id']}  {stage:<14} {record.get('note', '')}")
         if args.verbose:
             print(f"    {trust_report(record)}")
             outcome = record.get("outcome")
@@ -822,11 +835,8 @@ def cmd_show(args: argparse.Namespace) -> int:
     if orphans:
         print(f"! amendments with no record: {orphans}")
 
-    stages: dict[str, int] = {}
-    for record in records:
-        key = str(record.get("stage", "?"))
-        stages[key] = stages.get(key, 0) + 1
-    print("\n" + ", ".join(f"{k}={v}" for k, v in sorted(stages.items())))
+    stages = stage_tally(records)
+    print("\noptions: " + ", ".join(f"{k}={v}" for k, v in sorted(stages.items())))
     return 0
 
 

@@ -399,7 +399,46 @@ def _day_page(view: DayView, days: Sequence[date]) -> str:
         + f"<main><div class='tiles'>{tile_html}</div>{warnings}"
         "<table><thead><tr><th>time</th><th>cycle</th><th>stage</th>"
         "<th>structure</th><th>menu</th><th>why</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table></main>",
+        f"<tbody>{rows}</tbody></table>{_equity_panel(view)}</main>",
+    )
+
+
+def _equity_panel(view: DayView) -> str:
+    """The other sleeve's passes, listed rather than dropped.
+
+    The table above is the options sleeve's, and an equity pass rendered
+    through it would claim things about the pass that are not true — no menu,
+    no structure, and "never reached the Gate" about a pass carrying a full
+    check tape per order. But a journal covers a *day*, not a sleeve, so
+    leaving them out entirely would be a different lie: records that exist and
+    are not shown.
+
+    Summarised, not expanded. The equity sleeve has its own page and its own
+    tab; what this owes the reader is that the passes happened and where the
+    detail lives.
+    """
+    if not view.equity_passes:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(item.as_of)}</td>"
+        f"<td>{html.escape(item.cycle_id)}</td>"
+        f"<td>{_stage_tag(item.stage)}</td>"
+        f"<td>{item.orders} ({item.submitted} submitted, {item.vetoed} vetoed)</td>"
+        f"<td>{item.skipped}</td>"
+        f"<td>{html.escape(item.turnover)}</td>"
+        f"<td class='note'>{html.escape(item.note)}</td>"
+        "</tr>"
+        for item in view.equity_passes
+    )
+    return (
+        "<div class='panel' style='margin-top:24px'><h2>equity sleeve — specs/09</h2>"
+        "<table><thead><tr><th>time</th><th>pass</th><th>stage</th><th>orders</th>"
+        "<th>skipped</th><th>turnover</th><th>note</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+        "<div class='note' style='margin-top:10px'>Per-order verdicts are on the "
+        "Equity tab of the built dashboard, or in "
+        "<code>python -m alphagate equity-status</code>.</div></div>"
     )
 
 

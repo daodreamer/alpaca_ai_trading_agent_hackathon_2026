@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from alphagate.agent import Stage
 from alphagate.interface.app import build_app
 from alphagate.journal import Journal
+from tests.interface.test_read import equity_pass
 from tests.journal.conftest import DAY, at_stage, cycle
 
 
@@ -110,6 +111,39 @@ class TestRoutes:
         empty = TestClient(build_app(Path(str(tmp_path)) / "nothing"))
         response = empty.get(f"/day/{date(2020, 1, 1)}")
         assert response.status_code == 200
+
+
+class TestBothSleevesOnOnePage:
+    """The day page covers a day, and two agents write to it.
+
+    The options table cannot render an equity pass — it would print a menu of
+    zero and "never reached the Gate" about a pass carrying a full check tape
+    per order — and dropping the pass instead would hide a record that exists.
+    So it gets its own summary panel, and this asserts both halves.
+    """
+
+    @pytest.fixture
+    def both(self, journal: Journal) -> TestClient:
+        journal.append(at_stage(Stage.FILLED))
+        journal.append(equity_pass())
+        return TestClient(build_app(journal.directory))
+
+    def test_the_pass_is_on_the_page(self, both: TestClient) -> None:
+        page = both.get(f"/day/{DAY}").text
+        assert "equity sleeve" in page
+        assert "2026-08-26-EQ-000" in page
+        assert "2 of 2 intents submitted" in page
+
+    def test_it_is_not_in_the_options_table(self, both: TestClient) -> None:
+        """It has no cycle page, and nothing offers one."""
+        page = both.get(f"/day/{DAY}").text
+        assert f"/cycle/{DAY}/2026-08-26-EQ-000" not in page
+        assert both.get(f"/cycle/{DAY}/2026-08-26-EQ-000").status_code == 404
+
+    def test_the_api_still_hands_back_both(self, both: TestClient) -> None:
+        """`/api/day` is the whole day — the React tab splits it by `kind`."""
+        kinds = [record.get("kind") for record in both.get(f"/api/day/{DAY}").json()]
+        assert kinds == [None, "equity"]
 
 
 class TestItCannotTrade:

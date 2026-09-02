@@ -337,7 +337,15 @@ class TestOpenOrdersAreReconciled:
 
         assert result.reconciled == 1
         assert by_id(journal, cycle_id)["outcome"]["status"] == "filled"
-        assert by_id(journal, cycle_id)["stage"] == "submitted", "the decision stands"
+        assert by_id(journal, cycle_id)["stage"] == "filled", (
+            "and the cycle now reads as a fill, which is what puts its legs in "
+            "the book -- see `journal.writer._with_final_stage`"
+        )
+        assert [
+            line["stage"]
+            for line in journal.raw_lines(DAY)
+            if line.get("cycle_id") == cycle_id and "stage" in line
+        ] == ["submitted"], "the decision line on disk stands, untouched"
 
     def test_a_dry_run_asks_the_broker_nothing(self, tmp_path: Path) -> None:
         """`mcp=None` means there is nothing submitted to reconcile, and a call

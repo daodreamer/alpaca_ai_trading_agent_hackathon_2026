@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -22,9 +23,11 @@ from alphagate.agent.book import contract_from, open_positions, read_book, struc
 from alphagate.core.errors import InvariantViolation
 from alphagate.equity.policy import EQUITY_SLEEVE_ALLOCATION
 from alphagate.execution import AccountRead, LegPosition
+from alphagate.journal import Journal, outcome_from
 from alphagate.options import OptionContract, Right, Side, StructureKind
 from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
 from tests.agent.conftest import EXPIRY, SPY
+from tests.journal.conftest import submission
 
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
 
@@ -213,8 +216,10 @@ class TestMatchingLegsToStructures:
             assert len(unexplained) == 2, stage
 
     def test_each_leg_is_claimed_once(self) -> None:
-        """Two cycles that opened the same structure must not both claim it —
-        that would double the book's risk against one real position."""
+        """Two cycles that opened the same structure, and one contract at the
+        broker: they must not both claim it. That would double the book's risk
+        against one real position. The broker's quantity is the arbiter — see
+        `TestTheBrokersQuantityDecidesHowManyFit`."""
         positions, unexplained, closed = open_positions(
             OPEN_LEGS, [filled("2026-08-26-SPY-000"), filled("2026-08-26-SPY-001")]
         )
@@ -237,6 +242,157 @@ class TestMatchingLegsToStructures:
         )
         assert len(positions) == 1
         assert unexplained == ()
+
+
+class TestTheBrokersQuantityDecidesHowManyFit:
+    """Two journalled 1-lots and two contracts at the broker are two positions.
+
+    The rule this class pins down is the one the first version got wrong in the
+    safe-looking direction. Legs used to be claimed whole: the newest fill took
+    the contract and every older fill that wanted it was reported closed. With
+    one contract at the broker that is right. With two — the same rule firing
+    twice in a session, which is what a rule that trades a single underlying
+    does — it read a two-spread book as one spread, so the Gate budgeted half
+    the risk that was actually on and nothing anywhere said so.
+
+    The asymmetry below is deliberate. A journalled size *larger* than the
+    broker can cover still reads as open, because dropping a live position out
+    of the book would take it out of the exit policy too; a broker quantity
+    larger than the journal explains is reported as unexplained, because that
+    is the direction where the surplus is risk nobody decided on.
+    """
+
+    def test_two_identical_spreads_are_both_open_when_the_broker_holds_two(self) -> None:
+        legs = (leg_at("747", 2), leg_at("752", -2))
+        positions, unexplained, closed = open_positions(
+            legs, [filled("2026-08-26-SPY-000"), filled("2026-08-26-SPY-001")]
+        )
+        assert [item.cycle_id for item in positions] == [
+            "2026-08-26-SPY-000",
+            "2026-08-26-SPY-001",
+        ]
+        assert unexplained == ()
+        assert closed == ()
+
+    def test_the_gate_budgets_for_both(self) -> None:
+        """The reason the count matters: `open_risk` is what the portfolio-loss
+        check measures, and half of it is a licence to open a third."""
+        legs = (leg_at("747", 2), leg_at("752", -2))
+        book = read_book(
+            account(), legs, [filled("2026-08-26-SPY-000"), filled("2026-08-26-SPY-001")]
+        )
+        assert book.snapshot.open_structures == 2
+        assert book.snapshot.open_risk == Decimal("786.00")
+        assert book.is_clean
+
+    def test_the_older_copy_is_closed_when_the_broker_holds_only_one(self) -> None:
+        """Unchanged from before: one contract cannot be two positions."""
+        positions, unexplained, closed = open_positions(
+            OPEN_LEGS, [filled("2026-08-26-SPY-000"), filled("2026-08-26-SPY-001")]
+        )
+        assert [item.cycle_id for item in positions] == ["2026-08-26-SPY-001"]
+        assert closed == ("2026-08-26-SPY-000",)
+        assert unexplained == ()
+
+    def test_the_surplus_the_journal_cannot_explain_is_reported(self) -> None:
+        """Three contracts at the broker, one 1-lot in the journal. The spread
+        we opened is open; the other two are somebody else's doing and are
+        reported rather than absorbed."""
+        legs = (leg_at("747", 3), leg_at("752", -3))
+        positions, unexplained, closed = open_positions(legs, [filled()])
+        assert len(positions) == 1
+        assert closed == ()
+        assert [(leg.contract.strike, leg.quantity) for leg in unexplained] == [
+            (Decimal("747"), 2),
+            (Decimal("752"), -2),
+        ]
+
+    def test_the_surplus_carries_only_its_share_of_the_money(self) -> None:
+        """A residual reported at the whole line's market value would overstate
+        what is unaccounted for by exactly the part we *can* account for."""
+        legs = (leg_at("747", 3), leg_at("752", -3))
+        _, unexplained, _ = open_positions(legs, [filled()])
+        assert unexplained[0].quantity == 2, "one of the three is accounted for"
+        assert unexplained[0].market_value == Decimal("100.00")
+        assert unexplained[0].unrealised == Decimal("6.67")
+        assert unexplained[0].average_price == Decimal("1.50"), "a per-contract price"
+
+    def test_an_untouched_leg_is_reported_exactly_as_it_arrived(self) -> None:
+        """Nothing claimed, nothing scaled: the common case must not go through
+        the arithmetic at all."""
+        legs = (leg_at("747", 3), leg_at("752", -3))
+        _, unexplained, _ = open_positions(legs, [])
+        assert unexplained == legs
+
+    def test_a_journalled_size_the_broker_cannot_cover_still_reads_as_open(self) -> None:
+        """The other direction, and the deliberate asymmetry. A 3-lot in the
+        journal against one contract at the broker is over-modelled — and that
+        is the safe way to be wrong: the position stays in the Gate's risk
+        model and stays under the exit policy, where dropping it would leave a
+        live short leg nobody was managing."""
+        positions, unexplained, closed = open_positions(OPEN_LEGS, [filled(quantity=3)])
+        assert len(positions) == 1
+        assert positions[0].position.quantity == 3
+        assert unexplained == (), "claiming never leaves a negative remainder"
+        assert closed == ()
+
+    def test_a_second_copy_gets_nothing_once_the_broker_is_exhausted(self) -> None:
+        positions, unexplained, closed = open_positions(
+            OPEN_LEGS,
+            [filled("2026-08-26-SPY-000"), filled("2026-08-26-SPY-001", quantity=3)],
+        )
+        assert [item.cycle_id for item in positions] == ["2026-08-26-SPY-001"]
+        assert closed == ("2026-08-26-SPY-000",)
+        assert unexplained == ()
+
+
+class TestAFillThatArrivedAsAnAmendment:
+    """The seam where a real spread went missing — the bug this pairing fixes.
+
+    The cycle is journalled the moment the order is placed, when the broker
+    still says `pending_new`, so its line reads `submitted`. The fill lands
+    later and arrives as an amendment (specs/06 D3). Everything here depends on
+    the two halves agreeing about what that means: `Journal.read` settles the
+    stage from the outcome, and `open_positions` claims the legs of a cycle
+    that reads as filled. Assert them together, because separately they were
+    both "right" while a live two-legged spread sat at the broker labelled a
+    leg the journal could not explain.
+    """
+
+    def journal_with_a_late_fill(self, tmp_path: Path) -> Journal:
+        journal = Journal(directory=tmp_path / "journal")
+        journal.append({**filled(), "stage": "submitted"})
+        journal.record_outcome(
+            outcome_from(
+                submission("order_filled"),
+                cycle_id="2026-08-26-SPY-000",
+                observed_at=NOW,
+            ),
+            day=NOW.date(),
+        )
+        return journal
+
+    def test_the_spread_is_in_the_book(self, tmp_path: Path) -> None:
+        journal = self.journal_with_a_late_fill(tmp_path)
+        positions, unexplained, _ = open_positions(
+            OPEN_LEGS, journal.read_through(NOW.date())
+        )
+        assert len(positions) == 1
+        assert unexplained == (), "not a leg the journal cannot explain"
+
+    def test_the_gate_budgets_against_it(self, tmp_path: Path) -> None:
+        journal = self.journal_with_a_late_fill(tmp_path)
+        book = read_book(account(), OPEN_LEGS, journal.read_through(NOW.date()))
+        assert book.snapshot.open_structures == 1
+        assert book.snapshot.open_risk == Decimal("393.00")
+        assert book.is_clean
+
+    def test_the_exit_policy_can_see_it(self, tmp_path: Path) -> None:
+        """`book.held` is what the runner iterates to re-price and exit. An
+        empty tuple here is a position nobody is managing."""
+        journal = self.journal_with_a_late_fill(tmp_path)
+        book = read_book(account(), OPEN_LEGS, journal.read_through(NOW.date()))
+        assert [item.cycle_id for item in book.held] == ["2026-08-26-SPY-000"]
 
 
 class TestUnexplainedLegsAreNeverModelled:

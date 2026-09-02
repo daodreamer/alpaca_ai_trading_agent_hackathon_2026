@@ -9,6 +9,15 @@
  * The Gate's checks are sorted tightest-first, so a check that passed with 4%
  * of its budget left sits above one that passed with 90%. That ordering is the
  * whole argument that the risk layer is load-bearing rather than decorative.
+ *
+ * **Both sleeves, one chronological list, two cards.** The day covers the
+ * account rather than one agent, so an equity rebalance pass belongs on this
+ * page — but it is rendered by `EquityPassCard`, because every field
+ * `CycleCard` reads is options vocabulary an equity pass does not have. Put
+ * through the options card it read "unclassified · iv rank unmeasured · menu 0
+ * · the cycle never reached the Gate" about a pass that had just passed twelve
+ * checks per order, which is the most misleading sentence this dashboard could
+ * print about a risk system whose whole claim is that the Gate is load-bearing.
  */
 
 import { useState } from "react"
@@ -34,13 +43,17 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import type { EquityCycle } from "@/lib/equity"
 import {
   type Check,
+  type DayRecord,
   type DeclineCategory,
   type JournalCycle,
   clock,
   fmt,
+  isEquityPass,
   num,
+  pct,
 } from "@/lib/status"
 
 const STAGE_TONE: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -75,7 +88,7 @@ const CATEGORY_TONE: Record<DeclineCategory, "default" | "secondary" | "destruct
   other: "outline",
 }
 
-export function Journal({ cycles, day }: { cycles: JournalCycle[]; day: string }) {
+export function Journal({ cycles, day }: { cycles: DayRecord[]; day: string }) {
   const [open, setOpen] = useState<string | null>(null)
 
   if (cycles.length === 0) {
@@ -94,17 +107,173 @@ export function Journal({ cycles, day }: { cycles: JournalCycle[]; day: string }
 
   return (
     <div className="flex flex-col gap-4">
-      {cycles.map((cycle) => (
-        <CycleCard
-          key={cycle.cycle_id}
-          cycle={cycle}
-          expanded={open === cycle.cycle_id}
-          onToggle={() =>
-            setOpen(open === cycle.cycle_id ? null : cycle.cycle_id)
-          }
-        />
-      ))}
+      {cycles.map((record) => {
+        const shared = {
+          key: record.cycle_id,
+          expanded: open === record.cycle_id,
+          onToggle: () =>
+            setOpen(open === record.cycle_id ? null : record.cycle_id),
+        }
+        // One chronological list, two cards. The day is what happened on the
+        // account, in order, so both sleeves belong here — but an equity pass
+        // put through `CycleCard` would be described in a vocabulary it has
+        // none of. See `DayRecord` in `lib/status.ts`.
+        return isEquityPass(record) ? (
+          <EquityPassCard {...shared} pass={record} />
+        ) : (
+          <CycleCard {...shared} cycle={record} />
+        )
+      })}
     </div>
+  )
+}
+
+/**
+ * One equity rebalance pass — specs/09 D10.
+ *
+ * Shows what the options card shows, in the terms this sleeve has: no menu and
+ * no structure, but a target weight per order and, per order, the check tape
+ * the equity Gate produced. The Equity tab's Today card lists the same orders;
+ * what this adds is the tape, which is the journal's whole job — "the checks
+ * that nearly stopped it" is as much a question about a rebalance as about a
+ * spread.
+ */
+function EquityPassCard({
+  pass,
+  expanded,
+  onToggle,
+}: {
+  pass: EquityCycle
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const stage = pass.stage ?? "unknown"
+  const orders = pass.orders ?? []
+  const skipped = pass.skipped ?? []
+  const submitted = orders.filter((order) => order.submission).length
+  const vetoed = orders.filter(
+    (order) => (order.verdict?.reasons ?? []).length > 0,
+  ).length
+  // The same headline the options card carries, for the same reason: a check
+  // that passed with 0.2% of its budget left is the evidence that this Gate is
+  // load-bearing, and it is worth a badge rather than a scroll.
+  const near = nearMisses(orders.flatMap((order) => order.verdict?.checks ?? []))
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-muted-foreground font-mono text-sm tabular-nums">
+            {clock(pass.as_of)}
+          </span>
+          <CardTitle className="text-base">equity rebalance</CardTitle>
+          <Badge variant={STAGE_TONE[stage] ?? "outline"}>{stage}</Badge>
+          <Badge variant="secondary">
+            {orders.length} order{orders.length === 1 ? "" : "s"}
+          </Badge>
+          {vetoed > 0 ? (
+            <Badge variant="destructive">
+              {vetoed} stopped by the Gate
+            </Badge>
+          ) : null}
+          {near.length > 0 ? (
+            <Badge variant="secondary">near {near[0].name}</Badge>
+          ) : null}
+          {orders.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={onToggle}
+            >
+              <ChevronRight
+                data-icon="inline-start"
+                className={cn("transition-transform", expanded && "rotate-90")}
+              />
+              {expanded ? "less" : "detail"}
+            </Button>
+          ) : null}
+        </div>
+        <CardDescription>
+          {pass.note ||
+            `${submitted} of ${orders.length} intents reached the broker`}
+        </CardDescription>
+      </CardHeader>
+
+      {expanded && orders.length > 0 ? (
+        <CardContent className="flex flex-col gap-6">
+          <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {(
+              [
+                ["sleeve equity", fmt(pass.equity, 0)],
+                ["turnover", fmt(pass.turnover, 0)],
+                ["no-trade band", pct(pass.band_pct, 0)],
+                ["skipped", String(skipped.length)],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label} className="flex flex-col gap-0.5">
+                <span className="text-muted-foreground text-xs tracking-wide uppercase">
+                  {label}
+                </span>
+                <span className="tabular-nums">{value}</span>
+              </div>
+            ))}
+          </section>
+
+          {orders.map((order, index) => (
+            <section
+              key={`${order.symbol}-${index}`}
+              className="flex flex-col gap-2"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-sm">{order.symbol}</span>
+                <Badge variant={order.side === "buy" ? "secondary" : "outline"}>
+                  {order.side}
+                </Badge>
+                <span className="text-muted-foreground text-sm tabular-nums">
+                  {fmt(order.shares, 4)} @ {fmt(order.reference_price)} ={" "}
+                  {fmt(order.notional, 0)}
+                </span>
+                <Badge
+                  variant={
+                    (order.verdict?.reasons ?? []).length > 0
+                      ? "destructive"
+                      : "outline"
+                  }
+                >
+                  {order.outcome}
+                </Badge>
+              </div>
+              {(order.verdict?.reasons ?? []).map((reason) => (
+                <p key={reason.check} className="text-destructive text-xs">
+                  vetoed · {reason.check} — {reason.detail}
+                </p>
+              ))}
+              {(order.verdict?.waived ?? []).map((reason) => (
+                <p key={reason.check} className="text-muted-foreground text-xs">
+                  waived · {reason.check} — {reason.detail} (this order reduces
+                  risk)
+                </p>
+              ))}
+              <OrderChecks checks={order.verdict?.checks ?? []} />
+            </section>
+          ))}
+
+          {skipped.length > 0 ? (
+            <section className="flex flex-col gap-1">
+              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Not traded — inside the band or unpriced
+              </h3>
+              {skipped.map((item) => (
+                <p key={item.symbol} className="text-muted-foreground text-xs">
+                  {item.symbol} · {item.reason} — {item.detail}
+                </p>
+              ))}
+            </section>
+          ) : null}
+        </CardContent>
+      ) : null}
+    </Card>
   )
 }
 
@@ -122,9 +291,9 @@ function CycleCard({
   const near = nearMisses(checks)
   // Read off the backend, never re-derived here — see the module-level
   // comment on `JournalCycle.category` in `lib/status.ts` for why a second,
-  // client-side classifier is exactly the drift this field exists to rule
-  // out. `undefined` on an equity record (or any record predating this field)
-  // reads as "other" rather than crashing the card.
+  // client-side classifier is exactly the drift this field exists to rule out.
+  // `undefined` on a record predating the field reads as "other" rather than
+  // crashing the card; an equity pass never arrives here at all.
   const category: DeclineCategory = cycle.category ?? "other"
   const categoryLabel = cycle.category_label ?? "unclassified"
 
@@ -184,6 +353,47 @@ function CycleCard({
   )
 }
 
+/**
+ * One equity order's check tape — in full when it is interesting.
+ *
+ * A rebalance pass can carry eighty-four orders, and eighty-four twelve-row
+ * tables is a page nobody reads. So the tape is shown whenever it says
+ * something — a check failed, or one passed inside 15% of its limit — and
+ * summarised otherwise. The summary still names the tightest check and how
+ * much of its budget it used, because that is the number the full table exists
+ * to surface; what is dropped is eleven rows saying "plenty of room".
+ */
+function OrderChecks({ checks }: { checks: Check[] }) {
+  if (checks.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        No verdict recorded for this order.
+      </p>
+    )
+  }
+  const failed = checks.filter((check) => !check.passed)
+  const near = nearMisses(checks)
+  if (failed.length > 0 || near.length > 0) return <Checks checks={checks} />
+
+  const measured = checks
+    .map((check) => ({ check, room: headroom(check) }))
+    .filter((item): item is { check: Check; room: number } => item.room !== null)
+    .sort((a, b) => a.room - b.room)
+  const tightest = measured[0]
+
+  return (
+    <p className="text-muted-foreground text-xs">
+      {checks.length} of {checks.length} checks passed
+      {tightest
+        ? ` — tightest ${tightest.check.name}, ${Math.round(
+            (1 - tightest.room) * 100,
+          )}% of its budget used`
+        : ""}
+      .
+    </p>
+  )
+}
+
 function Read({ cycle }: { cycle: JournalCycle }) {
   const pairs = [
     ["spot", cycle.read?.spot ? fmt(cycle.read.spot) : "—"],
@@ -224,13 +434,22 @@ function measure(value: string | null): string {
   return parsed.toFixed(digits)
 }
 
-/** Headroom, 0–1. `null` where the check is not a magnitude. */
+/**
+ * Headroom, 0–1. `null` where the check is not a magnitude.
+ *
+ * Mirrors `_headroom` in `interface/read.py`, including its floor rule: a check
+ * that *passed* with observed above its limit is measured against a floor, not
+ * a budget, and 1 − observed/limit would rank the safest check on the page as
+ * the tightest one. Unrankable is the honest answer.
+ */
 function headroom(check: Check): number | null {
   if (check.observed === null || check.limit === null) return null
   const limit = Math.abs(num(check.limit))
   if (limit === 0) return null
   if (!check.passed) return 0
-  return Math.max(0, Math.min(1, 1 - Math.abs(num(check.observed)) / limit))
+  const used = Math.abs(num(check.observed)) / limit
+  if (used > 1) return null
+  return Math.max(0, Math.min(1, 1 - used))
 }
 
 function nearMisses(checks: Check[]): Check[] {

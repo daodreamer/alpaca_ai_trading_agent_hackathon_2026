@@ -18,12 +18,19 @@ from pathlib import Path
 
 import pytest
 
-from alphagate.journal import REDACTED, Journal, encode, redact
+from alphagate.agent import Stage
+from alphagate.execution import OrderStatus
+from alphagate.journal import REDACTED, Journal, encode, outcome_from, redact
+from alphagate.journal.writer import _FINAL_STAGE_FOR_STATUS, _LIVE_STAGE
+from tests.journal.conftest import at_stage, submission
 
 MCP_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "mcp"
 
 DAY = date(2026, 8, 26)
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
+
+OBSERVED_AT = datetime(2026, 8, 26, 18, 0, tzinfo=UTC)
+SPY_000 = "2026-08-26-SPY-000"
 
 FAKE_ALPACA_KEY = "PKTESTTESTTESTTESTTEST99"
 FAKE_SECRET = "sk-abcdefghijklmnop0123456789"
@@ -261,6 +268,161 @@ class TestAmendments:
             journal.path_for(DAY).read_text(encoding="utf-8").split("\n")[0]
         )
         assert "realised_pl" not in first_line
+
+
+class TestTheFinalStageFollowsTheOrder:
+    """specs/06 D3 applied to `stage` — test plan item 3, the half that was missing.
+
+    A cycle is journalled the instant its order is placed, and at that instant
+    the broker usually says `pending_new`: `agent.cycle._stage_of` reads that
+    and writes `SUBMITTED`. The fill lands seconds or hours later and arrives as
+    an amendment. So `stage` has always been *what the broker said, last we
+    looked* — and a reader that ignored the later look reported every
+    slower-than-instant fill as an order still in flight.
+
+    That is not cosmetic. `agent.book.open_positions` claims broker legs for the
+    cycles whose stage is `filled`; left at `submitted`, a real spread became a
+    leg "the journal cannot explain", dropped out of the Gate's risk model and
+    out of the exit policy that was supposed to close it.
+
+    The rule is deliberately narrow: only a cycle still at `submitted` is
+    promoted, and only by a *terminal* status. A live order, a latched
+    `BREACHED`, an unknown status — all left exactly as they were.
+    """
+
+    def fill_later(self, journal: Journal, *, sequence: int = 0) -> str:
+        """One real submitted cycle, filled by a later read-back."""
+        record = at_stage(Stage.SUBMITTED, sequence=sequence)
+        journal.append(record)
+        journal.record_outcome(
+            outcome_from(
+                submission("order_filled"),
+                cycle_id=record.cycle_id,
+                observed_at=OBSERVED_AT,
+            )
+        )
+        return record.cycle_id
+
+    def test_a_fill_that_landed_later_reads_as_filled(self, journal: Journal) -> None:
+        self.fill_later(journal)
+        record = journal.read(DAY)[0]
+        assert record["stage"] == "filled"
+        assert record["outcome"]["status"] == "filled"
+
+    def test_the_line_on_disk_still_says_submitted(self, journal: Journal) -> None:
+        """The promotion happens on read. No hindsight is written backwards into
+        the decision line — specs/01 Rule 4, and the whole reason D3 exists."""
+        self.fill_later(journal)
+        assert journal.raw_lines(DAY)[0]["stage"] == "submitted"
+
+    def test_the_whole_history_read_promotes_too(self, journal: Journal) -> None:
+        """`read_through` is what `agent.book.read_book` actually calls: a
+        position opened on Monday is claimed from Wednesday's session, or not at
+        all."""
+        self.fill_later(journal)
+        assert journal.read_through(DAY)[0]["stage"] == "filled"
+
+    def test_a_still_live_order_keeps_its_stage(self, journal: Journal) -> None:
+        """`new` is not an answer, it is the absence of one. Promoting it would
+        claim a fill nobody reported."""
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome={"status": "new"})
+        assert journal.read(DAY)[0]["stage"] == "submitted"
+
+    def test_an_unrecognised_status_keeps_its_stage(self, journal: Journal) -> None:
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome={"status": "sideways"})
+        assert journal.read(DAY)[0]["stage"] == "submitted"
+
+    def test_a_rejection_read_back_later_says_rejected(self, journal: Journal) -> None:
+        """A broker refusing an order after accepting it is the same fact as
+        refusing it at the door, and every view buckets it the same way."""
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome={"status": "rejected"})
+        assert journal.read(DAY)[0]["stage"] == "rejected"
+
+    def test_a_cancelled_order_is_left_at_submitted(self, journal: Journal) -> None:
+        """Deliberate. No `Stage` means "came back without a fill", and inventing
+        one here would change the taxonomy every view is built on rather than
+        report a fact. `submitted` stays true — it *was* submitted — and
+        `outcome.status` is right there for anyone asking what became of it."""
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome={"status": "canceled"})
+        assert journal.read(DAY)[0]["stage"] == "submitted"
+
+    def test_a_latched_breach_is_never_promoted(self, journal: Journal) -> None:
+        """specs/04 D5. `BREACHED` is a kill switch a human clears, and a
+        read-back that says `filled` must not clear it on their behalf."""
+        journal.append(at_stage(Stage.BREACHED))
+        journal.amend(SPY_000, outcome={"status": "filled"})
+        assert journal.read(DAY)[0]["stage"] == "breached"
+
+    def test_a_cycle_that_never_reached_the_broker_is_untouched(
+        self, journal: Journal
+    ) -> None:
+        journal.append(at_stage(Stage.VETOED))
+        journal.amend(SPY_000, outcome={"status": "filled"})
+        assert journal.read(DAY)[0]["stage"] == "vetoed"
+
+    def test_an_amendment_that_arrives_first_still_promotes(
+        self, journal: Journal
+    ) -> None:
+        """The held-amendment path (test plan item 4) reaches the same state."""
+        journal.amend(SPY_000, outcome={"status": "filled"})
+        journal.append(at_stage(Stage.SUBMITTED))
+        assert journal.read(DAY)[0]["stage"] == "filled"
+
+    def test_the_last_amendment_decides(self, journal: Journal) -> None:
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome={"status": "new"})
+        journal.amend(SPY_000, outcome={"status": "filled"})
+        assert journal.read(DAY)[0]["stage"] == "filled"
+
+    def test_an_outcome_that_is_not_a_mapping_is_ignored(self, journal: Journal) -> None:
+        """One malformed amendment must not stop the day from loading."""
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.amend(SPY_000, outcome="filled")
+        assert journal.read(DAY)[0]["stage"] == "submitted"
+
+    def test_an_equity_pass_keeps_its_own_stage(self, journal: Journal) -> None:
+        """The equity sleeve journals its outcomes per order rather than at the
+        top level, and `EquityStage` is a different vocabulary. Nothing here
+        reaches it — `interface/read.py` is where the two sleeves are told
+        apart."""
+        journal.append(
+            {
+                "cycle_id": "2026-08-26-EQ-000",
+                "as_of": NOW,
+                "kind": "equity",
+                "stage": "submitted",
+                "orders": [{"symbol": "HD", "outcome": "filled"}],
+            }
+        )
+        assert journal.read(DAY)[0]["stage"] == "submitted"
+
+    def test_the_promotion_map_names_real_statuses_and_real_stages(self) -> None:
+        """The anti-drift guard.
+
+        `journal` cannot import `agent` — `agent.runner` imports `journal`, so
+        that dependency only runs one way — which is why the rule is written in
+        the vocabularies' *strings*. This is the test that keeps those strings
+        honest: every key is a terminal `OrderStatus`, every value is a real
+        `Stage`, the stage promoted *from* is the one the reconciler considers
+        live, and the terminal statuses left out are exactly the three with no
+        `Stage` of their own.
+        """
+        for status, stage in _FINAL_STAGE_FOR_STATUS.items():
+            assert OrderStatus(status).is_terminal, f"{status} is not terminal"
+            assert Stage(stage), f"{stage} is not a Stage"
+        assert Stage(_LIVE_STAGE) is Stage.SUBMITTED
+        unmapped = {status for status in OrderStatus if status.is_terminal} - {
+            OrderStatus(status) for status in _FINAL_STAGE_FOR_STATUS
+        }
+        assert unmapped == {
+            OrderStatus.CANCELED,
+            OrderStatus.EXPIRED,
+            OrderStatus.REPLACED,
+        }, "a terminal status with no Stage of its own must stay unpromoted"
 
 
 class TestRedaction:

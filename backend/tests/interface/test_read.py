@@ -23,12 +23,59 @@ from alphagate.interface.read import (
     available_days,
     day_records_with_category,
     day_view,
+    is_equity_record,
+    stage_tally,
     to_cycle,
 )
 from alphagate.journal import Journal, outcome_from
 from tests.journal.conftest import DAY, at_stage, cycle, submission
 
 FILLED_AT = "2026-08-26T18:00:00+00:00"
+
+
+def equity_pass() -> dict[str, object]:
+    """One rebalance pass as `live/equity.py` journals it — specs/09 D10.
+
+    Two orders, because the interesting counts are the ones that differ: one
+    reached the broker and one the equity Gate refused. Both carry their check
+    tape, which is what the options renderer was throwing away.
+    """
+    return {
+        "cycle_id": "2026-08-26-EQ-000",
+        "kind": "equity",
+        "as_of": "2026-08-26T13:45:12+00:00",
+        "stage": "submitted",
+        "equity": "90010.46",
+        "band_pct": "0.20",
+        "turnover": "274.84",
+        "note": "2 of 2 intents submitted",
+        "orders": [
+            {
+                "symbol": "HD",
+                "side": "buy",
+                "shares": "0.5956",
+                "notional": "137.42",
+                "outcome": "pending_new",
+                "verdict": {"checks": [{"name": "buying_power", "passed": True}]},
+                "submission": {"status": "pending_new"},
+            },
+            {
+                "symbol": "LOW",
+                "side": "buy",
+                "shares": "0.4",
+                "notional": "137.42",
+                "outcome": "vetoed",
+                "verdict": {
+                    "checks": [{"name": "position_cap", "passed": False}],
+                    "reasons": [{"check": "position_cap", "detail": "9.1% > 8%"}],
+                },
+                "submission": None,
+            },
+        ],
+        "skipped": [
+            {"symbol": "SPY", "reason": "inside_band", "detail": "0.1% < 0.2%", "drift": "0.001"}
+        ],
+    }
 
 
 @pytest.fixture
@@ -162,6 +209,33 @@ class TestNearMisses:
         )
         assert view.checks[0].headroom == 0.0
 
+    def test_a_floor_a_passing_check_sits_above_is_not_ranked(self) -> None:
+        """`order_is_material` passes when the notional is *above* $25, so a
+        $137 order is as far from failing as it gets. `CheckResult` carries no
+        direction and the fraction assumes a ceiling, which would rank this at
+        zero room — the tightest thing on the page, and a "near" badge on the
+        safest check in the pass. Unrankable is the honest answer."""
+        view = to_cycle(
+            {"verdict": {"checks": [
+                {"name": "order_is_material", "passed": True,
+                 "observed": "137.407704", "limit": "25"}
+            ]}}
+        )
+        assert view.checks[0].headroom is None
+        assert not view.checks[0].is_near_miss
+        assert view.near_misses == ()
+
+    def test_a_failed_check_above_its_limit_is_still_zero(self) -> None:
+        """The floor rule reads `passed`, not the ratio. A ceiling that was
+        actually breached is a failure with no room left, not an unrankable
+        one."""
+        view = to_cycle(
+            {"verdict": {"checks": [
+                {"name": "max_loss", "passed": False, "observed": "400", "limit": "100"}
+            ]}}
+        )
+        assert view.checks[0].headroom == 0.0
+
     def test_a_check_with_no_magnitude_has_no_headroom(self) -> None:
         """`defined_risk` is a yes or a no. A percentage of it means nothing."""
         view = to_cycle(
@@ -277,6 +351,81 @@ class TestDayRecordsWithCategory:
         by_id = {r["category"]: r for r in day_records_with_category(records)}
         assert by_id["no_setup"]["cycle_id"] == "a"
         assert by_id["no_candidates"]["cycle_id"] == "b"
+
+
+class TestTheTwoSleevesAreToldApart:
+    """One journal, two agents — and one taxonomy that only fits one of them.
+
+    Both agents write to the same daily file (`live/equity.py`'s `CYCLE_KIND`
+    explains why: the question "what happened on 2026-09-02" is about the
+    account, not about which process asked). Everything in this module is the
+    options sleeve's vocabulary — `Stage`, `iv_rank`, a menu of candidates, a
+    structure — so an equity pass read through `to_cycle` does not come out
+    misclassified, it comes out *fabricated*: no spot, `iv_rank` "unmeasured",
+    a menu of zero, and no checks, which every renderer here words as "the
+    cycle never reached the Gate".
+
+    That last one is the reason this is a correctness test and not a cosmetic
+    one. The equity pass in the fixture below carries a full twelve-check
+    verdict per order. Saying it never reached the Gate is the single most
+    misleading sentence this dashboard could print about a risk system whose
+    whole claim is that the Gate is load-bearing.
+    """
+
+    def test_an_equity_pass_is_not_one_of_the_options_cycles(
+        self, journal: Journal
+    ) -> None:
+        journal.append(at_stage(Stage.FILLED))
+        journal.append(equity_pass())
+        view = day_view(journal, DAY)
+        assert [cycle.cycle_id for cycle in view.cycles] == ["2026-08-26-SPY-000"]
+
+    def test_it_is_carried_beside_them_rather_than_dropped(
+        self, journal: Journal
+    ) -> None:
+        """Filtered out of the options list, not out of the day. A record that
+        exists and is not shown is its own kind of dishonest."""
+        journal.append(at_stage(Stage.FILLED))
+        journal.append(equity_pass())
+        (pass_view,) = day_view(journal, DAY).equity_passes
+        assert pass_view.cycle_id == "2026-08-26-EQ-000"
+        assert pass_view.stage == "submitted"
+        assert pass_view.orders == 2
+        assert pass_view.submitted == 1
+        assert pass_view.vetoed == 1
+        assert pass_view.skipped == 1
+        assert pass_view.note == "2 of 2 intents submitted"
+
+    def test_the_stage_counts_are_the_options_sleeves_own(
+        self, journal: Journal
+    ) -> None:
+        """`submitted` on an equity pass and `submitted` on an options cycle are
+        two different agents' words. Adding them up produces a number that is
+        about neither sleeve — and it is the number the Live page prints."""
+        journal.append(at_stage(Stage.SUBMITTED))
+        journal.append(equity_pass())
+        view = day_view(journal, DAY)
+        assert view.stage_counts == {"submitted": 1}
+        assert sum(view.stage_counts.values()) == len(view.cycles)
+
+    def test_the_tally_helper_is_the_one_the_live_page_uses(self) -> None:
+        """One implementation. `live/wiring.py` publishes `stage_counts` into
+        `status.json` and this shapes the same field for the journal page; two
+        copies of "count the stages, options only" would be one copy too many."""
+        assert stage_tally(
+            [
+                {"stage": "declined"},
+                {"stage": "declined"},
+                {"kind": "equity", "stage": "submitted"},
+                {"stage": ""},
+            ]
+        ) == {"declined": 2}
+
+    def test_an_equity_pass_is_never_asked_for_a_category(self) -> None:
+        """The same rule `day_records_with_category` already applies, restated
+        where the view types are built."""
+        assert is_equity_record({"kind": "equity"})
+        assert not is_equity_record({"stage": "no_setup"})
 
 
 class TestCategory:

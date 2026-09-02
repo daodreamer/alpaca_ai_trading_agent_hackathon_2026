@@ -76,6 +76,7 @@ from alphagate.execution import (
     read_positions,
     require_paper_account,
 )
+from alphagate.interface.read import stage_tally
 from alphagate.journal import Journal
 from alphagate.live.equity import UnpinnedBook, find_latest_book, unpinned_books
 from alphagate.live.status import build_status, write_status
@@ -816,16 +817,19 @@ def publish_startup_status(
 
 
 def _stages_today(context: LiveContext, as_of: datetime) -> dict[str, int]:
-    counts: dict[str, int] = {}
+    """Today's stage tally for the options page.
+
+    Counted through `interface.read.stage_tally`, which is what shapes the same
+    field for the journal page — one implementation of "count the stages,
+    options only". Both agents write to one daily file, and a tally that added
+    an equity pass's `submitted` to this agent's would be a number about
+    neither sleeve, printed on this agent's own status card.
+    """
     try:
         records = context.journal.read(as_of.date())
     except OSError:
-        return counts
-    for record in records:
-        stage = str(record.get("stage", ""))
-        if stage:
-            counts[stage] = counts.get(stage, 0) + 1
-    return counts
+        return {}
+    return stage_tally(records)
 
 
 def market_session(as_of: datetime | None = None) -> tuple[datetime, datetime]:

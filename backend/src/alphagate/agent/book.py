@@ -20,11 +20,13 @@ misses risk that is.
 So: **the broker says what is open, the journal says what it was.** Every
 structure we ever opened is in the journal with its `max_loss` and its greeks
 (specs/06 D2). A journalled structure is still open if its legs are still at the
-broker with the right signs. Nothing is inferred; two records are matched.
+broker with the right signs, and in the quantity it was opened in. Nothing is
+inferred; two records are matched.
 
 **Legs the journal cannot explain are reported, never modelled.** They mean
 something happened outside this agent — a manual trade, a leg assigned, a fill
-from a session whose journal is missing. `unexplained` carries them out to the
+from a session whose journal is missing, or simply more contracts at the broker
+than the journalled fills add up to. `unexplained` carries them out to the
 caller, and `PortfolioSnapshot` is built without them. An agent that quietly
 absorbed an unknown short leg into its risk model would be reporting a defined
 risk it had not defined.
@@ -33,7 +35,7 @@ risk it had not defined.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -101,7 +103,8 @@ class BookRead:
     """The same positions as `snapshot.positions`, in the same order, with their
     entry premium and originating cycle attached."""
     unexplained: tuple[LegPosition, ...] = ()
-    """Option legs at the broker that no journalled structure accounts for.
+    """Option legs at the broker that no journalled structure accounts for — or
+    the part of one that none does, carrying just the surplus quantity.
 
     Not folded into the snapshot. See the module docstring — this is the one
     thing that must reach a human rather than a risk model."""
@@ -219,12 +222,34 @@ def open_positions(
 ) -> tuple[tuple[HeldPosition, ...], tuple[LegPosition, ...], tuple[str, ...]]:
     """Match broker legs against journalled structures.
 
-    Walks the journal newest-first so that when two cycles opened the same
-    structure, the most recent one claims the legs. Each leg is claimed at most
-    once: a structure whose legs another structure already took is treated as
-    closed, not as a second copy of the same risk.
+    Walks the journal newest-first, and **the broker's quantity decides how many
+    fills fit**. Each structure claims its share of each contract; the next one
+    back gets what is left. So two cycles that opened the same spread are two
+    positions when the broker holds two of each leg, and one position plus one
+    closed cycle when it holds one — a contract cannot be two positions, and
+    counting it twice would double the book's risk against one real one.
+
+    A cycle whose stage reads `filled` is one whose order the broker confirmed,
+    which for anything that did not fill instantly means `Journal.read` settled
+    that from the outcome amendment (see `journal.writer._with_final_stage`).
+    Matching on the decision line's own first guess would drop every
+    slower-than-instant fill out of this book.
+
+    The two ways the counts can disagree are treated differently, on purpose:
+
+    * **The journal wants more than the broker holds** — a 3-lot against one
+      contract. Claimed anyway, and the position stays open at its journalled
+      size. Over-modelling is the safe direction: the position keeps its place
+      in the Gate's budget and under the exit policy, where dropping it would
+      leave a live short leg nobody was managing.
+    * **The broker holds more than the journal explains.** The surplus comes
+      back as an unexplained leg carrying only the quantity nobody accounted
+      for. That is the direction where the extra is risk this agent never
+      decided on, and the module docstring's rule applies: reported, never
+      modelled.
     """
-    available: dict[OptionContract, LegPosition] = {leg.contract: leg for leg in legs}
+    holdings: dict[OptionContract, LegPosition] = {leg.contract: leg for leg in legs}
+    remaining: dict[OptionContract, int] = {leg.contract: leg.quantity for leg in legs}
     positions: list[HeldPosition] = []
     closed: list[str] = []
 
@@ -237,12 +262,12 @@ def open_positions(
         structure = _structure_or_none(proposal.get("structure"))
         if structure is None:
             continue
-        wanted = tuple(structure.legs)
-        if not _all_present(wanted, available):
+        wanted = _contracts_wanted(structure, _int(proposal.get("quantity"), default=1))
+        if not _all_present(wanted, remaining):
             closed.append(str(record.get("cycle_id", "")))
             continue
-        for leg in wanted:
-            available.pop(leg.contract, None)
+        for contract, count in wanted.items():
+            remaining[contract] = _after_claiming(remaining[contract], count)
         positions.append(
             HeldPosition(
                 position=OpenPosition(
@@ -259,7 +284,12 @@ def open_positions(
 
     positions.reverse()
     closed.reverse()
-    return tuple(positions), tuple(available.values()), tuple(closed)
+    unexplained = tuple(
+        _residual(holdings[contract], left)
+        for contract, left in remaining.items()
+        if left != 0
+    )
+    return tuple(positions), unexplained, tuple(closed)
 
 
 def structure_from(payload: Mapping[str, Any]) -> OptionStructure:
@@ -329,20 +359,86 @@ def _structure_or_none(payload: Any) -> OptionStructure | None:
         return None
 
 
-def _all_present(legs: Sequence[Leg], available: Mapping[OptionContract, LegPosition]) -> bool:
+def _contracts_wanted(structure: OptionStructure, quantity: int) -> dict[OptionContract, int]:
+    """How many of each contract this position is, signed — long positive.
+
+    `Leg.quantity` is the ratio inside the structure and `quantity` is how many
+    structures were opened; the broker reports one signed line per contract and
+    knows about neither. Multiplying here is what lets the two be compared at
+    all. Legs are summed rather than assigned so a structure naming the same
+    contract twice nets out instead of silently keeping the last one.
+    """
+    wanted: dict[OptionContract, int] = {}
+    for leg in structure.legs:
+        signed = leg.quantity * quantity * (-1 if leg.side is Side.SELL else 1)
+        wanted[leg.contract] = wanted.get(leg.contract, 0) + signed
+    return wanted
+
+
+def _all_present(
+    wanted: Mapping[OptionContract, int], remaining: Mapping[OptionContract, int]
+) -> bool:
     """Every leg still open at the broker, on the side we opened it.
 
     The side check is the point. A short put we believe we hold and the broker
     reports as long is not our position; treating it as one would net a risk
-    figure against an exposure pointing the other way.
+    figure against an exposure pointing the other way. Comparing signs does that
+    check and the "is it still there at all" check at once — nothing is left of
+    a contract earlier structures used up, and zero has no side.
+
+    A net-zero leg counts as absent. It cannot be matched against anything the
+    broker reports, and treating it as trivially present would let a structure
+    nobody can hold claim to be open.
     """
-    for leg in legs:
-        position = available.get(leg.contract)
-        if position is None:
+    for contract, count in wanted.items():
+        have = remaining.get(contract, 0)
+        if count == 0 or have == 0:
             return False
-        if (leg.side is Side.SELL) != position.is_short:
+        if (have > 0) != (count > 0):
             return False
     return True
+
+
+def _after_claiming(have: int, wanted: int) -> int:
+    """What is left of a broker leg once a structure has taken its share.
+
+    Never crosses zero. A journalled 3-lot matched against a single contract
+    takes the one contract and leaves nothing; a negative remainder would come
+    back out of `_residual` as a short leg nobody ever opened.
+    """
+    return 0 if abs(wanted) >= abs(have) else have - wanted
+
+
+def _residual(leg: LegPosition, left: int) -> LegPosition:
+    """The part of a broker leg no journalled structure accounts for.
+
+    Returned untouched in the common case — nothing was claimed, so there is
+    nothing to apportion and no rounding to explain. Otherwise the money is
+    scaled to the share that is left: reporting the whole line's market value as
+    unexplained would overstate the unaccounted-for exposure by exactly the part
+    we *can* account for. `average_price` is per contract and does not scale.
+    """
+    if left == leg.quantity:
+        return leg
+    share = Decimal(left) / Decimal(leg.quantity)
+    return replace(
+        leg,
+        quantity=left,
+        market_value=_apportion(leg.market_value, share),
+        unrealised=_apportion(leg.unrealised, share),
+    )
+
+
+def _apportion(amount: Decimal, share: Decimal) -> Decimal:
+    """A share of a money amount, to the cent.
+
+    Quantised because the division is exact only by luck — two thirds of a
+    market value is not a number of cents — and this figure is reported to a
+    human rather than added to anything the Gate measures. The sleeve's
+    mark-to-market is summed from the broker's own lines in `read_book`, so
+    nothing budgeted depends on this rounding.
+    """
+    return (amount * share).quantize(Decimal("0.01"))
 
 
 def _max_loss(proposal: Mapping[str, Any]) -> Decimal:

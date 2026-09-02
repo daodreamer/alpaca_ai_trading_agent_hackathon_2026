@@ -40,6 +40,18 @@ __all__ = ["REDACTED", "Amendable", "Journal", "encode", "redact"]
 
 REDACTED: Final = "[REDACTED]"
 
+_LIVE_STAGE: Final = "submitted"
+"""The one stage a later broker answer may move. See `_with_final_stage`."""
+
+_FINAL_STAGE_FOR_STATUS: Final = {"filled": "filled", "rejected": "rejected"}
+"""Terminal `execution.OrderStatus` → the `agent.Stage` it settles the cycle at.
+
+Strings rather than the enums themselves because this module is storage and
+`agent` imports `journal`, not the other way round. The identity of the two
+pairs is a coincidence of vocabulary, not a rule: a dict says which join is
+meant, and the guard in `tests/journal/test_writer.py` checks both sides of it
+against the real enums."""
+
 _SECRET_KEYS: Final = frozenset(
     {
         "account_number",
@@ -300,6 +312,8 @@ class Journal:
         fact beats an earlier one whatever order the originals appear in — which
         is what makes "the same final state" true rather than approximately
         true.
+
+        `stage` is part of that final state — see `_with_final_stage`.
         """
         entries: dict[str, dict[str, Any]] = {}
         order: list[str] = []
@@ -322,7 +336,7 @@ class Journal:
             for held in pending.pop(cycle_id, ()):
                 entries[cycle_id] = {**entries[cycle_id], **held}
 
-        return [entries[cycle_id] for cycle_id in order]
+        return [_with_final_stage(entries[cycle_id]) for cycle_id in order]
 
     def orphaned_amendments(self, day: date) -> tuple[str, ...]:
         """Cycle ids amended but never recorded, in file order.
@@ -389,6 +403,53 @@ class Journal:
                 continue
             if isinstance(parsed, dict):
                 yield parsed
+
+
+def _with_final_stage(record: dict[str, Any]) -> dict[str, Any]:
+    """The cycle's stage after the broker's last word — D3 applied to `stage`.
+
+    A cycle is journalled the instant its order is placed, and at that instant
+    the broker usually says `pending_new`, so `agent.cycle._stage_of` writes
+    `submitted`. The fill lands seconds or hours later and arrives here as an
+    amendment. `stage` was therefore always *what the broker said, last we
+    looked*; this applies the same rule to the later look.
+
+    It matters well beyond a badge on a page. `agent.book.open_positions`
+    claims broker legs for the cycles whose stage is `filled` — left at
+    `submitted`, a spread that filled after its line was written became a leg
+    "the journal cannot explain", outside the Gate's risk model and outside the
+    exit policy meant to close it.
+
+    Derived on read rather than written into the amendment, for two reasons.
+    The decision line stays byte-identical, which is the point of D3. And the
+    rule is then total: it holds for every day already on disk and for any
+    amendment, whoever wrote it, rather than only for the ones written after
+    this function existed.
+
+    Narrow on purpose:
+
+    * only a cycle still at `_LIVE_STAGE` is promoted, so a latched `breached`
+      (specs/04 D5) is never cleared by a read-back, and a `vetoed` cycle that
+      somehow acquired an outcome is not turned into a trade;
+    * only the statuses in `_FINAL_STAGE_FOR_STATUS` promote — `canceled`,
+      `expired` and `replaced` are terminal but have no `Stage` of their own,
+      and inventing one here would change the taxonomy every view is built on
+      rather than report a fact.
+
+    The rule is written in the two vocabularies' strings rather than their
+    enums because this module is storage: `agent.runner` imports `journal`, so
+    importing `Stage` back would close a cycle. `tests/journal/test_writer.py`
+    holds the guard that keeps the strings in step with the enums.
+    """
+    if record.get("stage") != _LIVE_STAGE:
+        return record
+    outcome = record.get("outcome")
+    if not isinstance(outcome, Mapping):
+        return record
+    stage = _FINAL_STAGE_FOR_STATUS.get(str(outcome.get("status", "")))
+    if stage is None:
+        return record
+    return {**record, "stage": stage}
 
 
 def _day_of(document: Any) -> date:

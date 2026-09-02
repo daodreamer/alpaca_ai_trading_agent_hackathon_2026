@@ -38,10 +38,14 @@ __all__ = [
     "CheckView",
     "CycleView",
     "DayView",
+    "EquityPassView",
     "available_days",
     "day_records_with_category",
     "day_view",
+    "is_equity_record",
+    "stage_tally",
     "to_cycle",
+    "to_equity_pass",
 ]
 
 _TRADED = frozenset({"submitted", "filled"})
@@ -203,14 +207,53 @@ class CycleView:
 
 
 @dataclass(frozen=True, slots=True)
+class EquityPassView:
+    """One equity rebalance pass, summarised — specs/09 D10.
+
+    Deliberately thin. The equity sleeve has its own status page, its own
+    routes and its own React tab; what this exists for is that the *journal*
+    covers a day rather than a sleeve, so a day that lists only options cycles
+    is a day with passes missing from it. Enough to say a pass happened, what
+    it decided and how many of its orders the equity Gate refused — and a
+    pointer to the tab that renders the rest.
+
+    Nothing here is a `CycleView`. `EquityStage` is a different vocabulary from
+    `Stage`, the verdicts live per order rather than per pass, and there is no
+    `iv_rank`, no menu and no structure. Fitting one into the other is what
+    produced a rebalance pass rendered as "unclassified, iv rank unmeasured,
+    menu 0, the cycle never reached the Gate" — about a pass carrying twelve
+    passed checks per order.
+    """
+
+    cycle_id: str
+    as_of: str
+    stage: str
+    note: str
+    equity: str
+    turnover: str
+    band_pct: str
+    orders: int
+    submitted: int
+    """Orders that reached the broker — the ones with a submission on them."""
+    vetoed: int
+    """Orders the equity Gate refused. `orders - submitted` is not the same
+    number: a halted pass leaves intents that were neither."""
+    skipped: int
+    """Positions inside the no-trade band, or unpriced. Decided, not attempted."""
+
+
+@dataclass(frozen=True, slots=True)
 class DayView:
-    """One trading day."""
+    """One trading day, both sleeves, kept apart."""
 
     day: date
     cycles: tuple[CycleView, ...]
+    """The options sleeve's cycles. Equity passes are not in here — see
+    `EquityPassView`."""
     stage_counts: dict[str, int]
     duplicates: dict[str, int]
     orphans: tuple[str, ...]
+    equity_passes: tuple[EquityPassView, ...] = ()
 
     @property
     def fills(self) -> int:
@@ -257,18 +300,91 @@ def available_days(journal: Journal) -> tuple[date, ...]:
 
 
 def day_view(journal: Journal, day: date) -> DayView:
+    """One day's file, split by the agent that wrote each line.
+
+    The split is the whole of this function. Both agents journal into the same
+    file, and everything else in this module speaks the options sleeve's
+    vocabulary — so an equity pass fed through `to_cycle` does not come out
+    mislabelled, it comes out invented: no spot, an `iv_rank` of "unmeasured",
+    a menu of zero and no checks at all, which reads as "the cycle never
+    reached the Gate" about a pass that carries a full check tape per order.
+    """
     records = journal.read(day)
-    cycles = tuple(to_cycle(record) for record in records)
-    counts: dict[str, int] = {}
-    for cycle in cycles:
-        counts[cycle.stage] = counts.get(cycle.stage, 0) + 1
+    cycles = tuple(to_cycle(record) for record in records if not is_equity_record(record))
     return DayView(
         day=day,
         cycles=cycles,
-        stage_counts=counts,
+        stage_counts=stage_tally(records),
         duplicates=journal.duplicate_cycles(day),
         orphans=journal.orphaned_amendments(day),
+        equity_passes=tuple(
+            to_equity_pass(record) for record in records if is_equity_record(record)
+        ),
     )
+
+
+def is_equity_record(record: Mapping[str, Any]) -> bool:
+    """Which sleeve journalled this line — `live/equity.py`'s `CYCLE_KIND`.
+
+    One function rather than a `.get("kind")` at each of the four sites that
+    ask, because "which sleeve is this" is one question and it is asked from
+    `day_view`, from `day_records_with_category`, from `stage_tally` and from
+    the live status publisher.
+    """
+    return record.get("kind") == "equity"
+
+
+def stage_tally(records: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Stage counts for the options sleeve, in journal order.
+
+    Equity passes are excluded rather than folded in. `submitted` on a
+    rebalance pass and `submitted` on an options cycle are two agents' words
+    for two different things, and a tally that adds them up is a number about
+    neither sleeve — printed, before this existed, on the Live page as the
+    options agent's own count.
+
+    Shared with `live/wiring.py`, which publishes the same field into
+    `status.json`. Two implementations of "count the stages, options only"
+    would be one too many.
+    """
+    counts: dict[str, int] = {}
+    for record in records:
+        if is_equity_record(record):
+            continue
+        stage = str(record.get("stage", ""))
+        if stage:
+            counts[stage] = counts.get(stage, 0) + 1
+    return counts
+
+
+def to_equity_pass(record: Mapping[str, Any]) -> EquityPassView:
+    """One journalled rebalance pass, summarised for a page. Pure."""
+    orders = record.get("orders")
+    orders = list(orders) if isinstance(orders, Sequence) else []
+    skipped = record.get("skipped")
+    return EquityPassView(
+        cycle_id=str(record.get("cycle_id", "")),
+        as_of=_clock(record.get("as_of")),
+        stage=str(record.get("stage", "unknown")),
+        note=str(record.get("note", "")),
+        equity=_number(record.get("equity")),
+        turnover=_number(record.get("turnover")),
+        band_pct=_number(record.get("band_pct")),
+        orders=len(orders),
+        submitted=sum(1 for order in orders if _mapping(order).get("submission")),
+        vetoed=sum(1 for order in orders if _veto_reasons(order)),
+        skipped=len(skipped) if isinstance(skipped, Sequence) else 0,
+    )
+
+
+def _veto_reasons(order: Any) -> Sequence[Any]:
+    """The equity Gate's refusals for one order, or nothing.
+
+    `VetoedEquity` carries `reasons` and `ApprovedEquity` does not, so the key's
+    presence *is* the verdict — see `risk/equity_verdict.py`.
+    """
+    reasons = _mapping(_mapping(order).get("verdict")).get("reasons")
+    return reasons if isinstance(reasons, Sequence) else ()
 
 
 def day_records_with_category(
@@ -298,7 +414,7 @@ def day_records_with_category(
     """
     enriched: list[dict[str, Any]] = []
     for record in records:
-        if record.get("kind") == "equity":
+        if is_equity_record(record):
             enriched.append(dict(record))
             continue
         view = to_cycle(record)
@@ -381,6 +497,15 @@ def _headroom(observed: Decimal | None, limit: Decimal | None, *, passed: bool) 
     much room was left" has one answer once there was none, and a scale that
     runs below zero would make the sort order say a badly failed check nearly
     passed.
+
+    **A limit a passing check sits above is a floor, not a budget.** `CheckResult`
+    carries no direction — most limits are ceilings, and this fraction assumes
+    one — but a check that passed with `observed` *above* its limit has told us
+    which kind it is: an order of $137 against a $25 materiality floor is as far
+    from failing as it could be, and 1 - 137/25 would rank it at zero room, the
+    tightest thing on the page. So it is reported as unrankable rather than
+    ranked backwards. A wrong "near" badge on the safest check is worse than no
+    badge: it is the dashboard misreading its own risk system out loud.
     """
     if observed is None or limit is None or limit == 0:
         return None
@@ -389,6 +514,8 @@ def _headroom(observed: Decimal | None, limit: Decimal | None, *, passed: bool) 
     try:
         used = abs(observed) / abs(limit)
     except (InvalidOperation, ZeroDivisionError):
+        return None
+    if used > 1:
         return None
     return max(0.0, min(1.0, 1.0 - float(used)))
 

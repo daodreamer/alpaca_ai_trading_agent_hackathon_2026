@@ -35,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { EquityCycle, EquityStatusResponse } from "@/lib/equity"
 import type { OptionBookResponse } from "@/lib/option-book"
 import type { SleevesResponse } from "@/lib/sleeves"
-import type { JournalCycle, StatusResponse } from "@/lib/status"
+import type { DayRecord, StatusResponse } from "@/lib/status"
 
 const POLL_MS = 15_000
 
@@ -43,7 +43,7 @@ export default function App() {
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [equity, setEquity] = useState<EquityStatusResponse | null>(null)
   const [equityCycles, setEquityCycles] = useState<EquityCycle[] | null>(null)
-  const [cycles, setCycles] = useState<JournalCycle[] | null>(null)
+  const [cycles, setCycles] = useState<DayRecord[] | null>(null)
   const [days, setDays] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [optionBook, setOptionBook] = useState<OptionBookResponse | null>(null)
@@ -106,7 +106,7 @@ export default function App() {
     let cancelled = false
     fetch(`/api/day/${day}`)
       .then((response) => response.json())
-      .then((loaded: JournalCycle[]) => {
+      .then((loaded: DayRecord[]) => {
         if (!cancelled) setCycles(loaded)
       })
       .catch(() => {
