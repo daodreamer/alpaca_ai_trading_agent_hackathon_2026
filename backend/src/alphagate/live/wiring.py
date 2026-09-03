@@ -54,6 +54,7 @@ from alphagate.agent import (
     Underlying,
     UnusableOptionBook,
     build_candidates,
+    entry_refusal,
     load_option_book,
     next_slot,
     perceive,
@@ -62,7 +63,13 @@ from alphagate.agent import (
     tradeable_today,
     vertical_credit_spreads,
 )
-from alphagate.agent.book import BookRead, HeldPosition, fills_on, read_book
+from alphagate.agent.book import (
+    BookRead,
+    HeldPosition,
+    fills_on,
+    last_entry_day,
+    read_book,
+)
 from alphagate.agent.cycle import CycleRecord, run_exit_cycle
 from alphagate.agent.exits import DEFAULT_EXIT_POLICY, ExitPolicy
 from alphagate.agent.screen import BookScreen, DefaultScreen, Screen
@@ -636,6 +643,7 @@ def gather_for(
             candidates=candidates,
             portfolio=book.snapshot,
             exits=exits,
+            entry_block=_entry_block(context, book, day=slot.at.date()),
         )
 
     return gather
@@ -654,6 +662,36 @@ sent `type=p` and the whole chain request failed, which would have been a silent
 
 def _api_right(right: Right) -> str:
     return _API_RIGHT[right]
+
+
+def _entry_block(context: LiveContext, book: BookRead, *, day: date) -> str:
+    """Whether the option book's own rule forbids an entry this slot.
+
+    The two numbers `entry_refusal` needs are here and nowhere else: how many
+    structures are open comes from the broker-matched book, and how long ago the
+    last entry was comes from the journal.
+
+    **Sessions are counted as journalled days, not calendar days.** The journal
+    holds one file per day the agent ran, so the count is "sessions this agent
+    was present for" — which under-counts a session it sat out, and therefore
+    refuses an entry slightly more often than a market calendar would. That is
+    the safe direction, and it needs no calendar: a holiday table that drifts
+    would be a cadence rule that silently loosens.
+
+    No book means no caps to enforce. `SLEEVE_LIMITS` still applies either way;
+    these are the rule's own limits, not the account's (specs/07 D1).
+    """
+    if context.option_book is None:
+        return ""
+    entered = last_entry_day(context.journal.read_through(day))
+    since = None if entered is None else sum(
+        1 for each in context.journal.days() if entered < each <= day
+    )
+    return entry_refusal(
+        context.option_book.rule,
+        open_structures=book.snapshot.open_structures,
+        sessions_since_entry=since,
+    )
 
 
 def _quotes_for(

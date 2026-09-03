@@ -22,6 +22,7 @@ import pytest
 from alphagate.agent.book import (
     contract_from,
     fills_on,
+    last_entry_day,
     open_positions,
     read_book,
     structure_from,
@@ -545,6 +546,51 @@ class TestTheDailyFillCapCanSeeTheDaysFills:
 
     def test_a_record_with_no_day_is_not_counted_as_todays(self) -> None:
         assert fills_on([{"cycle_id": "x", "stage": "filled"}], NOW.date()) == 0
+
+
+class TestWhenThisAgentLastOpenedSomething:
+    """What the rule's cadence is measured from.
+
+    A *submitted* entry counts as much as a filled one: an order working at the
+    broker is an entry this session made, and waiting for the fill before
+    admitting it is how a rule that allows one entry a session places two.
+    """
+
+    def test_the_most_recent_opening_session(self) -> None:
+        older = {**filled("2026-08-24-SPY-000"), "as_of": "2026-08-24T14:30:00+00:00"}
+        assert last_entry_day([older, filled()]) == NOW.date()
+
+    def test_a_working_order_already_counts(self) -> None:
+        pending = {**filled(), "stage": "submitted"}
+        assert last_entry_day([pending]) == NOW.date()
+
+    def test_a_close_is_not_an_entry(self) -> None:
+        assert last_entry_day([closing(stage="filled")]) is None
+
+    def test_a_decline_is_not_an_entry(self) -> None:
+        records = [
+            {**filled(), "stage": "declined"},
+            {**filled("2026-08-26-SPY-001"), "stage": "vetoed"},
+            {**filled("2026-08-26-SPY-002"), "stage": "no_setup"},
+        ]
+        assert last_entry_day(records) is None
+
+    def test_a_dry_run_is_not_an_entry(self) -> None:
+        """`dry_run` is the Gate approving something the run deliberately did
+        not send. Nothing is at the broker, so nothing spends the session."""
+        assert last_entry_day([{**filled(), "stage": "dry_run"}]) is None
+
+    def test_an_equity_pass_is_not_an_option_entry(self) -> None:
+        equity = {
+            "cycle_id": "2026-08-26-EQ-000",
+            "as_of": NOW.isoformat(),
+            "kind": "equity",
+            "stage": "submitted",
+        }
+        assert last_entry_day([equity]) is None
+
+    def test_no_entries_at_all(self) -> None:
+        assert last_entry_day([]) is None
 
 
 class TestUnexplainedLegsAreNeverModelled:

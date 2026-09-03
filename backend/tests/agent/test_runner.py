@@ -97,10 +97,12 @@ class Gatherer:
         portfolio: PortfolioSnapshot | None = None,
         exits: tuple[CycleRecord, ...] = (),
         fail_on: set[int] | None = None,
+        entry_block: str = "",
     ) -> None:
         self.portfolio = portfolio if portfolio is not None else book()
         self.exits = exits
         self.fail_on = fail_on or set()
+        self.entry_block = entry_block
         self.seen: list[Slot] = []
 
     def __call__(self, slot: Slot) -> CycleInputs:
@@ -112,6 +114,7 @@ class Gatherer:
             candidates=menu(),
             portfolio=self.portfolio,
             exits=self.exits,
+            entry_block=self.entry_block,
         )
 
 
@@ -120,8 +123,11 @@ def gather_for(
     portfolio: PortfolioSnapshot | None = None,
     exits: tuple[CycleRecord, ...] = (),
     fail_on: set[int] | None = None,
+    entry_block: str = "",
 ) -> Gatherer:
-    return Gatherer(portfolio=portfolio, exits=exits, fail_on=fail_on)
+    return Gatherer(
+        portfolio=portfolio, exits=exits, fail_on=fail_on, entry_block=entry_block
+    )
 
 
 
@@ -309,6 +315,58 @@ class TestFailures:
             slots, Journal(directory=tmp_path), gather=gather_for(fail_on={0, 1, 2})
         )
         assert isinstance(result.stopped_early, str)
+
+
+class TestTheBooksOwnCadence:
+    """A slot the rule forbids an entry on is journalled, and asks no model.
+
+    The refusal is computed where the book and the journal are (`gather`), and
+    arrives as `CycleInputs.entry_block`. The runner turns it into the same
+    `NO_SETUP` line a screen refusal produces — one line per slot, with the
+    reason in it — and never reaches the proposer, because there is nothing to
+    ask about a menu the rule will not let it take.
+    """
+
+    def test_the_slot_is_journalled_with_the_rules_reason(self, tmp_path: Path) -> None:
+        journal = Journal(directory=tmp_path)
+        result, _ = run(
+            session_slots(OPEN, CLOSE)[:1],
+            journal,
+            gather=gather_for(entry_block="the rule allows 3 concurrent position(s)"),
+        )
+        (record,) = result.records
+        assert record.stage is Stage.NO_SETUP
+        assert record.note == "the rule allows 3 concurrent position(s)"
+
+    def test_no_model_is_asked(self, tmp_path: Path) -> None:
+        proposer = StubProposer()
+        run(
+            session_slots(OPEN, CLOSE)[:1],
+            Journal(directory=tmp_path),
+            gather=gather_for(entry_block="the rule wants 1 session(s) between entries"),
+            proposer=proposer,
+        )
+        assert proposer.seen == []
+
+    def test_exits_still_run(self, tmp_path: Path) -> None:
+        """The cadence is about *entries*. A rule that stopped managing what it
+        already holds would be a rule that opens positions and abandons them."""
+        result, _ = run(
+            session_slots(OPEN, CLOSE)[:1],
+            Journal(directory=tmp_path),
+            gather=gather_for(entry_block="the rule allows 3", exits=(exit_record(),)),
+        )
+        assert [r.stage for r in result.records] == [Stage.FILLED, Stage.NO_SETUP]
+
+    def test_an_unblocked_slot_still_screens(self, tmp_path: Path) -> None:
+        proposer = StubProposer()
+        run(
+            session_slots(OPEN, CLOSE)[:1],
+            Journal(directory=tmp_path),
+            gather=gather_for(),
+            proposer=proposer,
+        )
+        assert proposer.seen != []
 
 
 class TestOpenOrdersAreReconciled:

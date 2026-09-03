@@ -62,6 +62,7 @@ __all__ = [
     "OptionRule",
     "SealedOptionRun",
     "UnusableOptionBook",
+    "entry_refusal",
     "load_option_book",
     "measurable_read",
 ]
@@ -620,6 +621,45 @@ def _timestamp(value: Any, *, faults: list[str]) -> datetime:
         faults.append(f"generated_at {value!r} has no timezone; all times are UTC here")
         return _UNREACHABLE_TIME
     return parsed
+
+
+def entry_refusal(
+    rule: OptionRule, *, open_structures: int, sessions_since_entry: int | None
+) -> str:
+    """Why the *rule* forbids an entry right now, or `""` if it does not. Pure.
+
+    Two caps travel in every option book and until now neither was enforced:
+    they were parsed here, printed on the status page and the dashboard, and
+    read by nothing. On 2026-09-02 the agent opened two spreads in one session
+    while the page beside it said "cadence: at most one entry per session".
+
+    **These are not the Gate's limits and do not replace them.** The Gate's caps
+    are about what this account can survive (specs/03 D5); these are about what
+    was actually measured. A rule validated at three concurrent positions and
+    one entry a session is a different rule at five and three — and five is what
+    the Gate's book-heat budget happens to allow here, which is the number the
+    executor would drift to on its own. specs/07 D1 pins the rule by
+    fingerprint precisely so that "we execute what the research validated" is
+    checkable; a cap that only ever gets printed makes it uncheckable again.
+
+    Concurrency is tested first: both refusals are true when both apply, and the
+    one about risk already on the book is the more useful sentence to journal.
+
+    `sessions_since_entry=None` means no entry is on record at all, which is not
+    zero sessions ago — a fresh journal must not read as "already traded today".
+    """
+    if open_structures >= rule.max_concurrent:
+        return (
+            f"the rule allows {rule.max_concurrent} concurrent position(s) and "
+            f"{open_structures} are open"
+        )
+    spacing = rule.min_sessions_between_entries
+    if sessions_since_entry is not None and sessions_since_entry < spacing:
+        return (
+            f"the rule wants {spacing} session(s) between entries and the last "
+            f"entry was {sessions_since_entry} session(s) ago"
+        )
+    return ""
 
 
 def measurable_read(read: Any) -> dict[str, Decimal | None]:

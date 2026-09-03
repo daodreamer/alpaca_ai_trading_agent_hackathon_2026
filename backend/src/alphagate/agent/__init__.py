@@ -49,6 +49,7 @@ from alphagate.agent.option_book import (
     OptionRule,
     SealedOptionRun,
     UnusableOptionBook,
+    entry_refusal,
     load_option_book,
     measurable_read,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "build_user_message",
     "cycle_id_for",
     "earnings_within",
+    "entry_refusal",
     "evaluate_exit",
     "load_option_book",
     "measurable_read",

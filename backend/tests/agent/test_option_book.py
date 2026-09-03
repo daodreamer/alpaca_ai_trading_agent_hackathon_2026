@@ -29,6 +29,7 @@ from alphagate.agent.option_book import (
     MEASURABLE_FEATURES,
     EntryRule,
     UnusableOptionBook,
+    entry_refusal,
     load_option_book,
     measurable_read,
 )
@@ -453,3 +454,84 @@ def test_seeding_is_idempotent_and_skips_vendor_blanks(tmp_path: Path) -> None:
     assert store.seed_from_vendor_history(spy, rows) == 2
     assert store.seed_from_vendor_history(spy, rows) == 0
     assert store.observations(spy) == [0.1136, 0.1158]
+
+
+class TestTheRulesOwnCaps:
+    """`max_concurrent` and `min_sessions_between_entries` were parsed, printed
+    on two pages, and enforced by nothing.
+
+    They are the researched rule's own limits, not the account's. The Gate's
+    caps are about what this account can survive (specs/03); these are about
+    what was actually measured — a rule validated at three concurrent positions
+    and one entry a session is not the same rule at five and three, whatever the
+    Gate allows. On 2026-09-02 the agent opened two spreads in one session while
+    the dashboard printed "cadence: at most one entry per session" beside them.
+
+    Refusing is `NO_SETUP` with a reason, not a veto: nothing was proposed, so
+    there is nothing for the Gate to refuse, and a judge reading the day needs
+    "the rule's cadence said no" to look different from "the market did not
+    qualify".
+    """
+
+    def rule(self, payload: dict[str, Any], **cadence: int) -> Any:
+        """The real rule, with its own caps or a changed spacing."""
+        book = deepcopy(payload)
+        if cadence:
+            book["rule"]["cadence"] = dict(book["rule"]["cadence"], **cadence)
+        return load(book).rule
+
+    def test_room_under_both_caps_is_no_refusal(self, payload: dict[str, Any]) -> None:
+        assert entry_refusal(self.rule(payload), open_structures=2, sessions_since_entry=1) == ""
+
+    def test_the_concurrency_cap_is_the_rules_not_the_gates(
+        self, payload: dict[str, Any]
+    ) -> None:
+        """Three concurrent is what the sealed run measured. The Gate would
+        allow eight, and its book-heat budget stops at five — neither is the
+        number this rule was validated at."""
+        refusal = entry_refusal(
+            self.rule(payload), open_structures=3, sessions_since_entry=9
+        )
+        assert "3 concurrent" in refusal
+        assert entry_refusal(
+            self.rule(payload), open_structures=4, sessions_since_entry=9
+        ) != ""
+
+    def test_a_second_entry_in_one_session_is_refused(
+        self, payload: dict[str, Any]
+    ) -> None:
+        """The one that already happened. `min_sessions_between_entries` is 1,
+        so an entry today is the session's entry."""
+        refusal = entry_refusal(
+            self.rule(payload), open_structures=0, sessions_since_entry=0
+        )
+        assert "session" in refusal
+
+    def test_the_next_session_is_allowed(self, payload: dict[str, Any]) -> None:
+        assert entry_refusal(
+            self.rule(payload), open_structures=0, sessions_since_entry=1
+        ) == ""
+
+    def test_a_wider_spacing_holds_for_longer(self, payload: dict[str, Any]) -> None:
+        wide = self.rule(payload, min_sessions_between_entries=3)
+        assert entry_refusal(wide, open_structures=0, sessions_since_entry=2) != ""
+        assert entry_refusal(wide, open_structures=0, sessions_since_entry=3) == ""
+
+    def test_never_having_entered_is_not_a_spacing_problem(
+        self, payload: dict[str, Any]
+    ) -> None:
+        """`None` is "no entry on record", which is not zero sessions ago."""
+        assert entry_refusal(
+            self.rule(payload), open_structures=0, sessions_since_entry=None
+        ) == ""
+
+    def test_the_concurrency_cap_is_checked_first(
+        self, payload: dict[str, Any]
+    ) -> None:
+        """Both refuse; the one that is about risk on the book is the one worth
+        printing."""
+        refusal = entry_refusal(
+            self.rule(payload), open_structures=3, sessions_since_entry=0
+        )
+        assert "concurrent" in refusal
+

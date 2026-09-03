@@ -37,7 +37,7 @@ from decimal import Decimal
 from typing import Final
 
 from alphagate.agent.cycle import CycleRecord, run_cycle
-from alphagate.agent.model import Candidate, MarketRead, Stage
+from alphagate.agent.model import Candidate, MarketRead, Setup, Stage
 from alphagate.agent.proposer import DEFAULT_PROPOSER, Proposer
 from alphagate.agent.schedule import Slot
 from alphagate.agent.screen import DefaultScreen, Screen
@@ -69,6 +69,14 @@ class CycleInputs:
     portfolio: PortfolioSnapshot
     exits: tuple[CycleRecord, ...] = ()
     """Exit cycles already run for this slot, ready to be journalled."""
+    entry_block: str = ""
+    """Why the option book's own rule forbids an entry this slot, if it does.
+
+    Decided by the gatherer, because the caps are the *book's* and this module
+    has never read a book — `agent.option_book.entry_refusal` writes the
+    sentence and `live/wiring.py` supplies it the two numbers. Non-empty means
+    the cycle stops at the screen with this as its reason, and no model is
+    asked: there is nothing to ask about a menu the rule will not allow."""
 
 
 type Gather = Callable[[Slot], CycleInputs]
@@ -181,7 +189,9 @@ def run_session(
             result.stopped_early = "kill switch latched on the incoming snapshot"
             return result
 
-        setup = chosen_screen.screen(inputs.read)
+        # The book's own cadence and concurrency caps, before the screen: a
+        # slot the rule forbids is not a slot to read the market for.
+        setup = None if inputs.entry_block else chosen_screen.screen(inputs.read)
         record = run_cycle(
             read=inputs.read,
             setup=setup,
@@ -193,7 +203,7 @@ def run_session(
             proposer=proposer,
             sequence=slot.sequence,
             intent=Intent.OPEN,
-            screen_reason="" if setup is not None else chosen_screen.explain(inputs.read),
+            screen_reason=_screen_reason(chosen_screen, inputs, setup),
         )
         journal.append(record)
         result.records.append(record)
@@ -203,6 +213,18 @@ def run_session(
             return result
 
     return result
+
+
+def _screen_reason(screen: Screen, inputs: CycleInputs, setup: Setup | None) -> str:
+    """The `NO_SETUP` note: the rule's refusal, the screen's, or nothing.
+
+    The book's own caps come first because they were decided first — the screen
+    never ran when they refuse, so asking it to explain a decision it did not
+    make would put an invented reason in the journal.
+    """
+    if inputs.entry_block:
+        return inputs.entry_block
+    return "" if setup is not None else screen.explain(inputs.read)
 
 
 def _reconcile_quietly(journal: Journal, mcp: McpSession, at: datetime) -> ReconcileResult:

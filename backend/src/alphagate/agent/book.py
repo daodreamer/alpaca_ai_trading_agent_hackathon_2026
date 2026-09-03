@@ -61,12 +61,18 @@ __all__ = [
     "HeldPosition",
     "contract_from",
     "fills_on",
+    "last_entry_day",
     "open_positions",
     "read_book",
     "realised_pl",
     "structure_from",
     "working_closes",
 ]
+
+_ENTERED = frozenset({"submitted", "filled"})
+"""Stages that put an order on the wire — `agent.Stage.traded`, as strings.
+
+The same vocabulary crossing the same file boundary as `_TERMINAL` below."""
 
 _TERMINAL = frozenset({"filled", "canceled", "expired", "rejected", "replaced"})
 """Order statuses that settle an order, mirroring `execution.OrderStatus`.
@@ -235,6 +241,31 @@ def read_book(
     )
 
 
+def last_entry_day(journal_records: Sequence[Mapping[str, Any]]) -> date | None:
+    """The most recent session this agent put an *opening* order on the wire.
+
+    What the option book's `min_sessions_between_entries` is measured from.
+
+    A `submitted` entry counts as much as a `filled` one, and that is the whole
+    point: an order working at the broker is an entry this session has made, and
+    waiting for the fill before admitting it is how a rule that allows one entry
+    a session places two. `dry_run` does not count — the Gate approved it and
+    the run deliberately sent nothing, so there is no order to space away from.
+
+    Closes are not entries. Neither are equity passes, which are another agent's
+    cadence entirely.
+    """
+    days = [
+        day
+        for record in journal_records
+        if record.get("kind") != "equity"
+        and str(record.get("stage", "")) in _ENTERED
+        and _intent_of(record) != "close"
+        and (day := _day_of(record)) is not None
+    ]
+    return max(days) if days else None
+
+
 def working_closes(
     journal_records: Sequence[Mapping[str, Any]],
 ) -> tuple[OptionStructure, ...]:
@@ -270,7 +301,7 @@ def working_closes(
         proposal = record.get("proposal")
         if not isinstance(proposal, Mapping):
             continue
-        if str(proposal.get("intent", "")) != "close":
+        if _intent_of(record) != "close":
             continue
         if str(record.get("stage", "")) != "submitted":
             continue
@@ -450,6 +481,14 @@ def _structure_or_none(payload: Any) -> OptionStructure | None:
         return structure_from(payload)
     except (KeyError, ValueError, ArithmeticError, TypeError):
         return None
+
+
+def _intent_of(record: Mapping[str, Any]) -> str:
+    """The proposal's intent, or "" where a cycle never made one."""
+    proposal = record.get("proposal")
+    if not isinstance(proposal, Mapping):
+        return ""
+    return str(proposal.get("intent", ""))
 
 
 def _day_of(record: Mapping[str, Any]) -> date | None:

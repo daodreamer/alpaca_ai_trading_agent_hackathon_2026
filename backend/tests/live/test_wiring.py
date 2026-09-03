@@ -49,6 +49,7 @@ from alphagate.live.wiring import (
     LiveContext,
     SessionState,
     _api_right,
+    _entry_block,
     _exit_cycles,
     _position_read,
     _spots_for,
@@ -75,6 +76,9 @@ from alphagate.risk import DEFAULT_LIMITS, OpenPosition, PortfolioSnapshot
 
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
 SPY = ticker("SPY")
+REAL_BOOKS = (
+    Path(__file__).resolve().parents[3] / "ai_quant_researcher" / "runs" / "option_books"
+)
 EXPIRY = date(2026, 9, 14)
 
 PAPER = {
@@ -633,6 +637,125 @@ class TestTheDaysFillsComeFromTheJournal:
 
     def test_a_quiet_day_is_zero(self, tmp_path: Path) -> None:
         assert self._context(tmp_path).book(as_of=NOW).snapshot.fills_today == 0
+
+
+class TestTheRulesCadenceIsCountedInSessions:
+    """`_entry_block` supplies `entry_refusal` its two numbers, and the
+    interesting one is "how many sessions ago".
+
+    There is no market calendar here on purpose. The journal holds one file per
+    day the agent ran, so a session is a day it was present for — which
+    under-counts a session it sat out and therefore refuses an entry slightly
+    *more* often than a calendar would. A holiday table that drifted out of date
+    would loosen a cadence rule silently; a missing file cannot.
+    """
+
+    def rule(self) -> object:
+        book, reason = load_pinned_option_book(REAL_BOOKS, "cc197008e0deb097")
+        assert book is not None, reason
+        return book.rule
+
+    def context(self, tmp_path: Path) -> SimpleNamespace:
+        return SimpleNamespace(
+            option_book=SimpleNamespace(rule=self.rule()),
+            journal=Journal(directory=tmp_path / "journal"),
+        )
+
+    def book_with(self, open_structures: int) -> BookRead:
+        return BookRead(
+            snapshot=PortfolioSnapshot(
+                equity=Decimal("10000"),
+                positions=tuple(_position() for _ in range(open_structures)),
+                drawdown_pct=Decimal(0),
+                fills_today=0,
+            )
+        )
+
+    def entry(self, day: str) -> dict[str, object]:
+        return {
+            "cycle_id": f"{day}-SPY-000",
+            "as_of": f"{day}T14:30:00+00:00",
+            "stage": "submitted",
+            "proposal": {"intent": "open", "quantity": 1},
+        }
+
+    def quiet(self, day: str) -> dict[str, object]:
+        return {
+            "cycle_id": f"{day}-SPY-001",
+            "as_of": f"{day}T14:35:00+00:00",
+            "stage": "declined",
+        }
+
+    def test_an_entry_earlier_in_the_same_session_blocks_the_next(
+        self, tmp_path: Path
+    ) -> None:
+        """The one that happened on 2026-09-02: two spreads, one session."""
+        context = self.context(tmp_path)
+        context.journal.append(self.entry("2026-09-02"))
+        refusal = _entry_block(
+            context, self.book_with(1), day=date(2026, 9, 2)  # type: ignore[arg-type]
+        )
+        assert "session(s) between entries" in refusal
+
+    def test_the_next_session_is_allowed_again(self, tmp_path: Path) -> None:
+        context = self.context(tmp_path)
+        context.journal.append(self.entry("2026-09-02"))
+        context.journal.append(self.quiet("2026-09-03"))
+        assert _entry_block(
+            context, self.book_with(1), day=date(2026, 9, 3)  # type: ignore[arg-type]
+        ) == ""
+
+    def test_a_day_the_agent_sat_out_is_not_counted_as_a_session(
+        self, tmp_path: Path
+    ) -> None:
+        """It has no file, so it is not a session this journal can vouch for.
+        The refusal outlives it, which is the safe direction."""
+        context = self.context(tmp_path)
+        context.journal.append(self.entry("2026-09-02"))
+        assert _entry_block(
+            context, self.book_with(1), day=date(2026, 9, 3)  # type: ignore[arg-type]
+        ) != ""
+
+    def test_the_concurrency_cap_comes_off_the_broker_matched_book(
+        self, tmp_path: Path
+    ) -> None:
+        """Three open is three open however long ago they were opened."""
+        context = self.context(tmp_path)
+        refusal = _entry_block(
+            context, self.book_with(3), day=date(2026, 9, 4)  # type: ignore[arg-type]
+        )
+        assert "3 concurrent" in refusal
+
+    def test_a_quiet_history_blocks_nothing(self, tmp_path: Path) -> None:
+        context = self.context(tmp_path)
+        context.journal.append(self.quiet("2026-09-03"))
+        assert _entry_block(
+            context, self.book_with(0), day=date(2026, 9, 4)  # type: ignore[arg-type]
+        ) == ""
+
+    def test_no_book_means_no_caps_to_enforce(self, tmp_path: Path) -> None:
+        """The Gate still applies; these are the rule's own limits."""
+        context = SimpleNamespace(
+            option_book=None, journal=Journal(directory=tmp_path / "journal")
+        )
+        assert _entry_block(
+            context, self.book_with(9), day=date(2026, 9, 4)  # type: ignore[arg-type]
+        ) == ""
+
+
+def _position() -> OpenPosition:
+    contract = OptionContract(SPY, EXPIRY, Decimal("735"), Right.PUT)
+    other = OptionContract(SPY, EXPIRY, Decimal("750"), Right.PUT)
+    return OpenPosition(
+        structure=OptionStructure(
+            StructureKind.VERTICAL_CREDIT,
+            (Leg(contract, Side.BUY), Leg(other, Side.SELL)),
+        ),
+        quantity=1,
+        max_loss=Decimal("1386"),
+        net_greeks=None,
+        opened_at=NOW,
+    )
 
 
 class TestPublishStartupStatus:
