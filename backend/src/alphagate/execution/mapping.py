@@ -34,7 +34,7 @@ from __future__ import annotations
 from typing import Final
 
 from alphagate.execution.errors import UnsubmittableOrder
-from alphagate.execution.pricing import alpaca_limit_price, net_premium_per_unit
+from alphagate.execution.pricing import alpaca_limit_price, wire_net_premium
 from alphagate.execution.session import ToolArgument
 from alphagate.options import Leg, Side, format_occ
 from alphagate.risk import GatedOrder, Intent
@@ -45,12 +45,37 @@ __all__ = [
     "TIME_IN_FORCE",
     "position_intent",
     "to_tool_arguments",
+    "wire_side",
 ]
 
 PLACE_ORDER_TOOL: Final = "place_option_order"
 MAX_LEGS: Final = 4
 TIME_IN_FORCE: Final = "day"
 """Options support nothing else. Not a default — the only legal value."""
+
+
+def wire_side(intent: Intent, side: Side) -> Side:
+    """The side that goes on the wire, given the side the structure holds.
+
+    **A close is the mirror order.** `run_exit_cycle` proposes the structure that
+    is *held* — long the 747, short the 752 — because that is the position being
+    closed, and mirroring the `OptionStructure` itself would journal a shape
+    nobody ever held and would have to survive invariants written for the shape
+    that was. So the reversal belongs here, at the wire, where "what we hold"
+    becomes "what we are asking for": flattening a long leg sells it, and
+    flattening a short leg buys it back.
+
+    Sending the held sides with `_to_close` intents instead is a request to open
+    a second copy of the position, labelled as closing one. Alpaca checks the
+    pair and refuses it — `422 position intent mismatch, inferred: buy_to_open,
+    specified: buy_to_close` — which is the only reason this was ever a rejected
+    order rather than a doubled position. A broker that trusted the label would
+    have opened another spread every fifteen minutes.
+
+    `OPEN` and `ROLL` are unchanged: both put a structure on, and a roll's close
+    half arrives as its own `Intent.CLOSE` proposal.
+    """
+    return side.opposite if intent is Intent.CLOSE else side
 
 
 def position_intent(intent: Intent, side: Side) -> str:
@@ -60,6 +85,10 @@ def position_intent(intent: Intent, side: Side) -> str:
     position netting both depend on it. Letting the broker guess whether this
     sell is opening a short or closing a long is letting the broker guess what
     the position is.
+
+    `side` is the side **on the wire** — the one `wire_side` produced — so the
+    verb and the intent always agree. Passing the held side of a close would
+    build exactly the mismatch the API refuses.
 
     `ROLL` maps to opening intents. A roll spans two expiries, which specs/02 D3
     makes unconstructible in one structure, so a roll is always *two* orders: a
@@ -109,14 +138,16 @@ def _single_leg(order: GatedOrder, leg: Leg) -> dict[str, ToolArgument]:
 
     The price is the option's own, always positive: `abs` of the per-unit net
     premium. The sign that says credit-or-debit is not dropped, it is expressed
-    by `side` — selling a put at 1.50 *is* the credit.
+    by `side` — selling a put at 1.50 *is* the credit, and closing that short is
+    a buy at 1.50, which is why flipping the side is the whole of the direction
+    change here.
     """
-    per_unit = net_premium_per_unit(order)
+    side = wire_side(order.intent, leg.side)
     return {
         "symbol": format_occ(leg.contract),
-        "side": leg.side.value,
-        "position_intent": position_intent(order.intent, leg.side),
-        "limit_price": f"{abs(per_unit):.2f}",
+        "side": side.value,
+        "position_intent": position_intent(order.intent, side),
+        "limit_price": f"{abs(wire_net_premium(order)):.2f}",
     }
 
 
@@ -130,13 +161,15 @@ def _multi_leg(order: GatedOrder, legs: tuple[Leg, ...]) -> dict[str, ToolArgume
     """
     return {
         "order_class": "mleg",
-        "limit_price": alpaca_limit_price(net_premium_per_unit(order)),
+        "limit_price": alpaca_limit_price(wire_net_premium(order)),
         "legs": [
             {
                 "symbol": format_occ(leg.contract),
                 "ratio_qty": str(leg.quantity),
-                "side": leg.side.value,
-                "position_intent": position_intent(order.intent, leg.side),
+                "side": wire_side(order.intent, leg.side).value,
+                "position_intent": position_intent(
+                    order.intent, wire_side(order.intent, leg.side)
+                ),
             }
             for leg in legs
         ],

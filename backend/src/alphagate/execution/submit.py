@@ -30,8 +30,8 @@ from datetime import date, datetime
 from typing import Final
 
 from alphagate.execution.errors import (
+    BrokerRefused,
     ExecutionError,
-    MalformedToolOutput,
     ToolTimeout,
     TransportFailure,
 )
@@ -167,11 +167,16 @@ def _reject_error_payload(result: ToolResult) -> None:
     The MCP server answers some failures with `{"error": ...}` and HTTP 200. A
     response that says "error" and is read as an order is an order that does not
     exist being recorded as one that does.
+
+    `BrokerRefused` rather than a bare `MalformedToolOutput`: the payload is
+    perfectly readable and says the broker declined. The distinction is only for
+    whoever reads the journal afterwards — see the class docstring — and the two
+    are caught identically everywhere.
     """
     data = result.data
     error = data.get("error") or data.get("detail")
     if error and "status" not in data:
-        raise MalformedToolOutput(f"{result.tool} returned an error: {error}")
+        raise BrokerRefused(f"{result.tool} returned an error: {error}")
 
 
 def _looks_like_not_found(result: ToolResult) -> bool:

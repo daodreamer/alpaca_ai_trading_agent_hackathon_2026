@@ -227,13 +227,24 @@ class TestSubmission:
         assert len(session.calls) == 1
 
     def test_the_order_is_a_close_on_the_wire(self) -> None:
-        """`position_intent` has to say so, or the broker opens a new position
-        in the opposite direction instead of flattening this one."""
+        """The wire order has to *be* the mirror, not merely be labelled one.
+
+        This asserted only the label once, and the label alone is what Alpaca
+        refused 39 times in one session: `422 position intent mismatch,
+        inferred: buy_to_open, specified: buy_to_close`. The held spread is
+        short the 752 and long the 747, so flattening it buys the 752 back and
+        sells the 747 -- and the credit it was opened for is a debit to close.
+        """
         session = RecordedSession.scripted(**{PLACE_ORDER_TOOL: payload("order_filled")})
         run(short="0.30", long="0.10", mcp=session)
         _, arguments = session.calls[0]
         legs = arguments["legs"]
-        assert all("close" in leg["position_intent"] for leg in legs)  # type: ignore[index,union-attr]
+        assert isinstance(legs, list)
+        assert [(leg["symbol"][-9:], leg["side"], leg["position_intent"]) for leg in legs] == [
+            ("P00747000", "sell", "sell_to_close"),
+            ("P00752000", "buy", "buy_to_close"),
+        ]
+        assert Decimal(str(arguments["limit_price"])) > 0, "a debit, not a credit"
 
     def test_a_rejected_close_is_recorded_not_swallowed(self) -> None:
         """A close that did not happen is a position still open. Nothing about

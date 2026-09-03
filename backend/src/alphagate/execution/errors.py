@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from alphagate.execution.lifecycle import Submission
 
 __all__ = [
+    "BrokerRefused",
     "ExecutionError",
     "MalformedToolOutput",
     "PartialFillBreach",
@@ -54,6 +55,22 @@ class MalformedToolOutput(ExecutionError):
     Raised rather than defaulted. A missing `status` field silently treated as
     "probably fine" is the kind of shortcut that reconciles at 16:05 into a
     position nobody knew about.
+    """
+
+
+class BrokerRefused(MalformedToolOutput):
+    """The broker answered, legibly, that it would not place the order.
+
+    A subclass rather than a sibling, deliberately. Every handler that treats an
+    unreadable answer as "no order exists" must treat a refusal the same way —
+    that is the same conclusion reached for a better reason — so widening the
+    hierarchy here would silently change what those handlers catch.
+
+    What it buys is the journal line. A refused order used to be recorded as
+    `MalformedToolOutput: place_option_order returned an error: {...}`, which
+    reads as "our parser broke" and sends the reader into this codebase. The
+    fact is `422 position intent mismatch` — the broker read the order fine and
+    said no, and the answer is in the order, not in the adapter.
     """
 
 

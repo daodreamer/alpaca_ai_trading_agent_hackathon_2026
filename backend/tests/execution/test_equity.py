@@ -21,6 +21,7 @@ from alphagate.core.identifiers import ticker
 from alphagate.equity import EquityPolicy, EquitySide, OrderIntent, TargetBook
 from alphagate.execution import (
     PLACE_STOCK_ORDER_TOOL,
+    BrokerRefused,
     ExecutionError,
     MalformedToolOutput,
     OrderStatus,
@@ -362,7 +363,12 @@ def test_a_tool_error_payload_is_not_read_as_an_order(
     session = RecordedSession.scripted(
         **{PLACE_STOCK_ORDER_TOOL: json.dumps({"error": "insufficient buying power"})}
     )
-    with pytest.raises(MalformedToolOutput, match="insufficient buying power"):
+    with pytest.raises(BrokerRefused, match="insufficient buying power"):
+        submit_equity(gated(book, portfolio, policy), session)
+    session = RecordedSession.scripted(
+        **{PLACE_STOCK_ORDER_TOOL: json.dumps({"error": "insufficient buying power"})}
+    )
+    with pytest.raises(MalformedToolOutput):
         submit_equity(gated(book, portfolio, policy), session)
 
 

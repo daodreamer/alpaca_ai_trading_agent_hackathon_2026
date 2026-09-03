@@ -5,6 +5,11 @@
 | `StructureRisk.net_premium`  | **positive**    | negative   |
 | Alpaca `limit_price` (mleg)  | **negative**    | positive   |
 
+There are two sign rules here and they are independent. `alpaca_limit_price`
+converts the *convention*; `wire_net_premium` applies the *direction*, because
+closing a structure is the opposite cash flow from opening the same one and the
+domain object describes the structure either way.
+
 The domain keeps the finance convention because that is what makes the
 `max_profit` / `max_loss` arithmetic in specs/02 D4 read correctly. Alpaca
 inverts it: its schema says *"positive = debit/cost, negative = credit/proceeds"*.
@@ -32,13 +37,14 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Final
 
 from alphagate.core.errors import InvariantViolation
-from alphagate.risk import GatedOrder
+from alphagate.risk import GatedOrder, Intent
 
 __all__ = [
     "PRICE_TICK",
     "alpaca_limit_price",
     "alpaca_limit_price_inverse",
     "net_premium_per_unit",
+    "wire_net_premium",
 ]
 
 PRICE_TICK: Final = Decimal("0.01")
@@ -76,6 +82,24 @@ def alpaca_limit_price_inverse(wire: str | Decimal) -> Decimal:
     if not value.is_finite():
         raise InvariantViolation(f"limit price must be finite, got {wire!r}")
     return -value
+
+
+def wire_net_premium(order: GatedOrder) -> Decimal:
+    """The per-share net premium **of the order being sent**, in domain sign.
+
+    The second half of specs/04 D2, and it is about direction rather than
+    convention. `GatedOrder.limit_price` is what the *structure* is worth: for a
+    put credit spread, a credit, positive. Sending it is a request to receive
+    that credit — which is right when opening and exactly backwards when
+    closing, because buying the spread back costs a debit of the same size.
+
+    So a close negates. Nothing else does: `OPEN` and `ROLL` both put the
+    structure on, and `run_exit_cycle` deliberately journals the structure that
+    is *held* rather than a mirrored one, which leaves this the only place that
+    knows a close reverses (see `mapping.wire_side` for the other half).
+    """
+    per_unit = net_premium_per_unit(order)
+    return -per_unit if order.intent is Intent.CLOSE else per_unit
 
 
 def net_premium_per_unit(order: GatedOrder) -> Decimal:

@@ -42,6 +42,7 @@ from alphagate.execution.equity import (
     to_stock_arguments,
 )
 from alphagate.execution.errors import (
+    BrokerRefused,
     ExecutionError,
     MalformedToolOutput,
     PartialFillBreach,
@@ -72,6 +73,7 @@ __all__ = [
     "PLACE_STOCK_ORDER_TOOL",
     "POSITIONS_TOOL",
     "AccountRead",
+    "BrokerRefused",
     "ExecutionError",
     "LegPosition",
     "LegStatus",

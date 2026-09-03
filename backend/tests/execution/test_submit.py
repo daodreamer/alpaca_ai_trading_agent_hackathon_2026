@@ -32,6 +32,7 @@ from alphagate.execution import (
     read_back,
     submit,
 )
+from alphagate.execution.errors import BrokerRefused, MalformedToolOutput
 from alphagate.execution.lifecycle import OrderId, parse_status
 from alphagate.execution.mapping import PLACE_ORDER_TOOL
 from alphagate.execution.pricing import alpaca_limit_price_inverse
@@ -490,3 +491,57 @@ class TestARealFill:
         assert filled_net == -Decimal("0.60"), "Alpaca reports a credit as negative"
         assert alpaca_limit_price_inverse(filled_net) == Decimal("0.60")
         assert Decimal(str(arguments_for(order)["limit_price"])) == filled_net
+
+
+class TestARefusalSaysWhoRefused:
+    """The name in the journal line, and nothing else.
+
+    `_reject_error_payload` covers a real and frequent case: the server answers
+    HTTP 200 with an error object, and reading that as an order would record an
+    order that does not exist. It used to raise `MalformedToolOutput`, so a
+    perfectly legible refusal was journalled as though our own parser had
+    broken — thirty-nine times on 2026-09-03, each one saying
+    `MalformedToolOutput` above an API message that explained itself.
+    """
+
+    REFUSAL = json.dumps(
+        {
+            "message": "API rejected the order",
+            "http_status": 422,
+            "detail": {
+                "code": 42210000,
+                "message": (
+                    "position intent mismatch, inferred: buy_to_open, "
+                    "specified: buy_to_close"
+                ),
+            },
+        }
+    )
+
+    def test_a_refusal_is_named_a_refusal(self, order: GatedOrder) -> None:
+        session = RecordedSession.scripted(**{PLACE_ORDER_TOOL: self.REFUSAL})
+        with pytest.raises(BrokerRefused, match="position intent mismatch"):
+            submit(order, session)
+
+    def test_it_is_still_caught_wherever_the_old_one_was(
+        self, order: GatedOrder
+    ) -> None:
+        """A subclass on purpose. Every handler that treated an unreadable
+        answer as "no order exists" must reach the same conclusion here."""
+        session = RecordedSession.scripted(**{PLACE_ORDER_TOOL: self.REFUSAL})
+        with pytest.raises(MalformedToolOutput):
+            submit(order, session)
+        session = RecordedSession.scripted(**{PLACE_ORDER_TOOL: self.REFUSAL})
+        with pytest.raises(ExecutionError):
+            submit(order, session)
+
+    def test_the_broker_message_survives_into_the_exception(
+        self, order: GatedOrder
+    ) -> None:
+        """The whole point: the answer is in the order, not in this codebase,
+        so the API's own words have to reach the journal."""
+        session = RecordedSession.scripted(**{PLACE_ORDER_TOOL: self.REFUSAL})
+        with pytest.raises(BrokerRefused) as raised:
+            submit(order, session)
+        assert "42210000" in str(raised.value)
+

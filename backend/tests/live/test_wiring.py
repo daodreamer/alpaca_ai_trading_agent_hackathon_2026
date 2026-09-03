@@ -33,6 +33,7 @@ from typing import Any
 import pytest
 
 from alphagate.agent import Slot, Underlying
+from alphagate.agent.book import HeldPosition
 from alphagate.agent.option_book import EntryRule, OptionRule
 from alphagate.agent.schedule import CycleKind
 from alphagate.agent.screen import BookScreen, DefaultScreen
@@ -48,6 +49,8 @@ from alphagate.live.wiring import (
     LiveContext,
     SessionState,
     _api_right,
+    _position_read,
+    _spots_for,
     expiry_window,
     gather_for,
     load_pinned_option_book,
@@ -59,10 +62,19 @@ from alphagate.live.wiring import (
     screen_for,
 )
 from alphagate.marketdata import RecordedMarketData
-from alphagate.options import Right
-from alphagate.risk import DEFAULT_LIMITS
+from alphagate.options import (
+    Leg,
+    OptionContract,
+    OptionStructure,
+    Right,
+    Side,
+    StructureKind,
+)
+from alphagate.risk import DEFAULT_LIMITS, OpenPosition
 
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
+SPY = ticker("SPY")
+EXPIRY = date(2026, 9, 14)
 
 PAPER = {
     "ALPACA_API_KEY_ID": "PKTESTTESTTESTTESTTEST99",
@@ -417,6 +429,75 @@ class TestGatherJudgesFreshnessAsOfTheSlotItIsGiven:
 # `run` reporting "not running" for up to a full slot interval after it
 # actually starts, because nothing was published before the first slot fired.
 # --------------------------------------------------------------------------- #
+
+
+class TestTheExitLinesOwnRead:
+    """What an exit cycle journals about the market — and what it may not claim.
+
+    An exit reads the position's marks, not the trend engine, so its
+    `MarketRead` is deliberately almost empty. But `spot` cannot be `None`
+    (specs/05 D2: a read with no price is not a read), and what went in there
+    was `legs[0].contract.strike` — on a put credit spread the *long wing*. On
+    2026-09-03 that put "spot 735.00" on thirty-nine journal lines and on the
+    dashboard beside them, while SPY was at 773.
+    """
+
+    def held_spread(self) -> HeldPosition:
+        long_leg = OptionContract(SPY, EXPIRY, Decimal("735"), Right.PUT)
+        short_leg = OptionContract(SPY, EXPIRY, Decimal("750"), Right.PUT)
+        structure = OptionStructure(
+            StructureKind.VERTICAL_CREDIT,
+            (Leg(long_leg, Side.BUY), Leg(short_leg, Side.SELL)),
+        )
+        return HeldPosition(
+            position=OpenPosition(
+                structure=structure,
+                quantity=1,
+                max_loss=Decimal("1386"),
+                net_greeks=None,
+                opened_at=NOW,
+            ),
+            entry_premium=Decimal("114.00"),
+            cycle_id="2026-09-02-SPY-003",
+        )
+
+    def test_it_records_the_underlyings_real_price_when_there_is_one(self) -> None:
+        read = _position_read(self.held_spread(), NOW, spot=Decimal("773.33"))
+        assert read.spot == Decimal("773.33")
+        assert read.trend is None, "an exit perceives nothing and says so"
+        assert read.iv_rank is None
+
+    def test_without_a_quote_it_falls_back_to_the_short_strike(self) -> None:
+        """Not the first leg. The short strike is the one the position is
+        defined around; the long wing is the one that made 735 look like a
+        market price."""
+        read = _position_read(self.held_spread(), NOW)
+        assert read.spot == Decimal("750")
+
+    def test_a_quote_failure_does_not_stop_the_exits(self) -> None:
+        """`_spots_for` is best-effort by construction. A missing price is a
+        less informative journal line; it must never be a position nobody
+        evaluated."""
+
+        class Refuses:
+            def latest_price(self, symbol: object) -> Decimal:
+                raise RuntimeError("no market data")
+
+        assert _spots_for(Refuses(), (self.held_spread(),)) == {}  # type: ignore[arg-type]
+
+    def test_one_quote_per_underlying_however_many_positions(self) -> None:
+        class Counts:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def latest_price(self, symbol: object) -> Decimal:
+                self.calls += 1
+                return Decimal("773.33")
+
+        data = Counts()
+        held = (self.held_spread(), self.held_spread())
+        assert _spots_for(data, held) == {SPY: Decimal("773.33")}  # type: ignore[arg-type]
+        assert data.calls == 1
 
 
 class TestPublishStartupStatus:

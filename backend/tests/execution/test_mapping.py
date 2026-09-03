@@ -184,6 +184,121 @@ class TestPositionIntent:
         assert all(leg["position_intent"].endswith("_to_open") for leg in legs)
 
 
+class TestClosingReversesTheOrder:
+    """specs/04 D3, the half that had never been sent.
+
+    A close is journalled as the structure that is *held* — `run_exit_cycle`
+    passes `held.position.structure` with `Intent.CLOSE`, because the position
+    is the thing being closed and inventing a mirrored `OptionStructure` would
+    put a shape in the journal that was never held. Turning that into an order
+    is this module's job, and the order is the mirror: every leg goes the other
+    way, and a credit structure costs a debit to buy back.
+
+    Getting only half of it right is worse than getting none: an order with the
+    held sides and `_to_close` intents is a request to open a second copy of the
+    position wearing a label that says it closes one. Alpaca happens to check
+    that pair and refuse it -- `422 position intent mismatch, inferred:
+    buy_to_open, specified: buy_to_close`, which is what this class was written
+    from, 39 of them in one session. A broker that only recorded the label would
+    have opened 39 more spreads instead.
+    """
+
+    def test_a_put_credit_spread_closes_as_the_mirror_order(self) -> None:
+        """The golden one, typed out. Compare it with `test_vertical_credit`
+        above: same structure, every side inverted, and the credit that opened
+        it is the debit that closes it."""
+        structure, quotes = put_credit_spread()
+        assert to_tool_arguments(
+            gated(structure=structure, quotes=quotes, intent=Intent.CLOSE)
+        ) == {
+            "qty": "1",
+            "type": "limit",
+            "time_in_force": "day",
+            "order_class": "mleg",
+            "limit_price": "0.60",  # buying the spread back costs a debit (D2)
+            "legs": [
+                {
+                    "symbol": "SPY260904P00747000",
+                    "ratio_qty": "1",
+                    "side": "sell",  # held long; sold to close
+                    "position_intent": "sell_to_close",
+                },
+                {
+                    "symbol": "SPY260904P00752000",
+                    "ratio_qty": "1",
+                    "side": "buy",  # held short; bought back
+                    "position_intent": "buy_to_close",
+                },
+            ],
+        }
+
+    def test_a_single_leg_close_flips_its_side_too(self) -> None:
+        """A covered call is closed by buying the call back. The price stays
+        positive on a single leg — the direction lives in `side`."""
+        structure, quotes = covered_call()
+        opening = to_tool_arguments(gated(structure=structure, quotes=quotes, equity=RICH))
+        closing = to_tool_arguments(
+            gated(structure=structure, quotes=quotes, intent=Intent.CLOSE, equity=RICH)
+        )
+        assert opening["side"] == "sell"
+        assert opening["position_intent"] == "sell_to_open"
+        assert closing["side"] == "buy"
+        assert closing["position_intent"] == "buy_to_close"
+        assert closing["limit_price"] == opening["limit_price"], (
+            "a single-leg price is the option's own and never signed; only the "
+            "side carries the direction"
+        )
+
+    @pytest.mark.parametrize("kind", sorted(STRUCTURES, key=lambda k: k.value))
+    def test_every_kind_reverses_every_leg(self, kind: StructureKind) -> None:
+        """The property, over all five kinds: the order that closes a position
+        is the one that would have opened its opposite."""
+        structure, quotes = STRUCTURES[kind]()
+        order = gated(
+            structure=structure, quotes=quotes, intent=Intent.CLOSE, equity=RICH
+        )
+        arguments = to_tool_arguments(order)
+        legs = arguments.get("legs")
+        wire = (
+            [(leg["side"], leg["position_intent"]) for leg in legs]  # type: ignore[index,union-attr]
+            if isinstance(legs, list)
+            else [(arguments["side"], arguments["position_intent"])]
+        )
+        held = [leg.side for leg in structure.legs]
+        assert [side for side, _ in wire] == [s.opposite.value for s in held]
+        for side, intent in wire:
+            assert intent == f"{side}_to_close", "the intent's verb is the wire side's"
+
+    def test_the_sign_flip_is_the_only_difference_in_price(self) -> None:
+        """Closing prices at the same magnitude, on the other side of zero. A
+        close that priced at the same signed number would be an order to sell
+        the spread again, at the price we would pay to buy it."""
+        structure, quotes = put_credit_spread()
+        opening = to_tool_arguments(gated(structure=structure, quotes=quotes))
+        closing = to_tool_arguments(
+            gated(structure=structure, quotes=quotes, intent=Intent.CLOSE)
+        )
+        assert Decimal(str(opening["limit_price"])) == -Decimal(str(closing["limit_price"]))
+
+    def test_an_open_is_left_exactly_as_it_was(self) -> None:
+        """The regression guard. Only `CLOSE` mirrors."""
+        structure, quotes = put_credit_spread()
+        legs = to_tool_arguments(gated(structure=structure, quotes=quotes))["legs"]
+        assert isinstance(legs, list)
+        assert [leg["side"] for leg in legs] == [leg.side.value for leg in structure.legs]
+
+    def test_a_roll_opens_and_does_not_mirror(self) -> None:
+        """A roll is two orders and this is the opening half, so its sides are
+        the sides of the structure it is opening."""
+        structure, quotes = put_credit_spread()
+        legs = to_tool_arguments(
+            gated(structure=structure, quotes=quotes, intent=Intent.ROLL)
+        )["legs"]
+        assert isinstance(legs, list)
+        assert [leg["side"] for leg in legs] == [leg.side.value for leg in structure.legs]
+        assert all(leg["position_intent"].endswith("_to_open") for leg in legs)
+
+
 class TestLegCeiling:
     def test_no_constructible_structure_exceeds_four_legs(self) -> None:
         """The domain enforces it; the adapter only has to agree."""

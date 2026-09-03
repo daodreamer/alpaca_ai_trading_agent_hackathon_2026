@@ -30,6 +30,7 @@ from alphagate.equity import (
     UnusableBook,
 )
 from alphagate.execution import RecordedSession, TransportFailure
+from alphagate.execution.account import read_account
 from alphagate.execution.equity import PLACE_STOCK_ORDER_TOOL
 from alphagate.journal import Journal
 from alphagate.live.equity import (
@@ -49,6 +50,8 @@ from alphagate.live.equity import (
     today_totals,
     unpinned_books,
 )
+from alphagate.live.equity_cli import _heartbeat
+from alphagate.live.wiring import EQUITY_SLEEVE_BASIS, SessionState
 from alphagate.marketdata import StockSnapshot
 from tests.equity.conftest import AAA, BBB, CCC, FINGERPRINT
 
@@ -559,6 +562,92 @@ def test_an_options_cycle_does_not_count_towards_the_equity_caps(
     )
     orders, turnover = today_totals(context.journal, NOW.date())
     assert (orders, turnover) == (0, Decimal(0))
+
+
+# --------------------------------------------------------------------- #
+# The drawdown, and the two numbers that have to be the same one
+# --------------------------------------------------------------------- #
+
+
+def _status(context: EquityContext) -> dict[str, Any]:
+    return json.loads(
+        (context.journal.directory / "equity-status.json").read_text(encoding="utf-8")
+    )
+
+
+class TestTheDrawdownIsMeasuredOnTheSleeve:
+    """specs/03 D6, and the day it cost a rebalance.
+
+    Two things compute a drawdown for this sleeve: the Gate's
+    `drawdown_killswitch`, off `sleeve.drawdown(peak)`, and the status page. They
+    have to be the same number, because one of them stops trading and the other
+    is the only place a human would look to see it coming.
+
+    They were not. The rebalance pass marked the high-water mark on the sleeve
+    (~$90k, correct), the thirty-second heartbeat re-marked it on the *account*
+    (~$101k), and the heartbeat runs two hundred times more often. So the stored
+    peak was account-scale while the drawdown was measured sleeve-scale, giving a
+    standing ~10.3% loss that never happened — and on 2026-09-03 it crossed the
+    10% kill switch and refused the day's only rebalance while the page beside it
+    read 0.08%.
+    """
+
+    def test_the_heartbeat_marks_the_sleeve_not_the_account(
+        self, context: EquityContext
+    ) -> None:
+        _heartbeat(context, as_of=NOW, next_pass=None, sequence=1)
+        assert context.peak_equity == EQUITY_SLEEVE_ALLOCATION, (
+            "an untraded sleeve is worth its allocation; the account is worth "
+            "that plus the options sleeve, and marking the account here is what "
+            "made the kill switch measure one against the other"
+        )
+
+    def test_the_page_reports_what_the_gate_will_measure(
+        self, context: EquityContext, books: Path, tmp_path: Path
+    ) -> None:
+        """Mark the peak, then lose $1,000 of it. The sleeve is down 1.11% of
+        $90,000 — not 1.00% of the $100,000 account."""
+        _heartbeat(context, as_of=NOW, next_pass=None, sequence=1)
+        context.mcp = session(equity="99000", cash="99000")
+        _heartbeat(context, as_of=NOW, next_pass=None, sequence=2)
+
+        published = _status(context)
+        account = read_account(context.mcp, observed_at=NOW)  # type: ignore[arg-type]
+        sleeve = context.sleeve(account)
+        assert published["equity"] == "99000", "the page still shows the account"
+        assert Decimal(published["peak_equity"]) == EQUITY_SLEEVE_ALLOCATION
+        assert Decimal(published["drawdown_pct"]) == sleeve.drawdown(
+            peak=context.peak_equity
+        ), "the page's drawdown is the Gate's drawdown"
+        assert Decimal(published["drawdown_pct"]) > Decimal("0.011")
+
+    def test_a_peak_stored_under_the_pre_fix_label_is_discarded(
+        self, tmp_path: Path
+    ) -> None:
+        """The state files written before this fix say `equity-sleeve` and hold
+        an account-scale number. The basis check exists for exactly this: the
+        label was right about what it should have been and wrong about what was
+        recorded, so the mark is dropped rather than believed."""
+        path = tmp_path / "equity-state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "peak_equity": "101367.36",
+                    "killswitch_tripped": False,
+                    "basis": "equity-sleeve",
+                }
+            ),
+            encoding="utf-8",
+        )
+        state = SessionState.load(path, basis=EQUITY_SLEEVE_BASIS)
+        assert state.peak_equity is None
+        assert state.discarded_peak == Decimal("101367.36")
+
+    def test_the_sleeve_basis_says_what_it_measures(self) -> None:
+        """A guard on the constant itself. Reusing the old label would silently
+        adopt the poisoned marks it was bumped to discard."""
+        assert EQUITY_SLEEVE_BASIS != "equity-sleeve"
+        assert EQUITY_SLEEVE_BASIS.startswith("equity-sleeve")
 
 
 def _row(symbol: str, qty: str) -> dict[str, Any]:

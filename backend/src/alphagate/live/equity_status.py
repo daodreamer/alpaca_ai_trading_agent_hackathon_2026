@@ -164,6 +164,7 @@ def build_equity_status(
     holdings: tuple[Holding, ...],
     marks: dict[Ticker, Mark],
     policy: EquityPolicy,
+    sleeve_equity: Decimal,
     peak_equity: Decimal | None,
     killswitch_tripped: bool,
     orders_today: int,
@@ -180,6 +181,16 @@ def build_equity_status(
     no artefact to execute. The page then shows the account and says so, which
     is more useful than an empty page and much more useful than a page that
     looks like a flat book.
+
+    **Two equity figures, and they are not interchangeable.** `account.equity` is
+    the broker's whole account and is what the page reports, because that is the
+    number a reader can check against Alpaca (see `interface/sleeves.py` for the
+    rest of that argument). `sleeve_equity` is this strategy's own capital
+    (specs/03 D6) and is what the drawdown is measured on — because the Gate's
+    `drawdown_killswitch` measures it there, and a page whose drawdown is
+    computed on a different quantity from the one that stops trading is a page
+    that cannot warn you. On 2026-09-03 the two differed by a factor of a
+    hundred: 0.08% here, 10.07% at the Gate, on the pass it refused.
     """
     held = {holding.symbol: holding for holding in holdings}
     wanted = dict(book.weights) if book else {}
@@ -247,7 +258,7 @@ def build_equity_status(
         buying_power=account.buying_power,
         session_change=account.session_change,
         peak_equity=peak_equity,
-        drawdown_pct=_drawdown(peak_equity, equity),
+        drawdown_pct=_drawdown(peak_equity, sleeve_equity),
         killswitch_tripped=killswitch_tripped,
         is_blocked=account.is_blocked,
         gross_exposure=gross / equity if equity else Decimal(0),

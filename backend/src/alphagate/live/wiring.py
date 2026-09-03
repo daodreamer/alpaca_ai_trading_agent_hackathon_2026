@@ -82,7 +82,15 @@ from alphagate.live.equity import UnpinnedBook, find_latest_book, unpinned_books
 from alphagate.live.status import build_status, write_status
 from alphagate.marketdata import MarketData
 from alphagate.marketdata.alpaca import AlpacaMarketData
-from alphagate.options import OptionContract, OptionQuote, Right, StructureRisk, compute_risk
+from alphagate.options import (
+    OptionContract,
+    OptionQuote,
+    OptionStructure,
+    Right,
+    Side,
+    StructureRisk,
+    compute_risk,
+)
 from alphagate.risk import RiskLimits
 from alphagate.risk.limits import OPTIONS_SLEEVE_ALLOCATION, SLEEVE_LIMITS
 
@@ -286,7 +294,21 @@ ACCOUNT_BASIS: Final = "account"
 which is why it is the default rather than an error."""
 
 OPTIONS_SLEEVE_BASIS: Final = "options-sleeve"
-EQUITY_SLEEVE_BASIS: Final = "equity-sleeve"
+
+EQUITY_SLEEVE_BASIS: Final = "equity-sleeve/marked-on-the-sleeve"
+"""Bumped from the bare `equity-sleeve`, which is a label the files on disk
+still carry while holding a number that is not one.
+
+The rebalance pass marked the sleeve, as the label says. The thirty-second
+heartbeat re-marked the same field with *account* equity, and it runs two
+hundred times as often, so every state file written before that was fixed holds
+an account-scale peak under a sleeve-scale name — read back, a standing ~10%
+drawdown that never happened, which on 2026-09-03 latched the kill switch and
+refused the day's rebalance.
+
+Changing the string is what makes `SessionState.load` discard those marks
+instead of believing them. See its docstring for why they are discarded rather
+than rescaled."""
 
 
 @dataclass
@@ -678,6 +700,7 @@ def _exit_cycles(
     except Exception:
         return ()
 
+    spots = _spots_for(context.data, book.held)
     records: list[CycleRecord] = []
     for offset, item in enumerate(book.held):
         legs = [leg.contract for leg in item.position.structure.legs]
@@ -692,7 +715,7 @@ def _exit_cycles(
         record = run_exit_cycle(
             held=item,
             current=current,
-            read=_position_read(item, as_of),
+            read=_position_read(item, as_of, spot=spots.get(item.position.underlying)),
             portfolio=book.snapshot,
             limits=context.limits,
             as_of=as_of,
@@ -705,20 +728,58 @@ def _exit_cycles(
     return tuple(records)
 
 
-def _position_read(item: HeldPosition, as_of: datetime) -> MarketRead:
+def _spots_for(data: MarketData, held: Sequence[HeldPosition]) -> dict[Ticker, Decimal]:
+    """The underlying's price for each held position. Best effort, never raises.
+
+    One quote per distinct underlying, so an exit line can journal what the
+    market was actually doing rather than a stand-in. A symbol the port cannot
+    answer for is simply absent: `_position_read` falls back, and a quote
+    failure must not be able to stop an exit from being evaluated — the
+    position's own option marks are what the policy reads, and they came from a
+    different call.
+    """
+    spots: dict[Ticker, Decimal] = {}
+    for symbol in sorted({item.position.underlying for item in held}, key=str):
+        try:
+            spots[symbol] = data.latest_price(symbol)
+        except Exception as failure:
+            # Not logged and not raised. The caller renders the fallback, and
+            # the one thing this must not do is prevent the exit below it from
+            # being evaluated over a field that decides nothing.
+            del failure
+    return spots
+
+
+def _position_read(
+    item: HeldPosition, as_of: datetime, *, spot: Decimal | None = None
+) -> MarketRead:
     """The minimum honest `MarketRead` for an exit line.
 
     An exit is not a perception-driven decision — it reads the position's own
     marks, not the trend engine — so inventing a full read here would put
-    numbers in the journal that no engine produced. Spot is the one field a read
-    may never omit, and the position's own short strike is the closest thing to
-    a price this path actually knows.
+    numbers in the journal that no engine produced. Every optional field stays
+    `None` for that reason.
+
+    `spot` is the one field a read may never omit. It is the underlying's real
+    price when `_spots_for` could get one, and the position's **short strike**
+    otherwise — the strike the position is defined around, and the closest thing
+    to a price this path knows on its own. The fallback used to be `legs[0]`,
+    which on a put credit spread is the long wing: journalled and rendered as
+    "spot", it read as a market forty points from where SPY actually was.
     """
     return MarketRead(
         underlying=item.position.underlying,
         as_of=as_of,
-        spot=item.position.structure.legs[0].contract.strike,
+        spot=spot if spot is not None else _short_strike(item.position.structure),
     )
+
+
+def _short_strike(structure: OptionStructure) -> Decimal:
+    """The strike of the first short leg — every kind in specs/02 D3 has one."""
+    for leg in structure.legs:
+        if leg.side is Side.SELL:
+            return leg.contract.strike
+    return structure.legs[0].contract.strike  # pragma: no cover - no such kind
 
 
 def _publish_status(

@@ -413,7 +413,13 @@ def _heartbeat(
             return
         account = read_account(context.mcp, observed_at=as_of)
         context.last_account = account
-        context.observe(account.equity)
+        # On the sleeve, never on the account — specs/03 D6, and the same line
+        # `run_equity_cycle` marks. This runs every thirty seconds against the
+        # pass's once a day, so when the two disagreed this one decided: it
+        # stored an account-scale high-water mark that the Gate then measured
+        # sleeve equity against, a standing ~10% drawdown that never happened.
+        sleeve = context.sleeve(account)
+        context.observe(sleeve.equity)
         holdings = read_share_positions(context.mcp)
         context.last_holdings = holdings
 
@@ -438,6 +444,7 @@ def _heartbeat(
             holdings=holdings,
             marks=marks,
             policy=context.policy,
+            sleeve_equity=sleeve.equity,
             peak_equity=context.peak_equity,
             killswitch_tripped=context.killswitch_tripped,
             orders_today=orders,
