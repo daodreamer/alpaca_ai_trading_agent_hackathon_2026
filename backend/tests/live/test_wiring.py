@@ -33,7 +33,7 @@ from typing import Any
 import pytest
 
 from alphagate.agent import Slot, Underlying
-from alphagate.agent.book import HeldPosition
+from alphagate.agent.book import BookRead, HeldPosition
 from alphagate.agent.option_book import EntryRule, OptionRule
 from alphagate.agent.schedule import CycleKind
 from alphagate.agent.screen import BookScreen, DefaultScreen
@@ -49,6 +49,7 @@ from alphagate.live.wiring import (
     LiveContext,
     SessionState,
     _api_right,
+    _exit_cycles,
     _position_read,
     _spots_for,
     expiry_window,
@@ -70,7 +71,7 @@ from alphagate.options import (
     Side,
     StructureKind,
 )
-from alphagate.risk import DEFAULT_LIMITS, OpenPosition
+from alphagate.risk import DEFAULT_LIMITS, OpenPosition, PortfolioSnapshot
 
 NOW = datetime(2026, 8, 26, 14, 30, tzinfo=UTC)
 SPY = ticker("SPY")
@@ -498,6 +499,140 @@ class TestTheExitLinesOwnRead:
         held = (self.held_spread(), self.held_spread())
         assert _spots_for(data, held) == {SPY: Decimal("773.33")}  # type: ignore[arg-type]
         assert data.calls == 1
+
+
+class TestASecondCloseIsNeverSent:
+    """The exit path skips a position whose close is already working.
+
+    `agent.book.working_closes` decides it and `BookRead.closing` carries it;
+    what this pins is that the live path *acts* on it, and acts on it before
+    asking for a price. A slot that re-priced the position and then declined to
+    submit would still be one broker call away from the duplicate order this
+    exists to prevent, and the skip has to survive a refactor of the code that
+    quotes.
+    """
+
+    def held_spread(self) -> HeldPosition:
+        long_leg = OptionContract(SPY, EXPIRY, Decimal("735"), Right.PUT)
+        short_leg = OptionContract(SPY, EXPIRY, Decimal("750"), Right.PUT)
+        structure = OptionStructure(
+            StructureKind.VERTICAL_CREDIT,
+            (Leg(long_leg, Side.BUY), Leg(short_leg, Side.SELL)),
+        )
+        return HeldPosition(
+            position=OpenPosition(
+                structure=structure,
+                quantity=1,
+                max_loss=Decimal("1386"),
+                net_greeks=None,
+                opened_at=NOW,
+            ),
+            entry_premium=Decimal("114.00"),
+            cycle_id="2026-09-02-SPY-003",
+        )
+
+    def book_with(self, *, closing: tuple[str, ...]) -> BookRead:
+        held = self.held_spread()
+        return BookRead(
+            snapshot=PortfolioSnapshot(
+                equity=Decimal("10000"),
+                positions=(held.position,),
+                drawdown_pct=Decimal(0),
+                fills_today=0,
+            ),
+            held=(held,),
+            closing=closing,
+        )
+
+    def test_nothing_is_proposed_and_nothing_is_priced(self) -> None:
+        class Refuses:
+            def __getattr__(self, name: str) -> object:
+                raise AssertionError(f"a skipped exit must not call data.{name}()")
+
+        context = SimpleNamespace(data=Refuses(), limits=DEFAULT_LIMITS)
+        records = _exit_cycles(
+            context,  # type: ignore[arg-type]
+            self.book_with(closing=("2026-09-02-SPY-003",)),
+            as_of=NOW,
+            base_sequence=0,
+            mcp=None,
+        )
+        assert records == ()
+
+    def test_a_position_with_no_working_close_is_still_evaluated(self) -> None:
+        """The other half: the skip must be about *this* position, not about
+        having any working close at all."""
+        asked: list[str] = []
+
+        class Records:
+            def option_chain(self, symbol: object, **kwargs: object) -> tuple[()]:
+                asked.append(str(symbol))
+                return ()
+
+            def latest_price(self, symbol: object) -> Decimal:
+                return Decimal("773.33")
+
+        context = SimpleNamespace(data=Records(), limits=DEFAULT_LIMITS)
+        records = _exit_cycles(
+            context,  # type: ignore[arg-type]
+            self.book_with(closing=()),
+            as_of=NOW,
+            base_sequence=0,
+            mcp=None,
+        )
+        # No quotes come back from an empty chain, so the position is held
+        # loudly rather than closed -- but it was *looked at*, which is the
+        # difference this test is about.
+        assert asked == ["SPY"]
+        assert records == ()
+
+
+class TestTheDaysFillsComeFromTheJournal:
+    """`fills_today` reached the Gate as a session counter nobody incremented.
+
+    A number that is always zero is not a cap. This pins the live path onto
+    `agent.book.fills_on`, which reads the journal — the only source that also
+    survives the mid-session restart `supervised_run` is built to perform.
+    """
+
+    def _context(self, tmp_path: Path) -> LiveContext:
+        from alphagate.agent import IvHistoryStore
+
+        fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "marketdata"
+        return LiveContext(
+            data=RecordedMarketData(directory=fixtures),
+            mcp=FakeMcp(),
+            journal=Journal(directory=tmp_path / "journal"),
+            iv=IvHistoryStore(directory=tmp_path / "iv"),
+            state=SessionState(path=tmp_path / "state.json"),
+        )
+
+    def filled_today(self, cycle_id: str) -> dict[str, object]:
+        return {
+            "cycle_id": cycle_id,
+            "as_of": NOW.isoformat(),
+            "stage": "filled",
+            "proposal": {"quantity": 1, "intent": "open"},
+        }
+
+    def test_a_fill_journalled_today_reaches_the_gates_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        context = self._context(tmp_path)
+        context.journal.append(self.filled_today("2026-08-26-SPY-000"))
+        context.journal.append(self.filled_today("2026-08-26-SPY-001"))
+        assert context.book(as_of=NOW).snapshot.fills_today == 2
+
+    def test_it_survives_a_restart(self, tmp_path: Path) -> None:
+        """The counter did not: `supervised_run` rebuilds the session, and a
+        fresh closure starts the day at zero however many fills it has had."""
+        first = self._context(tmp_path)
+        first.journal.append(self.filled_today("2026-08-26-SPY-000"))
+        restarted = self._context(tmp_path)
+        assert restarted.book(as_of=NOW).snapshot.fills_today == 1
+
+    def test_a_quiet_day_is_zero(self, tmp_path: Path) -> None:
+        assert self._context(tmp_path).book(as_of=NOW).snapshot.fills_today == 0
 
 
 class TestPublishStartupStatus:

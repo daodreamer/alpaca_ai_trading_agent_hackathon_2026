@@ -62,7 +62,7 @@ from alphagate.agent import (
     tradeable_today,
     vertical_credit_spreads,
 )
-from alphagate.agent.book import BookRead, HeldPosition, read_book
+from alphagate.agent.book import BookRead, HeldPosition, fills_on, read_book
 from alphagate.agent.cycle import CycleRecord, run_exit_cycle
 from alphagate.agent.exits import DEFAULT_EXIT_POLICY, ExitPolicy
 from alphagate.agent.screen import BookScreen, DefaultScreen, Screen
@@ -470,7 +470,7 @@ class LiveContext:
             raise RuntimeError("no MCP session: cannot read the account")
         return read_account(self.mcp, observed_at=as_of)
 
-    def book(self, *, as_of: datetime, fills_today: int = 0) -> BookRead:
+    def book(self, *, as_of: datetime) -> BookRead:
         """Re-read the account and the sleeve from the broker. Never inferred.
 
         Three orderings matter here and each was a bug waiting to happen.
@@ -483,6 +483,13 @@ class LiveContext:
 
         **Bounded at `as_of`**, so a replay of an earlier day cannot see a later
         one.
+
+        **`fills_today` is counted, not carried.** specs/03 D5's daily cap reads
+        it off the snapshot, and it used to arrive from a session counter that
+        nothing incremented -- so the cap never bound and the dashboard's tile
+        read zero on a day with two fills. It is read from the journal here,
+        which is also the only source that survives the mid-session restart
+        `supervised_run` exists to perform.
 
         **The high-water mark is observed after the read, and on the sleeve.**
         Before, it recorded account equity — which made the options kill switch
@@ -498,13 +505,14 @@ class LiveContext:
         account = read_account(self.mcp, observed_at=as_of)
         self.last_account = account
         legs = read_positions(self.mcp)
+        history = self.journal.read_through(as_of.date())
         book = read_book(
             account,
             legs,
-            self.journal.read_through(as_of.date()),
+            history,
             sleeve_allocation=self.sleeve_allocation,
             peak_equity=self.state.peak_equity,
-            fills_today=fills_today,
+            fills_today=fills_on(history, as_of.date()),
             killswitch_tripped=self.state.killswitch_tripped,
         )
         self.state.observe(book.snapshot.equity)
@@ -530,18 +538,19 @@ def expiry_window(
 def gather_for(
     context: LiveContext,
     *,
-    fills: Sequence[int] = (),
     submit_exits: bool = True,
     slots: Sequence[Slot] = (),
 ) -> Any:
     """Build the runner's `gather` callable.
 
     One closure over one context, because `run_session` wants a function of a
-    slot and everything else it needs is fixed for the session. `fills` is a
-    one-element mutable counter the caller can read — the Gate's daily fill cap
-    (specs/03 D5) is a portfolio fact and the snapshot has to carry it.
+    slot and everything else it needs is fixed for the session.
+
+    It used to take a `fills` counter for the Gate's daily fill cap (specs/03
+    D5). Nothing ever incremented it, so the cap read zero all day and never
+    bound; the count now comes off the journal inside `LiveContext.book`, where
+    it also survives a restart. A counter in a closure could not.
     """
-    counter = list(fills) or [0]
     schedule = tuple(slots)
 
     def gather(slot: Slot) -> CycleInputs:
@@ -579,7 +588,7 @@ def gather_for(
         )
         upcoming = next_slot(schedule, slot.at) if schedule else None
         context.next_slot_at = upcoming.at if upcoming else None
-        book = context.book(as_of=slot.at, fills_today=counter[0])
+        book = context.book(as_of=slot.at)
         account = context.last_account
         if account is None:  # pragma: no cover - book() always sets it
             raise RuntimeError('book() did not record an account read')
@@ -692,17 +701,24 @@ def _exit_cycles(
     Sequences start well above the entry cycles' so an exit and an entry in the
     same slot cannot mint the same `cycle_id` (specs/06 D2).
     """
-    if not book.held:
+    # A position with a close already working at the broker is skipped here,
+    # before anything is priced. It is still held and still in the Gate's risk
+    # model -- the risk is on until the close fills -- but proposing a second
+    # close would mint a second `client_order_id` for one decision, and two
+    # working closes on a one-lot spread that both fill open the mirror
+    # position. See `agent.book.working_closes`.
+    managed = tuple(item for item in book.held if item.cycle_id not in book.closing)
+    if not managed:
         return ()
 
     try:
-        quotes = _quotes_for(context.data, book.held, as_of=as_of)
+        quotes = _quotes_for(context.data, managed, as_of=as_of)
     except Exception:
         return ()
 
-    spots = _spots_for(context.data, book.held)
+    spots = _spots_for(context.data, managed)
     records: list[CycleRecord] = []
-    for offset, item in enumerate(book.held):
+    for offset, item in enumerate(managed):
         legs = [leg.contract for leg in item.position.structure.legs]
         if any(leg not in quotes for leg in legs):
             continue

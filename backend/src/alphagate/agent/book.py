@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -60,11 +60,20 @@ __all__ = [
     "BookRead",
     "HeldPosition",
     "contract_from",
+    "fills_on",
     "open_positions",
     "read_book",
     "realised_pl",
     "structure_from",
+    "working_closes",
 ]
+
+_TERMINAL = frozenset({"filled", "canceled", "expired", "rejected", "replaced"})
+"""Order statuses that settle an order, mirroring `execution.OrderStatus`.
+
+Strings rather than the enum for the same reason `journal.writer` keeps its
+own copy: this module reads journalled records, so the vocabulary crosses a
+file rather than a function call."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +121,12 @@ class BookRead:
     """Cycle ids whose structures are no longer at the broker: filled and since
     closed, expired, or assigned. Reported so a session that resumes mid-day can
     tell "closed" from "never opened"."""
+    closing: tuple[str, ...] = ()
+    """Held cycle ids that already have a close order working at the broker.
+
+    Still in `held` and still in the snapshot: a working close is not a closed
+    position and the risk is on until it fills. What it changes is that the
+    exit path must not propose a second one — see `working_closes`."""
 
     @property
     def is_clean(self) -> bool:
@@ -191,6 +206,7 @@ def read_book(
     latch across the days that matter.
     """
     held, unexplained, closed = open_positions(legs, journal_records)
+    in_flight = working_closes(journal_records)
     sleeve = Sleeve(
         name="options",
         allocation=sleeve_allocation,
@@ -213,6 +229,83 @@ def read_book(
         held=held,
         unexplained=unexplained,
         closed=closed,
+        closing=tuple(
+            item.cycle_id for item in held if item.position.structure in in_flight
+        ),
+    )
+
+
+def working_closes(
+    journal_records: Sequence[Mapping[str, Any]],
+) -> tuple[OptionStructure, ...]:
+    """Structures with a close already at the broker and not yet settled. Pure.
+
+    The exit policy is evaluated against the broker's *positions*, and a
+    position with a working close is still a position — its legs are there
+    until the close fills. So without this, the slot after a close is submitted
+    proposes the same close again; the idempotency key derives from the
+    proposal, every slot is a new proposal, and the broker has no reason to
+    refuse the second one. Two working closes on a one-lot spread that both
+    fill do not flatten it twice: they flatten it and open the mirror position.
+
+    "Not yet settled" is read from the outcome rather than from the stage
+    alone. `Journal.read` settles `stage` to `filled` or `rejected` from a
+    terminal outcome, but `canceled`, `expired` and `replaced` have no `Stage`
+    of their own and leave the line reading `submitted` — and those are exactly
+    the cases where the position must be closable again today rather than left
+    open until tomorrow.
+
+    Matched by structure because that is what an exit carries: `run_exit_cycle`
+    proposes the structure that is held, which is the same object the position
+    was opened with (specs/07 D6).
+
+    Two positions holding the *same* structure — the rule trades one underlying,
+    so this happens — are therefore both marked while either close is working.
+    Conservative on purpose, and it costs nothing in practice: both are proposed
+    in the same slot, from one `BookRead`, before either order exists. The
+    direction to be wrong in is the one that sends fewer orders.
+    """
+    working: list[OptionStructure] = []
+    for record in journal_records:
+        proposal = record.get("proposal")
+        if not isinstance(proposal, Mapping):
+            continue
+        if str(proposal.get("intent", "")) != "close":
+            continue
+        if str(record.get("stage", "")) != "submitted":
+            continue
+        outcome = record.get("outcome")
+        if isinstance(outcome, Mapping) and str(outcome.get("status", "")) in _TERMINAL:
+            continue
+        structure = _structure_or_none(proposal.get("structure"))
+        if structure is not None:
+            working.append(structure)
+    return tuple(working)
+
+
+def fills_on(journal_records: Sequence[Mapping[str, Any]], day: date) -> int:
+    """How many of `day`'s option cycles reached a fill. Pure.
+
+    What `PortfolioSnapshot.fills_today` is meant to hold, and specs/03 D5's
+    `daily_trade_cap` measures — "fills today", with no carve-out, so a close
+    counts as much as an open: both cross a spread and both are trades the day
+    did.
+
+    Counted off the journal rather than off a session counter. The live path
+    used to thread a counter nobody incremented, so the cap never bound and the
+    dashboard's tile read zero on a day with two fills. The journal is also the
+    only source that survives a restart mid-session, which a counter in a
+    closure does not.
+
+    A record with no readable day is not counted as today's: guessing would
+    make an undated line tighten a cap it has no claim on.
+    """
+    return sum(
+        1
+        for record in journal_records
+        if record.get("kind") != "equity"
+        and str(record.get("stage", "")) == "filled"
+        and _day_of(record) == day
     )
 
 
@@ -357,6 +450,29 @@ def _structure_or_none(payload: Any) -> OptionStructure | None:
         return structure_from(payload)
     except (KeyError, ValueError, ArithmeticError, TypeError):
         return None
+
+
+def _day_of(record: Mapping[str, Any]) -> date | None:
+    """The trading day a journalled record belongs to, or `None`.
+
+    `as_of` first, because it is the decision's own timestamp; the `cycle_id`
+    prefix is the fallback for a line that somehow lost it (specs/06 D2 puts the
+    date there too). Never a clock read — the caller says which day it is asking
+    about.
+    """
+    stamp = record.get("as_of")
+    if isinstance(stamp, str):
+        try:
+            return datetime.fromisoformat(stamp).date()
+        except ValueError:
+            pass
+    cycle_id = record.get("cycle_id")
+    if isinstance(cycle_id, str) and len(cycle_id) >= 10:
+        try:
+            return date.fromisoformat(cycle_id[:10])
+        except ValueError:
+            pass
+    return None
 
 
 def _contracts_wanted(structure: OptionStructure, quantity: int) -> dict[OptionContract, int]:

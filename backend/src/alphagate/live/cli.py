@@ -621,6 +621,34 @@ def _is_terminal_stop(reason: str) -> bool:
     return any(marker in reason for marker in _TERMINAL_STOPS)
 
 
+def _latch_if_breached(context: LiveContext, result: SessionResult) -> None:
+    """Write the kill switch to disk when a session stopped on one.
+
+    specs/04 D5 says a partial fill blocks new opens "until a human clears it",
+    and `SessionState` has carried a `killswitch_tripped` field since sleeves
+    existed -- loaded on every start, handed to `read_book`, and never once
+    written. So the latch lived in the process: `supervised_run` refused to
+    resume, and the next `alphagate run` started clean and traded on with a
+    naked leg outstanding. The equity path has always persisted it
+    (`equity_cli._persist`); this is the options half.
+
+    Clearing it is deliberately not a command. A latch a script can reset is a
+    latch that gets reset by a script -- `journal/state.json` is two lines, and
+    a human editing it is exactly the human this rule is asking for.
+    """
+    if not (result.stopped_early and _is_terminal_stop(result.stopped_early)):
+        return
+    if context.state.killswitch_tripped:
+        return
+    context.state.killswitch_tripped = True
+    context.state.save()
+    print(
+        f"! kill switch latched in {context.state.path}: {result.stopped_early}\n"
+        "! it stays latched across restarts and across days. Clear it by hand, "
+        "after looking at the book."
+    )
+
+
 def _one_session(args: argparse.Namespace, slots: Sequence[Slot]) -> SessionResult:
     """One MCP session over the given slots. Opened and closed here.
 
@@ -638,7 +666,7 @@ def _one_session(args: argparse.Namespace, slots: Sequence[Slot]) -> SessionResu
         # correct: each restart opens a fresh session and the page should say
         # so as promptly as the first one did.
         publish_startup_status(context, as_of=datetime.now(UTC), slots=slots)
-        return run_session(
+        result = run_session(
             slots,
             gather_for(context, submit_exits=not args.dry_run, slots=slots),
             limits=context.limits,
@@ -649,6 +677,8 @@ def _one_session(args: argparse.Namespace, slots: Sequence[Slot]) -> SessionResu
             sleep=time.sleep,
             now=lambda: datetime.now(UTC),
         )
+        _latch_if_breached(context, result)
+        return result
 
 
 def _report(result: SessionResult) -> None:

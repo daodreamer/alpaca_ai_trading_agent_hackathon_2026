@@ -68,6 +68,16 @@ export type Snapshot = {
 
   positions: PositionStatus[]
   unexplained: string[]
+  /**
+   * Cycle ids whose close order is already at the broker and still working.
+   *
+   * The agent skips these positions until the close settles, so without this
+   * the page shows a position whose exit rule has fired and an agent doing
+   * nothing about it — which is the picture of a bug, not of an order waiting
+   * to fill. Optional because a snapshot written before this field existed is
+   * still a snapshot.
+   */
+  closing?: string[]
 
   profit_target: string
   stop_multiple: string

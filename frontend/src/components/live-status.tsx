@@ -322,6 +322,9 @@ function PositionRow({
 }) {
   const pnl = num(position.unrealised)
   const unpriced = position.rule === "unpriced"
+  // The close is out and waiting to fill. Until it settles the agent proposes
+  // nothing further for this position -- one decision, one order.
+  const closing = (snapshot.closing ?? []).includes(position.cycle_id)
 
   return (
     <TableRow>
@@ -330,6 +333,11 @@ function PositionRow({
         <div className="text-muted-foreground font-mono text-xs">
           {position.structure}
         </div>
+        {closing ? (
+          <Badge variant="secondary" className="mt-1">
+            closing — order working
+          </Badge>
+        ) : null}
       </TableCell>
       <TableCell className="text-right tabular-nums">
         {position.quantity}

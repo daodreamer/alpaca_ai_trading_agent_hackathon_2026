@@ -144,6 +144,12 @@ class StatusSnapshot:
 
     stage_counts: dict[str, int]
     note: str = ""
+    closing: tuple[str, ...] = ()
+    """Cycle ids whose close order is already working at the broker.
+
+    Rendered so "the exit rule fired and nothing happened" and "the exit is out
+    and waiting to fill" do not look identical on the page. The agent skips
+    these positions until the close settles (`agent.book.working_closes`)."""
 
     @property
     def unrealised(self) -> Decimal:
@@ -210,6 +216,7 @@ def build_status(
             for item in book.held
         ),
         unexplained=tuple(str(leg.contract) for leg in book.unexplained),
+        closing=book.closing,
         profit_target=policy.profit_target,
         stop_multiple=policy.stop_multiple,
         min_dte=policy.min_dte,

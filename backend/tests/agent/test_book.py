@@ -19,7 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from alphagate.agent.book import contract_from, open_positions, read_book, structure_from
+from alphagate.agent.book import (
+    contract_from,
+    fills_on,
+    open_positions,
+    read_book,
+    structure_from,
+    working_closes,
+)
 from alphagate.core.errors import InvariantViolation
 from alphagate.equity.policy import EQUITY_SLEEVE_ALLOCATION
 from alphagate.execution import AccountRead, LegPosition
@@ -393,6 +400,151 @@ class TestAFillThatArrivedAsAnAmendment:
         journal = self.journal_with_a_late_fill(tmp_path)
         book = read_book(account(), OPEN_LEGS, journal.read_through(NOW.date()))
         assert [item.cycle_id for item in book.held] == ["2026-08-26-SPY-000"]
+
+
+def closing(
+    cycle_id: str = "2026-08-26-SPY-500",
+    *,
+    stage: str = "submitted",
+    outcome: dict[str, object] | None = None,
+    structure: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """An exit cycle as `run_exit_cycle` journals one: the *held* structure,
+    `intent: close`, and whatever the broker has said about it so far."""
+    record: dict[str, object] = {
+        "cycle_id": cycle_id,
+        "as_of": NOW.isoformat(),
+        "stage": stage,
+        "proposal": {
+            "intent": "close",
+            "quantity": 1,
+            "structure": structure if structure is not None else structure_payload(),
+            "risk": {"max_loss": "393.00"},
+        },
+    }
+    if outcome is not None:
+        record["outcome"] = outcome
+    return record
+
+
+class TestAClosingOrderAlreadyWorking:
+    """One decision, sent once. The hole this closes was opened by fixing the
+    exit path at all.
+
+    The exit policy is evaluated every slot against the broker's positions, and
+    a position with a working close order is still a position: the legs are
+    there until the close fills. So the slot after a close is submitted proposes
+    the same close again, mints a *different* `client_order_id` (the key derives
+    from the proposal, and every slot is a new proposal), and the broker accepts
+    it. Two working closes on a one-lot spread that both fill do not flatten it
+    twice — they flatten it and then open the mirror position, which no journal
+    line asked for.
+
+    Until 2026-09-03 this was unreachable: every close was refused at the door
+    for a malformed position intent. Fixing that made it reachable, so this is
+    part of the same fix.
+    """
+
+    def test_a_submitted_close_is_reported_as_working(self) -> None:
+        working = working_closes([filled(), closing()])
+        assert [leg.contract.strike for leg in working[0].legs] == [
+            Decimal("747"),
+            Decimal("752"),
+        ]
+
+    def test_the_book_names_the_position_being_closed(self) -> None:
+        book = read_book(account(), OPEN_LEGS, [filled(), closing()])
+        assert book.closing == ("2026-08-26-SPY-000",)
+        assert [item.cycle_id for item in book.held] == ["2026-08-26-SPY-000"], (
+            "still held -- a working close is not a closed position"
+        )
+
+    def test_a_filled_close_is_not_working(self) -> None:
+        """`Journal.read` settles the stage from the outcome, so a close that
+        filled reads `filled` here. Its legs are gone from the broker anyway."""
+        book = read_book(
+            account(), OPEN_LEGS, [filled(), closing(stage="filled", outcome={"status": "filled"})]
+        )
+        assert book.closing == ()
+
+    def test_a_cancelled_close_is_not_working(self) -> None:
+        """The case a naive `stage == submitted` test gets wrong. A cancelled
+        order is terminal and has no `Stage` of its own, so the line still reads
+        `submitted` -- and the position must be closable again today, not left
+        open until tomorrow."""
+        book = read_book(
+            account(),
+            OPEN_LEGS,
+            [filled(), closing(outcome={"status": "canceled"})],
+        )
+        assert book.closing == ()
+
+    def test_a_live_outcome_is_still_working(self) -> None:
+        book = read_book(
+            account(), OPEN_LEGS, [filled(), closing(outcome={"status": "new"})]
+        )
+        assert book.closing == ("2026-08-26-SPY-000",)
+
+    def test_an_opening_cycle_is_not_a_close(self) -> None:
+        """`intent` is what separates them, not the structure: an exit carries
+        the same structure as the position it closes."""
+        book = read_book(account(), OPEN_LEGS, [filled()])
+        assert book.closing == ()
+
+    def test_a_close_for_a_different_position_does_not_block_this_one(self) -> None:
+        other = structure_payload(short="762", long="757")
+        book = read_book(
+            account(), OPEN_LEGS, [filled(), closing(structure=other)]
+        )
+        assert book.closing == ()
+
+
+class TestTheDailyFillCapCanSeeTheDaysFills:
+    """`daily_trade_cap` counts `PortfolioSnapshot.fills_today`, and live that
+    number was always zero: `gather_for` threads a counter nobody increments.
+    So specs/03 D5's ceiling on how fast a bad day can compound never bound, and
+    the dashboard's "fills today" tile read 0 on a day with two fills.
+
+    Counted off the journal instead, which is the same place the day's fills are
+    read from everywhere else -- and which only became reliable once
+    `Journal.read` started settling `stage` from the outcome, because a fill
+    that landed as an amendment used to read `submitted`.
+    """
+
+    def test_todays_fills_are_counted(self) -> None:
+        day = NOW.date()
+        assert fills_on([filled(), filled("2026-08-26-SPY-001")], day) == 2
+
+    def test_another_days_fills_are_not(self) -> None:
+        yesterday = {**filled("2026-08-25-SPY-000"), "as_of": "2026-08-25T14:30:00+00:00"}
+        assert fills_on([yesterday, filled()], NOW.date()) == 1
+
+    def test_only_fills_count(self) -> None:
+        """Not proposals, and not orders still working -- a Gate that counted
+        its own vetoes could talk itself out of trading."""
+        records = [
+            filled(),
+            {**filled("2026-08-26-SPY-001"), "stage": "submitted"},
+            {**filled("2026-08-26-SPY-002"), "stage": "vetoed"},
+        ]
+        assert fills_on(records, NOW.date()) == 1
+
+    def test_an_exit_that_filled_counts_too(self) -> None:
+        """specs/03's own wording is "fills today", without a carve-out. A close
+        is a fill: it crosses a spread and it is a trade the day did."""
+        assert fills_on([filled(), closing(stage="filled")], NOW.date()) == 2
+
+    def test_an_equity_pass_is_not_an_option_fill(self) -> None:
+        equity = {
+            "cycle_id": "2026-08-26-EQ-000",
+            "as_of": NOW.isoformat(),
+            "kind": "equity",
+            "stage": "submitted",
+        }
+        assert fills_on([equity, filled()], NOW.date()) == 1
+
+    def test_a_record_with_no_day_is_not_counted_as_todays(self) -> None:
+        assert fills_on([{"cycle_id": "x", "stage": "filled"}], NOW.date()) == 0
 
 
 class TestUnexplainedLegsAreNeverModelled:

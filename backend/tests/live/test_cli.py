@@ -15,17 +15,27 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from alphagate.agent import SessionResult, Slot, Stage, session_slots
+from alphagate.agent.book import read_book
 from alphagate.agent.iv_store import IvHistoryStore
 from alphagate.core.identifiers import ticker
+from alphagate.execution import AccountRead
 from alphagate.journal import Journal
 from alphagate.live import cli
-from alphagate.live.cli import _adhoc_slot, _free_sequence, _slot_now, build_parser, main
-from alphagate.live.wiring import LiveContext, SessionState
+from alphagate.live.cli import (
+    _adhoc_slot,
+    _free_sequence,
+    _latch_if_breached,
+    _slot_now,
+    build_parser,
+    main,
+)
+from alphagate.live.wiring import OPTIONS_SLEEVE_BASIS, LiveContext, SessionState
 from tests.journal.conftest import at_stage
 
 OPEN = datetime(2026, 8, 26, 13, 30, tzinfo=UTC)
@@ -397,3 +407,93 @@ class TestTheSupervisor:
         self, reason: str, terminal: bool
     ) -> None:
         assert cli._is_terminal_stop(reason) is terminal
+
+
+class TestTheKillSwitchOutlivesTheProcess:
+    """specs/04 D5: a partial fill blocks new opens "until a human clears it".
+
+    `SessionState.killswitch_tripped` has been loaded on every start and handed
+    to `read_book` since sleeves existed, and nothing ever wrote it. So the
+    latch lived in one process: `supervised_run` refused to resume, and the next
+    `alphagate run` -- an hour later or the next morning -- started clean and
+    went back to opening positions with a naked leg outstanding. The equity path
+    has always persisted it; this is the options half.
+    """
+
+    def context(self, tmp_path: Path) -> LiveContext:
+        return LiveContext(
+            data=None,  # type: ignore[arg-type]
+            mcp=None,
+            journal=Journal(directory=tmp_path / "journal"),
+            iv=IvHistoryStore(directory=tmp_path / "iv"),
+            state=SessionState(path=tmp_path / "state.json", basis=OPTIONS_SLEEVE_BASIS),
+        )
+
+    def stopped(self, reason: str) -> SessionResult:
+        result = SessionResult()
+        result.stopped_early = reason
+        return result
+
+    def test_a_breach_is_written_to_disk(self, tmp_path: Path) -> None:
+        context = self.context(tmp_path)
+        _latch_if_breached(
+            context, self.stopped("partial fill breach - opens blocked, reconcile by hand")
+        )
+        reloaded = SessionState.load(tmp_path / "state.json", basis=OPTIONS_SLEEVE_BASIS)
+        assert reloaded.killswitch_tripped is True
+
+    def test_a_latch_on_the_incoming_snapshot_is_written_too(self, tmp_path: Path) -> None:
+        """The second terminal stop. One day's latch has to reach the next."""
+        context = self.context(tmp_path)
+        _latch_if_breached(context, self.stopped("kill switch latched on the incoming snapshot"))
+        assert context.state.killswitch_tripped is True
+
+    def test_an_ordinary_end_of_day_latches_nothing(self, tmp_path: Path) -> None:
+        context = self.context(tmp_path)
+        _latch_if_breached(context, SessionResult())
+        assert not (tmp_path / "state.json").exists()
+
+    def test_a_survivable_failure_latches_nothing(self, tmp_path: Path) -> None:
+        """A gather that failed three times is a bad connection, not a naked
+        leg. `supervised_run` resumes those, and a latch would make a network
+        blip cost the rest of the week."""
+        context = self.context(tmp_path)
+        _latch_if_breached(
+            context, self.stopped("gather failed at slot 3: TransportFailure: reset")
+        )
+        assert context.state.killswitch_tripped is False
+
+    def test_it_does_not_rewrite_a_latch_it_already_holds(self, tmp_path: Path) -> None:
+        context = self.context(tmp_path)
+        context.state.killswitch_tripped = True
+        _latch_if_breached(context, self.stopped("partial fill breach"))
+        assert not (tmp_path / "state.json").exists(), "nothing changed, nothing written"
+
+    def test_the_latch_reaches_the_gate_on_the_next_start(self, tmp_path: Path) -> None:
+        """The whole point, end to end: what is written is what `read_book` is
+        handed, and `PortfolioSnapshot.killswitch_tripped` is what the Gate
+        refuses opens on."""
+        context = self.context(tmp_path)
+        _latch_if_breached(context, self.stopped("partial fill breach"))
+
+        tomorrow = SessionState.load(tmp_path / "state.json", basis=OPTIONS_SLEEVE_BASIS)
+        assert tomorrow.killswitch_tripped is True
+        book = read_book(
+            _account(), (), [], killswitch_tripped=tomorrow.killswitch_tripped
+        )
+        assert book.snapshot.killswitch_tripped is True
+
+
+def _account() -> AccountRead:
+    return AccountRead(
+        equity=Decimal("100000"),
+        last_equity=Decimal("100000"),
+        buying_power=Decimal("100000"),
+        options_buying_power=Decimal("100000"),
+        options_level=3,
+        cash=Decimal("100000"),
+        multiplier=1,
+        is_blocked=False,
+        envelope=None,
+        observed_at=datetime(2026, 8, 26, 14, 30, tzinfo=UTC),
+    )
