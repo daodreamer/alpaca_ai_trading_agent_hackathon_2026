@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -188,7 +189,12 @@ def resolve_pinned_option_book(
     if not pin:
         return OptionBookView(
             available=False,
-            reasons=(f"no fingerprint pinned ({OPTION_FINGERPRINT_VAR} is not set)",),
+            reasons=(
+                "No option rule has been chosen, so the agent will not trade options.",
+                f"Add {OPTION_FINGERPRINT_VAR}=cc197008e0deb097 to your .env.local "
+                "file and restart. There is no default on purpose: the agent "
+                "executes the one rule you name and refuses every other.",
+            ),
         )
 
     directory = books_dir
@@ -199,7 +205,12 @@ def resolve_pinned_option_book(
     if path is None:
         return OptionBookView(
             available=False,
-            reasons=(f"no option book for {pin} in {directory}",),
+            reasons=(
+                f"Rule {pin} is pinned, but no file describing it was found in "
+                f"{directory}.",
+                "Either the rule name is a typo, or the file has not been written "
+                "yet. Rebuild it with: python scripts/pipeline.py option-book",
+            ),
         )
 
     try:
@@ -272,7 +283,7 @@ def option_book_to_json(view: OptionBookView) -> dict[str, Any]:
         "selection_rule": book.selection_rule,
         "distinct_hypotheses": book.distinct_hypotheses,
         "campaign_hypotheses": book.campaign_hypotheses,
-        "exit_convention": book.exit_convention,
+        "exit_convention": _without_spec_citations(book.exit_convention),
         "underlying": str(book.underlying),
         "rule": {
             "structure": rule.structure,
@@ -325,3 +336,19 @@ def option_book_to_json(view: OptionBookView) -> dict[str, Any]:
 
 def _decimal_str(value: Decimal) -> str:
     return format(value, "f")
+
+
+_SPEC_CITATION = re.compile(r"\s*\(\s*specs?/[^)]*\)")
+
+
+def _without_spec_citations(text: str) -> str:
+    """Drop `(specs/10 D0, D1)`-style references from text bound for a screen.
+
+    The research side writes these deliberately and they belong in the artefact
+    — a book is evidence, and evidence cites its source. They do not belong on
+    a dashboard: a reader looking at a trading agent wants to know what happens
+    to a position, and a pointer to a document they do not have cannot tell
+    them. The book on disk keeps its citations; only the rendered copy loses
+    them.
+    """
+    return _SPEC_CITATION.sub("", text).strip()

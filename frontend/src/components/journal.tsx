@@ -54,6 +54,8 @@ import {
   isEquityPass,
   num,
   pct,
+  stageHint,
+  stageLabel,
 } from "@/lib/status"
 
 const STAGE_TONE: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -88,6 +90,22 @@ const CATEGORY_TONE: Record<DeclineCategory, "default" | "secondary" | "destruct
   other: "outline",
 }
 
+/**
+ * Categories where the journal's own note adds something.
+ *
+ * These are the ones a reader might have to act on, and the note is where the
+ * specifics live — the broker's rejection text, the failing check's numbers.
+ * Everywhere else the note restates the plain-English explanation in internal
+ * vocabulary, and printing both says the same thing twice, the second time
+ * worse.
+ */
+const NOTE_WORTH_SHOWING = new Set<DeclineCategory>([
+  "gate_veto",
+  "broker_rejected",
+  "traded",
+  "other",
+])
+
 export function Journal({ cycles, day }: { cycles: DayRecord[]; day: string }) {
   const [open, setOpen] = useState<string | null>(null)
 
@@ -95,10 +113,11 @@ export function Journal({ cycles, day }: { cycles: DayRecord[]; day: string }) {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Nothing journalled for {day}</EmptyTitle>
+          <EmptyTitle>No record for {day}</EmptyTitle>
           <EmptyDescription>
-            Every cycle writes a line, so an empty day means the agent has not
-            run — not that it found nothing.
+            The agent writes a line every time it looks at the market, even when
+            it decides to do nothing. An empty day therefore means it was not
+            running that day — not that it looked and found nothing.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -166,18 +185,22 @@ function EquityPassCard({
           <span className="text-muted-foreground font-mono text-sm tabular-nums">
             {clock(pass.as_of)}
           </span>
-          <CardTitle className="text-base">equity rebalance</CardTitle>
-          <Badge variant={STAGE_TONE[stage] ?? "outline"}>{stage}</Badge>
+          <CardTitle className="text-base">stock rebalance</CardTitle>
+          <Badge variant={STAGE_TONE[stage] ?? "outline"}>
+            {stageLabel(stage)}
+          </Badge>
           <Badge variant="secondary">
             {orders.length} order{orders.length === 1 ? "" : "s"}
           </Badge>
           {vetoed > 0 ? (
             <Badge variant="destructive">
-              {vetoed} stopped by the Gate
+              {vetoed} stopped by a safety check
             </Badge>
           ) : null}
           {near.length > 0 ? (
-            <Badge variant="secondary">near {near[0].name}</Badge>
+            <Badge variant="secondary">
+              close to the “{near[0].name.replace(/_/g, " ")}” limit
+            </Badge>
           ) : null}
           {orders.length > 0 ? (
             <Button
@@ -196,7 +219,9 @@ function EquityPassCard({
         </div>
         <CardDescription>
           {pass.note ||
-            `${submitted} of ${orders.length} intents reached the broker`}
+            `${submitted} of ${orders.length} planned order${
+              orders.length === 1 ? "" : "s"
+            } reached the broker. ${stageHint(stage)}`}
         </CardDescription>
       </CardHeader>
 
@@ -246,13 +271,15 @@ function EquityPassCard({
               </div>
               {(order.verdict?.reasons ?? []).map((reason) => (
                 <p key={reason.check} className="text-destructive text-xs">
-                  vetoed · {reason.check} — {reason.detail}
+                  Not sent — failed the “{reason.check.replace(/_/g, " ")}”
+                  safety check: {reason.detail}
                 </p>
               ))}
               {(order.verdict?.waived ?? []).map((reason) => (
                 <p key={reason.check} className="text-muted-foreground text-xs">
-                  waived · {reason.check} — {reason.detail} (this order reduces
-                  risk)
+                  Allowed through despite “{reason.check.replace(/_/g, " ")}”:{" "}
+                  {reason.detail}. This order reduces risk, so the limit does not
+                  apply to it.
                 </p>
               ))}
               <OrderChecks checks={order.verdict?.checks ?? []} />
@@ -261,12 +288,13 @@ function EquityPassCard({
 
           {skipped.length > 0 ? (
             <section className="flex flex-col gap-1">
-              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                Not traded — inside the band or unpriced
+              <h3 className="text-muted-foreground text-xs font-medium">
+                LEFT ALONE — already close enough to target, or not priceable
               </h3>
               {skipped.map((item) => (
                 <p key={item.symbol} className="text-muted-foreground text-xs">
-                  {item.symbol} · {item.reason} — {item.detail}
+                  {item.symbol} · {item.reason.replace(/_/g, " ")} —{" "}
+                  {item.detail}
                 </p>
               ))}
             </section>
@@ -307,10 +335,24 @@ function CycleCard({
           <CardTitle className="text-base">
             {cycle.read?.underlying ?? "—"}
           </CardTitle>
-          <Badge variant={STAGE_TONE[stage] ?? "outline"}>{stage}</Badge>
-          <Badge variant={CATEGORY_TONE[category]}>{categoryLabel}</Badge>
+          {/* One badge, not two. The stage and the category describe the same
+              event at different resolutions, and where they differ the stage
+              is the misleading one: a cycle that could not evaluate its entry
+              rule is stored as `no_setup`, which renders "no opportunity" —
+              the exact wrong conclusion — right beside the category saying the
+              volatility history is missing. The category is always at least as
+              specific, so it wins whenever the backend classified the cycle. */}
+          {category === "other" ? (
+            <Badge variant={STAGE_TONE[stage] ?? "outline"}>
+              {stageLabel(stage)}
+            </Badge>
+          ) : (
+            <Badge variant={CATEGORY_TONE[category]}>{categoryLabel}</Badge>
+          )}
           {near.length > 0 ? (
-            <Badge variant="secondary">near {near[0].name}</Badge>
+            <Badge variant="secondary">
+              close to the “{near[0].name.replace(/_/g, " ")}” limit
+            </Badge>
           ) : null}
           <Button
             variant="ghost"
@@ -325,7 +367,20 @@ function CycleCard({
             {expanded ? "less" : "detail"}
           </Button>
         </div>
-        <CardDescription>{cycle.note || cycle.category_detail}</CardDescription>
+        <CardDescription className="flex flex-col gap-1">
+          <span>{cycle.category_detail || stageHint(stage) || cycle.note}</span>
+          {/* The note is shown only where it carries something the sentence
+              above cannot: on a failure it is the only place the broker's or
+              the process's own words appear, and those are what someone
+              debugging actually needs. On a quiet cycle it merely restates the
+              explanation in the vocabulary this page exists to avoid, so it is
+              dropped rather than printed twice. */}
+          {cycle.note && NOTE_WORTH_SHOWING.has(category) ? (
+            <span className="text-muted-foreground font-mono text-xs wrap-break-word">
+              {cycle.note}
+            </span>
+          ) : null}
+        </CardDescription>
       </CardHeader>
 
       {expanded ? (
@@ -333,16 +388,17 @@ function CycleCard({
           <Read cycle={cycle} />
           {cycle.choice?.rationale ? (
             <section className="flex flex-col gap-2">
-              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                What the model said
+              <h3 className="text-muted-foreground text-xs font-medium">
+                WHY THE MODEL PICKED THIS ONE
               </h3>
               <blockquote className="border-primary bg-muted/40 border-l-2 p-3 text-sm">
                 {cycle.choice.rationale}
               </blockquote>
               <p className="text-muted-foreground text-xs">
-                Chose #{cycle.choice.candidate_index ?? "—"} of{" "}
-                {cycle.candidates?.length ?? 0} structures. Self-reported
-                confidence is recorded and never acted on.
+                Picked option {(cycle.choice.candidate_index ?? 0) + 1} out of{" "}
+                {cycle.candidates?.length ?? 0} it was shown. The model only
+                chooses from a pre-approved shortlist, and how confident it says
+                it is has no effect on the size of the trade.
               </p>
             </section>
           ) : null}
@@ -367,7 +423,7 @@ function OrderChecks({ checks }: { checks: Check[] }) {
   if (checks.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        No verdict recorded for this order.
+        No safety checks were recorded for this order.
       </p>
     )
   }
@@ -383,11 +439,11 @@ function OrderChecks({ checks }: { checks: Check[] }) {
 
   return (
     <p className="text-muted-foreground text-xs">
-      {checks.length} of {checks.length} checks passed
+      All {checks.length} safety checks passed with room to spare
       {tightest
-        ? ` — tightest ${tightest.check.name}, ${Math.round(
+        ? ` — the closest was “${tightest.check.name.replace(/_/g, " ")}”, which used ${Math.round(
             (1 - tightest.room) * 100,
-          )}% of its budget used`
+          )}% of what it is allowed`
         : ""}
       .
     </p>
@@ -396,20 +452,39 @@ function OrderChecks({ checks }: { checks: Check[] }) {
 
 function Read({ cycle }: { cycle: JournalCycle }) {
   const pairs = [
-    ["spot", cycle.read?.spot ? fmt(cycle.read.spot) : "—"],
-    ["iv rank", cycle.read?.iv_rank ?? "unmeasured"],
-    ["menu", String(cycle.candidates?.length ?? 0)],
-    ["max loss", cycle.proposal?.risk?.max_loss ? fmt(cycle.proposal.risk.max_loss) : "—"],
+    [
+      "price at the time",
+      cycle.read?.spot ? fmt(cycle.read.spot) : "—",
+      "",
+    ],
+    [
+      "how jumpy the market was",
+      cycle.read?.iv_rank ?? "not available",
+      cycle.read?.iv_rank
+        ? "0 = calmest in a year, 100 = wildest"
+        : "the past year of readings is missing",
+    ],
+    [
+      "options it could have traded",
+      String(cycle.candidates?.length ?? 0),
+      "shortlist built for the model",
+    ],
+    [
+      "most it could have lost",
+      cycle.proposal?.risk?.max_loss ? fmt(cycle.proposal.risk.max_loss) : "—",
+      "capped by design",
+    ],
   ] as const
 
   return (
     <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      {pairs.map(([label, value]) => (
+      {pairs.map(([label, value, hint]) => (
         <div key={label} className="flex flex-col gap-0.5">
-          <span className="text-muted-foreground text-xs tracking-wide uppercase">
-            {label}
-          </span>
+          <span className="text-muted-foreground text-xs">{label}</span>
           <span className="tabular-nums">{value}</span>
+          {hint ? (
+            <span className="text-muted-foreground text-xs">{hint}</span>
+          ) : null}
         </div>
       ))}
     </section>
@@ -465,7 +540,8 @@ function Checks({ checks }: { checks: Check[] }) {
   if (checks.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        The cycle never reached the Gate.
+        No safety checks ran, because there was no order to check — the agent
+        decided not to trade before it got that far.
       </p>
     )
   }
@@ -477,8 +553,9 @@ function Checks({ checks }: { checks: Check[] }) {
 
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-        The Gate — {passed}/{checks.length} passed, tightest first
+      <h3 className="text-muted-foreground text-xs font-medium">
+        SAFETY CHECKS — {passed} OF {checks.length} PASSED. Closest call first;
+        a full bar means that check nearly stopped the order.
       </h3>
       <div className="overflow-x-auto">
         <Table>
@@ -486,9 +563,9 @@ function Checks({ checks }: { checks: Check[] }) {
             <TableRow>
               <TableHead className="w-16" />
               <TableHead>Check</TableHead>
-              <TableHead className="text-right">Observed</TableHead>
-              <TableHead className="text-right">Limit</TableHead>
-              <TableHead className="w-32">Room</TableHead>
+              <TableHead className="text-right">Measured</TableHead>
+              <TableHead className="text-right">Allowed</TableHead>
+              <TableHead className="w-32">How close</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -501,7 +578,9 @@ function Checks({ checks }: { checks: Check[] }) {
                       {check.passed ? "pass" : "fail"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{check.name}</TableCell>
+                  <TableCell className="text-xs">
+                    {check.name.replace(/_/g, " ")}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {measure(check.observed)}
                   </TableCell>

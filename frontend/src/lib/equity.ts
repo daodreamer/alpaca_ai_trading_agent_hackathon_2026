@@ -178,54 +178,57 @@ export function equityHealth(status: EquityStatusResponse): EquityHealth {
   const snapshot = status.snapshot
   if (!snapshot) {
     return {
-      label: "never run",
+      label: "not started",
       tone: "idle",
-      detail: "no equity-status.json yet",
+      detail: "The stock agent has never run, so there is nothing to show yet.",
     }
   }
   if (!status.running) {
     const age = status.age_seconds ?? 0
+    const ago =
+      age < 90 ? `${Math.round(age)} seconds ago` : `${Math.round(age / 60)} minutes ago`
     return {
-      label: "not running",
+      label: "stopped",
       tone: "bad",
-      detail:
-        age < 600
-          ? `last heartbeat ${Math.round(age)}s ago`
-          : `last heartbeat ${Math.round(age / 60)} minutes ago`,
+      detail: `The agent last checked in ${ago} and has gone quiet. Your holdings are untouched, but nothing is being rebalanced until it is restarted.`,
     }
   }
   if (snapshot.killswitch_tripped) {
     return {
-      label: "kill switch latched",
+      label: "halted — kill switch",
       tone: "bad",
-      detail: "buys are refused until a human clears it; sells still go through",
+      detail:
+        "Losses hit the safety limit, so the agent has stopped buying. Selling still works, so it can still reduce risk. It will not resume on its own.",
     }
   }
   if (snapshot.is_blocked) {
     return {
-      label: "account blocked",
+      label: "cannot trade",
       tone: "bad",
-      detail: "the broker will not accept an order",
+      detail: "The broker has frozen this account, so every order will be rejected.",
     }
   }
   if (!hasStrategy(snapshot.strategy)) {
     return {
-      label: "no book",
+      label: "no strategy loaded",
       tone: "warn",
-      detail: "run `aqr target-book <fingerprint>` to produce one",
+      detail:
+        "The agent has no list of what to hold, so it will not trade. Rebuild it with: python scripts/pipeline.py book",
     }
   }
   if (snapshot.unpriced.length > 0) {
     return {
-      label: `${snapshot.unpriced.length} unpriced`,
+      label: "running — some prices missing",
       tone: "warn",
-      detail: "those names are held rather than traded on a guess",
+      detail: `Trading normally, except for ${snapshot.unpriced.length} holding${
+        snapshot.unpriced.length === 1 ? "" : "s"
+      } the broker gave no price for. Those are left alone rather than traded on a guess.`,
     }
   }
   return {
     label: "running",
     tone: "ok",
-    detail: `heartbeat ${snapshot.heartbeat_sequence}`,
+    detail: "Holdings are being checked every 30 seconds against the target list.",
   }
 }
 
@@ -239,10 +242,11 @@ export function equityHealth(status: EquityStatusResponse): EquityHealth {
  * dashboard that said "confirmed" would be claiming something nobody measured.
  */
 export function sealedVerdict(sealed: SealedRun): string {
-  if (sealed.refuted) return "refuted by the sealed window"
+  if (sealed.refuted) {
+    return "Disproved on the held-back years — this strategy is not allowed to trade."
+  }
+  const t = sealed.t_alpha.toFixed(2)
   return sealed.is_significant
-    ? `not refuted · t=${sealed.t_alpha.toFixed(2)} clears the bar at ${sealed.looks} look${
-        sealed.looks === 1 ? "" : "s"
-      }`
-    : `not refuted · t=${sealed.t_alpha.toFixed(2)} does not clear the bar`
+    ? `Survived a test on years of market data it had never seen, by a comfortable margin (score ${t}). That is the strongest verdict available: this test can disprove a strategy, never prove one.`
+    : `Was not disproved on years of market data it had never seen, but the margin is too small to read much into (score ${t}). It runs because it survived, not because it was proven.`
 }

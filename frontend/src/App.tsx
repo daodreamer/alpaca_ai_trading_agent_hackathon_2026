@@ -22,12 +22,13 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, TriangleAlert } from "lucide-react"
 
 import { EquityStatus } from "@/components/equity-status"
 import { Journal } from "@/components/journal"
 import { LiveStatus } from "@/components/live-status"
 import { SleevesOverview } from "@/components/sleeves-overview"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -58,22 +59,43 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [statusResponse, equityResponse, daysResponse, optionBookResponse, sleevesResponse] =
-        await Promise.all([
-          fetch("/api/status"),
-          fetch("/api/equity/status"),
-          fetch("/api/days"),
-          fetch("/api/option-book"),
-          fetch("/api/sleeves"),
-        ])
-      setStatus(await statusResponse.json())
-      setEquity(await equityResponse.json())
-      setDays(await daysResponse.json())
-      setOptionBook(await optionBookResponse.json())
-      setSleeves(await sleevesResponse.json())
+      const responses = await Promise.all([
+        fetch("/api/status"),
+        fetch("/api/equity/status"),
+        fetch("/api/days"),
+        fetch("/api/option-book"),
+        fetch("/api/sleeves"),
+      ])
+      // A 500 still parses as JSON on some paths, so an unchecked `.json()`
+      // would quietly install an error object as though it were a snapshot and
+      // the page would render nonsense with a confident face. Refuse the whole
+      // round instead: a stale page next to a visible warning is honest, and a
+      // fresh-looking page built from an error is not.
+      const failed = responses.find((response) => !response.ok)
+      if (failed) {
+        throw new Error(
+          `The dashboard server answered ${failed.status} for ${new URL(failed.url).pathname}.`,
+        )
+      }
+      const [status, equity, days, book, sleeves] = await Promise.all(
+        responses.map((response) => response.json()),
+      )
+      setStatus(status)
+      setEquity(equity)
+      setDays(days)
+      setOptionBook(book)
+      setSleeves(sleeves)
       setError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "cannot reach the server")
+      // Browsers word a dead connection as "Failed to fetch" / "NetworkError",
+      // which tells a reader nothing about what to do. Say what broke and what
+      // to try; keep the original wording only when it is our own message.
+      const raw = cause instanceof Error ? cause.message : String(cause)
+      setError(
+        /fetch|network|load failed/i.test(raw)
+          ? "Cannot reach the dashboard server. It has probably stopped — restart it with `alphagate serve`. The figures below are the last ones received."
+          : `${raw} The figures below are the last ones received.`,
+      )
     }
   }, [])
 
@@ -143,7 +165,7 @@ export default function App() {
           agents that can be overruled
         </p>
         <div className="ml-auto flex items-center gap-2">
-          {error ? <Badge variant="destructive">{error}</Badge> : null}
+          {error ? <Badge variant="destructive">disconnected</Badge> : null}
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
             <RefreshCw data-icon="inline-start" />
             refresh
@@ -152,6 +174,16 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-6">
+        {/* A badge alone was too easy to miss, and "everything on this page is
+            stale" is the one thing a reader must not miss. */}
+        {error ? (
+          <Alert variant="destructive" className="mb-6">
+            <TriangleAlert />
+            <AlertTitle>This page is not updating</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+
         <div className="mb-6">
           <SleevesOverview sleeves={sleeves} />
         </div>

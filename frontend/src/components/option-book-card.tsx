@@ -49,18 +49,20 @@ export function OptionBookCard({ optionBook }: { optionBook: OptionBookResponse 
 
   if (!optionBook.available) {
     return (
-      <Alert>
+      <Alert variant="destructive">
         <AlertTriangle />
-        <AlertTitle>The pinned option rule is not being executed</AlertTitle>
+        <AlertTitle>No options will be traded</AlertTitle>
         <AlertDescription>
-          <ul className="flex flex-col gap-1">
+          <p>
+            The agent has no rule it is allowed to follow, so it will keep
+            watching and never place an order. This is a setup problem, not a
+            market one:
+          </p>
+          <ul className="mt-2 flex list-disc flex-col gap-1 pl-4">
             {optionBook.reasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
-          {optionBook.can_refute_not_confirm ? (
-            <p className="mt-2 italic">{optionBook.can_refute_not_confirm}</p>
-          ) : null}
         </AlertDescription>
       </Alert>
     )
@@ -73,9 +75,8 @@ export function OptionBookCard({ optionBook }: { optionBook: OptionBookResponse 
       <CardHeader>
         <CardDescription className="flex flex-wrap items-center gap-2">
           <FlaskConical className="size-3.5" />
-          the option rule this sleeve executes
-          <Badge variant="outline">{optionBook.status}</Badge>
-          <Badge variant="outline">{optionBook.underlying}</Badge>
+          the one options rule this agent is allowed to trade
+          <Badge variant="outline">trades {optionBook.underlying}</Badge>
         </CardDescription>
         <CardTitle className="font-mono text-base">
           {optionBook.name}{" "}
@@ -94,38 +95,34 @@ export function OptionBookCard({ optionBook }: { optionBook: OptionBookResponse 
         <Separator />
 
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Row term="entry rule" detail={rule.entry_expression} mono />
+          <Row term="when it enters" detail={rule.entry_expression} mono />
           <Row
-            term="verdict"
+            term="how it tested"
             detail={optionSealedVerdict(sealed)}
             tone={sealed.refuted ? "bad" : "neutral"}
           />
-          <Row term="sizing — researched" detail={researchedSizingLabel(rule)} />
-          <Row term="sizing — live" detail={liveSizingLabel(rule)} />
-          <Row term="book as of" detail={optionBook.as_of} />
-          <Row term="generated" detail={clock(optionBook.generated_at)} />
+          <Row term="size, in testing" detail={researchedSizingLabel(rule)} />
+          <Row term="size, live" detail={liveSizingLabel(rule)} />
+          <Row term="rule written on" detail={optionBook.as_of} />
+          <Row term="last rebuilt" detail={clock(optionBook.generated_at)} />
           <Row
-            term="hypotheses searched"
-            detail={`${optionBook.distinct_hypotheses} distinct, ${optionBook.campaign_hypotheses} this campaign — the multiplicity denominator`}
+            term="ideas tried"
+            detail={`${optionBook.campaign_hypotheses} in the search that found this one, ${optionBook.distinct_hypotheses} ever. The more ideas you try, the more likely one looks good by luck — so this number is held against the result, not hidden from it.`}
           />
-          <Row term="selection rule" detail={optionBook.selection_rule} />
-          <Row term="exit convention" detail={optionBook.exit_convention} />
-          <Row term="dataset" detail={optionBook.dataset_version} />
+          <Row term="why this one" detail={optionBook.selection_rule} />
+          <Row term="how it exits" detail={optionBook.exit_convention} />
+          <Row term="data it was tested on" detail={optionBook.dataset_version} />
         </dl>
 
-        <p className="text-muted-foreground border-l-2 pl-3 text-xs italic">
-          The two sizing figures above are deliberately made to agree in
-          dollars: {liveSizingLabel(rule)} was chosen so that this sleeve's
-          live per-trade budget lands on exactly the fraction the sealed run
-          measured. They come from different places and nothing on this side
-          reads the other — <code>agent/sizing.py</code> never consults{" "}
-          <code>risk_per_trade</code>; the agreement is a property of how the
-          sleeve was sized, not a live calculation.
-        </p>
-
-        <p className="text-muted-foreground border-l-2 pl-3 text-xs italic">
-          {optionBook.can_refute_not_confirm ||
-            `The sealed window can refute and cannot confirm: t=${sealed.t_alpha.toFixed(2)} against a bar of ${sealed.significance_bar.toFixed(2)} over ${sealed.observations} sessions is not the same claim as a passed test.`}
+        <p className="text-muted-foreground border-l-2 pl-3 text-xs">
+          <strong>Read the test result above before the numbers.</strong> This
+          rule was tried once against two years of market data that were locked
+          away while it was being designed. It came through without being
+          disproved — but only about 32 separate trades fit into those two
+          years, which is far too few to call it a winner. A test this size can
+          tell you a rule is broken; it can never tell you a rule works. The
+          agent trades it on that basis, and nothing here should be read as a
+          promise that it will make money.
         </p>
       </CardContent>
     </Card>
@@ -133,20 +130,21 @@ export function OptionBookCard({ optionBook }: { optionBook: OptionBookResponse 
 }
 
 function RuleGrid({ rule }: { rule: OptionRule }) {
-  const cells: [string, string][] = [
-    ["structure", rule.structure.replace(/_/g, " ")],
-    ["dte", dteRange(rule)],
-    ["anchor delta", anchorRange(rule)],
-    ["width delta", rule.width_delta.toFixed(2)],
-    ["cadence", cadenceLabel(rule)],
-    ["max concurrent", String(rule.max_concurrent)],
+  const cells: [string, string, string][] = [
+    ["what it trades", rule.structure.replace(/_/g, " "), "the shape of the position"],
+    ["time to expiry", dteRange(rule), "how far out the contracts are"],
+    ["strike it sells", anchorRange(rule), "further from today's price = safer, less paid"],
+    ["strike it buys", rule.width_delta.toFixed(2), "the far leg that caps the loss"],
+    ["how often", cadenceLabel(rule), ""],
+    ["open at once", String(rule.max_concurrent), "hard ceiling"],
   ]
   return (
     <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-      {cells.map(([label, value]) => (
+      {cells.map(([label, value, hint]) => (
         <div key={label}>
           <p className="text-muted-foreground text-xs">{label}</p>
           <p className="text-sm tabular-nums">{value}</p>
+          {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : null}
         </div>
       ))}
     </div>
@@ -163,20 +161,33 @@ function RuleGrid({ rule }: { rule: OptionRule }) {
  * "not refuted" has to do all the work, not the colour around it.
  */
 function SealedFigures({ sealed }: { sealed: OptionSealedRun }) {
-  const figures: [string, string][] = [
-    ["alpha", `${(sealed.alpha * 100).toFixed(2)}%/yr`],
-    ["beta", sealed.beta.toFixed(2)],
-    ["t(alpha)", `${sealed.t_alpha >= 0 ? "+" : ""}${sealed.t_alpha.toFixed(2)}`],
-    ["bar", sealed.significance_bar.toFixed(2)],
-    ["sealed trades", String(sealed.trades)],
-    ["looks", String(sealed.looks)],
+  const figures: [string, string, string][] = [
+    [
+      "return above the market",
+      `${(sealed.alpha * 100).toFixed(2)}%/yr`,
+      "in the locked-away years",
+    ],
+    ["market exposure", sealed.beta.toFixed(2), "1.00 = moves with the market"],
+    [
+      "confidence score",
+      sealed.t_alpha.toFixed(2),
+      `${sealed.significance_bar.toFixed(2)} needed to mean much`,
+    ],
+    ["worst drop", `${(sealed.max_drawdown * 100).toFixed(2)}%`, "peak to trough"],
+    [
+      "trades in the test",
+      String(sealed.trades),
+      "many overlapped, so they count for less",
+    ],
+    ["rules tested this way", String(sealed.looks), "each one raises the bar"],
   ]
   return (
     <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-      {figures.map(([label, value]) => (
+      {figures.map(([label, value, hint]) => (
         <div key={label}>
           <p className="text-muted-foreground text-xs">{label}</p>
           <p className="text-lg tabular-nums">{value}</p>
+          <p className="text-muted-foreground text-xs">{hint}</p>
         </div>
       ))}
     </div>

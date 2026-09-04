@@ -53,13 +53,17 @@ function SleeveCard({
     <Card>
       <CardHeader>
         <CardDescription className="flex flex-wrap items-center gap-2">
-          {accent} sleeve
-          <Badge variant="outline">{fmt(sleeve.allocation, 0)} allocated</Badge>
-          {!sleeve.running ? <Badge variant="secondary">not reporting</Badge> : null}
+          {accent === "options" ? "options half" : "stocks half"}
+          <Badge variant="outline">
+            ${fmt(sleeve.allocation, 0)} set aside for it
+          </Badge>
+          {!sleeve.running ? (
+            <Badge variant="destructive">stopped</Badge>
+          ) : null}
           {sleeve.killswitch_tripped ? (
             <Badge variant="destructive" className="gap-1">
               <ShieldAlert className="size-3" />
-              kill switch latched
+              halted on losses
             </Badge>
           ) : null}
         </CardDescription>
@@ -70,13 +74,17 @@ function SleeveCard({
       <CardContent className="flex flex-col gap-4">
         {sleeve.equity === null ? (
           <p className="text-muted-foreground text-xs">
-            {sleeve.note || "current sleeve equity is not available yet"}
+            {sleeve.note ||
+              "No value to show yet — this half has not reported since it was started."}
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <Stat label="realised" value={sleeve.realised === null ? "—" : fmt(sleeve.realised)} />
             <Stat
-              label="unrealised"
+              label="banked"
+              value={sleeve.realised === null ? "—" : fmt(sleeve.realised)}
+            />
+            <Stat
+              label="on open positions"
               value={sleeve.unrealised === null ? "—" : fmt(sleeve.unrealised)}
             />
           </div>
@@ -85,7 +93,7 @@ function SleeveCard({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between text-sm">
             <span className="text-muted-foreground">
-              drawdown vs its own kill switch
+              down from its best, against its own stop
             </span>
             <span className="tabular-nums">
               {pct(sleeve.drawdown_pct, 2)} / {pct(sleeve.max_drawdown_pct, 0)}

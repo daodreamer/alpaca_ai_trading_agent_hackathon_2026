@@ -67,7 +67,7 @@ import {
   hasStrategy,
   sealedVerdict,
 } from "@/lib/equity"
-import { clock, fmt, num, pct, signed } from "@/lib/status"
+import { clock, fmt, num, pct, signed, stageHint, stageLabel } from "@/lib/status"
 
 export function EquityStatus({
   status,
@@ -86,13 +86,16 @@ export function EquityStatus({
           <EmptyMedia variant="icon">
             <CircleSlash />
           </EmptyMedia>
-          <EmptyTitle>The equity agent has not run yet</EmptyTitle>
+          <EmptyTitle>The stock agent has not run yet</EmptyTitle>
           <EmptyDescription>
-            {state.detail}. Start it with{" "}
+            {state.detail} Start it from the project folder — this one works out
+            every order and places none of them:
+            <br />
             <code className="font-mono">
-              python -m alphagate equity-plan
+              uv run --directory backend python -m alphagate equity-plan
             </code>
-            .
+            <br />
+            This page fills in on its own once it has run.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -142,11 +145,11 @@ function HealthBanner({
       <span className="text-muted-foreground flex items-center gap-1.5 text-sm">
         <Clock className="size-3.5" />
         heartbeat {clock(snapshot.as_of)}
-        {snapshot.next_pass ? ` · rebalance at ${clock(snapshot.next_pass)}` : ""}
+        {snapshot.next_pass ? ` · next rebalance ${clock(snapshot.next_pass)}` : ""}
       </span>
       {snapshot.stale.length > 0 ? (
         <Badge variant="outline" className="ml-auto">
-          {snapshot.stale.length} marks stale — nothing will trade
+          prices are out of date — nothing will trade
         </Badge>
       ) : null}
     </div>
@@ -168,9 +171,8 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
       <CardHeader>
         <CardDescription className="flex flex-wrap items-center gap-2">
           <FlaskConical className="size-3.5" />
-          the strategy this account executes
-          <Badge variant="outline">{strategy.status}</Badge>
-          <Badge variant="outline">{strategy.universe}</Badge>
+          the one stock strategy this agent is allowed to trade
+          <Badge variant="outline">picks from {strategy.universe}</Badge>
         </CardDescription>
         <CardTitle className="font-mono text-base">
           {strategy.name}{" "}
@@ -181,45 +183,65 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
         <p className="text-muted-foreground text-sm">{strategy.hypothesis}</p>
 
         <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <Figure label="alpha" value={`${(sealed.alpha * 100).toFixed(2)}%/yr`} />
-          <Figure label="beta" value={sealed.beta.toFixed(2)} />
           <Figure
-            label="t(alpha)"
-            value={`${sealed.t_alpha >= 0 ? "+" : ""}${sealed.t_alpha.toFixed(2)}`}
+            label="return above the market"
+            value={`${(sealed.alpha * 100).toFixed(2)}%/yr`}
+            hint="in the locked-away years"
+          />
+          <Figure
+            label="market exposure"
+            value={sealed.beta.toFixed(2)}
+            hint="1.00 = moves with the market"
+          />
+          <Figure
+            label="confidence score"
+            value={sealed.t_alpha.toFixed(2)}
+            hint="above ~2.6 is a strong result"
             tone={sealed.is_significant ? "up" : undefined}
           />
           <Figure
-            label="info ratio"
-            value={`${sealed.information_ratio >= 0 ? "+" : ""}${sealed.information_ratio.toFixed(2)}`}
+            label="worst drop"
+            value={`${(sealed.max_drawdown * 100).toFixed(2)}%`}
+            hint="peak to trough"
           />
-          <Figure label="sealed trades" value={String(sealed.trades)} />
-          <Figure label="looks" value={String(sealed.looks)} />
+          <Figure
+            label="trades in the test"
+            value={String(sealed.trades)}
+            hint={`over ${sealed.observations} trading days`}
+          />
+          <Figure
+            label="strategies tested this way"
+            value={String(sealed.looks)}
+            hint="each one raises the bar"
+          />
         </div>
 
         <Separator />
 
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Row term="sealed window" detail={sealed.window} />
+          <Row term="years it was tested on" detail={sealed.window} />
           <Row
-            term="verdict"
+            term="how it tested"
             detail={sealedVerdict(sealed)}
             tone={sealed.refuted ? "bad" : "ok"}
           />
-          <Row term="book as of" detail={strategy.as_of} />
+          <Row term="holdings decided on" detail={strategy.as_of} />
           <Row
-            term="hypotheses searched"
-            detail={`${strategy.distinct_hypotheses} — the multiplicity denominator`}
+            term="ideas tried"
+            detail={`${strategy.distinct_hypotheses}. The more ideas you try, the more likely one looks good by luck — so this number is held against the result, not hidden from it.`}
           />
-          <Row term="selection rule" detail={strategy.selection_rule} />
-          <Row term="dataset" detail={strategy.dataset_version} />
+          <Row term="why this one" detail={strategy.selection_rule} />
+          <Row term="data it was tested on" detail={strategy.dataset_version} />
         </dl>
 
-        <p className="text-muted-foreground border-l-2 pl-3 text-xs italic">
-          The sealed window can refute and cannot confirm: the standard error on
-          an annualised Sharpe over {sealed.observations} sessions is about
-          ±0.71. It also proves only that the embargoed <em>data</em> was not
-          read — not that the embargoed <em>period</em> did not inform a
-          decision.
+        <p className="text-muted-foreground border-l-2 pl-3 text-xs">
+          <strong>What this test can and cannot tell you.</strong> The strategy
+          was designed without access to these {sealed.observations} trading
+          days, then tried against them once. Coming through that is the
+          strongest evidence available here — but it is still only two years,
+          which is not enough to prove any strategy works. It is enough to prove
+          one <em>doesn't</em>, and this one was not caught out. Nothing on this
+          page is a prediction or a recommendation.
         </p>
       </CardContent>
     </Card>
@@ -229,10 +251,12 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
 function Figure({
   label,
   value,
+  hint,
   tone,
 }: {
   label: string
   value: string
+  hint?: string
   tone?: "up" | "down"
 }) {
   return (
@@ -247,6 +271,7 @@ function Figure({
       >
         {value}
       </p>
+      {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : null}
     </div>
   )
 }
@@ -281,23 +306,26 @@ function Money({ snapshot }: { snapshot: EquitySnapshot }) {
   const day = num(snapshot.session_change)
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Stat label="Equity" value={fmt(snapshot.equity)} hint="paper account" />
+      <Stat
+        label="Account value"
+        value={fmt(snapshot.equity)}
+        hint="practice money — none of this is real"
+      />
       <Stat
         label="Today"
         value={signed(snapshot.session_change)}
-        hint="equity less last close"
+        hint="change since yesterday's close"
         tone={day === 0 ? undefined : day > 0 ? "up" : "down"}
       />
       <Stat
         label="Invested"
         value={`${(num(snapshot.gross_exposure) * 100).toFixed(1)}%`}
-        hint={`${snapshot.positions_held} held of ${snapshot.positions_wanted} wanted`}
+        // Not "N of M": the two counts move independently, and right after the
+        // strategy re-picks its list the agent holds more names than it wants,
+        // which "86 of 75" renders as a bug rather than as a pending sell.
+        hint={`${snapshot.positions_held} companies held, ${snapshot.positions_wanted} wanted`}
       />
-      <Stat
-        label="Cash"
-        value={fmt(snapshot.cash)}
-        hint="an idle sleeve holds the benchmark, not cash"
-      />
+      <Stat label="Cash" value={fmt(snapshot.cash)} hint="not yet invested" />
     </div>
   )
 }
@@ -343,11 +371,11 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
     warnings.push(
       <Alert variant="destructive" key="kill">
         <ShieldAlert />
-        <AlertTitle>Kill switch latched</AlertTitle>
+        <AlertTitle>Trading halted — losses hit the safety limit</AlertTitle>
         <AlertDescription>
-          Buys are refused until a human clears it. Sells still go through — the
-          Gate waives a budget for an order that reduces risk, and never for one
-          that adds it.
+          Nothing more will be bought. Selling still works, so the agent can
+          still reduce what it holds. It will not restart itself: someone has to
+          look at what happened and clear it by hand.
         </AlertDescription>
       </Alert>,
     )
@@ -357,10 +385,10 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
     warnings.push(
       <Alert variant="destructive" key="blocked">
         <Ban />
-        <AlertTitle>The broker has blocked this account</AlertTitle>
+        <AlertTitle>The broker has frozen this account</AlertTitle>
         <AlertDescription>
-          Every order will be rejected. Nothing below will happen until it is
-          cleared.
+          Every order will be rejected until the broker lifts it. Your existing
+          holdings are untouched, but nothing below will happen in the meantime.
         </AlertDescription>
       </Alert>,
     )
@@ -371,7 +399,8 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
       <Alert key="unpriced">
         <AlertTriangle />
         <AlertTitle>
-          {snapshot.unpriced.length} names in the book have no price
+          No price available for {snapshot.unpriced.length} holding
+          {snapshot.unpriced.length === 1 ? "" : "s"}
         </AlertTitle>
         <AlertDescription>
           <span className="font-mono text-xs">
@@ -379,8 +408,9 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
             {snapshot.unpriced.length > 24 ? " …" : ""}
           </span>
           <br />
-          They are held rather than traded on a guess. A position we cannot
-          value is one the plan deliberately does not touch.
+          These are left exactly as they are. The agent will not buy or sell
+          something it cannot value, so they are skipped rather than traded on a
+          guess. Everything else continues normally.
         </AlertDescription>
       </Alert>,
     )
@@ -391,16 +421,18 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
       <Alert key="offbook">
         <AlertTriangle />
         <AlertTitle>
-          {snapshot.off_book.length} holdings the book does not want
+          {snapshot.off_book.length} holding
+          {snapshot.off_book.length === 1 ? "" : "s"} the strategy no longer
+          wants
         </AlertTitle>
         <AlertDescription>
           <span className="font-mono text-xs">
             {snapshot.off_book.join(" ")}
           </span>
           <br />
-          They are sold to zero on the next pass. A symbol absent from the book
-          has a target of zero, so its whole position is the drift — there is no
-          separate exit rule, and none to forget to run.
+          These will be sold off completely at the next rebalance. Expected
+          behaviour — the strategy re-picks what it holds every few days, and
+          anything dropped from the list is sold rather than left behind.
         </AlertDescription>
       </Alert>,
     )
@@ -410,14 +442,16 @@ function Warnings({ snapshot }: { snapshot: EquitySnapshot }) {
     warnings.push(
       <Alert key="stale">
         <Clock />
-        <AlertTitle>
-          {snapshot.stale.length} marks are older than the freshness limit
-        </AlertTitle>
+        <AlertTitle>Prices are out of date — nothing will trade</AlertTitle>
         <AlertDescription>
-          Usually this is the whole book at once, and the reason is that the
-          market is closed. Nothing will trade on a stale price: the Gate refuses
-          it, and a plan built on prices from last night is a plan about a market
-          that no longer exists.
+          The broker's last prices for {snapshot.stale.length} holding
+          {snapshot.stale.length === 1 ? "" : "s"} are too old to act on.{" "}
+          <strong>
+            Almost always this just means the US market is closed
+          </strong>{" "}
+          — it is normal outside 09:30–16:00 New York time. The agent refuses to
+          trade on last night's prices, so it will wait. If you see this while
+          the market is open, the price feed is the thing to check.
         </AlertDescription>
       </Alert>,
     )
@@ -448,26 +482,31 @@ function Book({ snapshot }: { snapshot: EquitySnapshot }) {
     <Card>
       <CardHeader>
         <CardDescription className="flex flex-wrap items-center gap-2">
-          the book — target against held
+          what it wants to hold, against what it actually holds
           <span className="text-muted-foreground">
-            band {pct(snapshot.drift_band_pct, 0)} of each position, floor{" "}
-            {fmt(snapshot.min_order_notional, 0)}
+            a holding is only traded once it has drifted more than{" "}
+            {pct(snapshot.drift_band_pct, 0)} away from its target, and never for
+            less than {fmt(snapshot.min_order_notional, 0)} — small corrections
+            cost more in fees than they are worth
           </span>
         </CardDescription>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-          {outside.length} of {snapshot.lines.length} outside the band
+          {outside.length} of {snapshot.lines.length} need adjusting
           <div className="ml-auto flex gap-1">
-            {(["outside", "core", "all"] as Filter[]).map((option) => (
+            {(
+              [
+                ["outside", "needs adjusting", outside.length],
+                ["core", "biggest holdings", core.length],
+                ["all", "everything", snapshot.lines.length],
+              ] as [Filter, string, number][]
+            ).map(([option, label, count]) => (
               <Button
                 key={option}
                 size="sm"
                 variant={option === filter ? "default" : "outline"}
                 onClick={() => setFilter(option)}
               >
-                {option}
-                {option === "outside" ? ` (${outside.length})` : ""}
-                {option === "core" ? ` (${core.length})` : ""}
-                {option === "all" ? ` (${snapshot.lines.length})` : ""}
+                {label} ({count})
               </Button>
             ))}
           </div>
@@ -476,23 +515,24 @@ function Book({ snapshot }: { snapshot: EquitySnapshot }) {
       <CardContent>
         {sorted.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            Nothing here. Every position is inside its own no-trade band, which
-            is the honest answer four sessions in five — the strategy rebalances
-            every five.
+            Nothing needs adjusting — every holding is already close enough to
+            its target. This is the normal answer on roughly four days out of
+            five, because the strategy only re-picks what it holds every five
+            trading days.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>symbol</TableHead>
-                  <TableHead className="text-right">target</TableHead>
+                  <TableHead>company</TableHead>
+                  <TableHead className="text-right">wanted</TableHead>
                   <TableHead className="text-right">held</TableHead>
                   <TableHead className="text-right">value</TableHead>
-                  <TableHead className="text-right">drift</TableHead>
-                  <TableHead className="text-right">band</TableHead>
+                  <TableHead className="text-right">off by</TableHead>
+                  <TableHead className="text-right">allowed</TableHead>
                   <TableHead className="text-right">price</TableHead>
-                  <TableHead>next</TableHead>
+                  <TableHead>what happens</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -516,14 +556,14 @@ function Book({ snapshot }: { snapshot: EquitySnapshot }) {
 function BookRow({ line }: { line: PositionLine }) {
   const drift = num(line.drift)
   const action = line.inside_band
-    ? "hold"
+    ? "leave alone"
     : drift > 0
       ? num(line.held_shares) === 0
-        ? "open"
-        : "buy"
+        ? "buy in"
+        : "buy more"
       : num(line.target_weight) === 0
-        ? "close"
-        : "sell"
+        ? "sell all"
+        : "trim"
 
   return (
     <TableRow>
@@ -560,7 +600,7 @@ function BookRow({ line }: { line: PositionLine }) {
         {line.price === null ? "—" : fmt(line.price)}
       </TableCell>
       <TableCell>
-        <Badge variant={action === "hold" ? "outline" : "secondary"}>
+        <Badge variant={action === "leave alone" ? "outline" : "secondary"}>
           {action}
         </Badge>
       </TableCell>
@@ -573,25 +613,25 @@ function BookRow({ line }: { line: PositionLine }) {
 function Limits({ snapshot }: { snapshot: EquitySnapshot }) {
   const bars = [
     {
-      label: "orders today",
+      label: "orders placed today",
       used: snapshot.orders_today,
       limit: snapshot.max_daily_orders,
       shown: `${snapshot.orders_today} / ${snapshot.max_daily_orders}`,
     },
     {
-      label: "turnover today",
+      label: "money traded today",
       used: num(snapshot.turnover_today),
       limit: num(snapshot.max_daily_turnover),
       shown: `${fmt(snapshot.turnover_today, 0)} / ${fmt(snapshot.max_daily_turnover, 0)}`,
     },
     {
-      label: "invested",
+      label: "share of the account invested",
       used: num(snapshot.gross_exposure),
       limit: 1,
       shown: `${(num(snapshot.gross_exposure) * 100).toFixed(1)}% / 100%`,
     },
     {
-      label: "drawdown",
+      label: "down from its best ever",
       used: num(snapshot.drawdown_pct),
       limit: num(snapshot.max_drawdown_pct),
       shown: `${pct(snapshot.drawdown_pct, 2)} / ${pct(snapshot.max_drawdown_pct, 0)}`,
@@ -602,9 +642,12 @@ function Limits({ snapshot }: { snapshot: EquitySnapshot }) {
     <Card>
       <CardHeader>
         <CardDescription>
-          how much room is left before the Gate refuses
+          Hard ceilings the agent will not trade past. A full bar means it stops
+          itself — that is the system working, not a fault.
         </CardDescription>
-        <CardTitle className="text-base">Limits</CardTitle>
+        <CardTitle className="text-base">
+          How close it is to its safety limits
+        </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2">
         {bars.map((bar) => {
@@ -646,15 +689,21 @@ function Today({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2">
           {Object.entries(snapshot.stage_counts).map(([stage, count]) => (
-            <Badge key={stage} variant="outline">
-              {stage.replace(/_/g, " ")} × {count}
-            </Badge>
+            <div key={stage} className="flex flex-wrap items-baseline gap-2">
+              <Badge variant="outline">
+                {count}× {stageLabel(stage)}
+              </Badge>
+              <span className="text-muted-foreground text-xs">
+                {stageHint(stage)}
+              </span>
+            </div>
           ))}
           {Object.keys(snapshot.stage_counts).length === 0 ? (
             <span className="text-muted-foreground text-sm">
-              no pass has run today
+              The agent has not rebalanced yet today. It does this once, shortly
+              after the market opens.
             </span>
           ) : null}
         </div>
@@ -729,13 +778,15 @@ function OrderRow({ order }: { order: EquityOrder }) {
           <TableCell colSpan={6} className="text-xs">
             {reasons.map((reason) => (
               <p key={reason.check} className="text-destructive">
-                vetoed · {reason.check} — {reason.detail}
+                Not sent — failed the “{reason.check.replace(/_/g, " ")}” safety
+                check: {reason.detail}
               </p>
             ))}
             {waived.map((reason) => (
               <p key={reason.check} className="text-muted-foreground">
-                waived · {reason.check} — {reason.detail} (this order reduces
-                risk)
+                Allowed through despite “{reason.check.replace(/_/g, " ")}”:{" "}
+                {reason.detail}. This order reduces risk, so the limit does not
+                apply to it.
               </p>
             ))}
           </TableCell>

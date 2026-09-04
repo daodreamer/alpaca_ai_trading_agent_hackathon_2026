@@ -116,14 +116,26 @@ class TestFindLatestOptionBook:
 
 class TestResolvePinnedOptionBook:
     def test_no_fingerprint_is_unavailable_with_a_reason(self, tmp_path: Path) -> None:
+        """The reasons render on the dashboard, so they have to be actionable.
+
+        Asserted against the joined text rather than `reasons[0]`: what matters
+        is that a reader is told the consequence *and* the variable to set, not
+        which sentence carries which.
+        """
         view = resolve_pinned_option_book(books_dir=tmp_path, fingerprint="")
         assert not view.available
-        assert OPTION_FINGERPRINT_VAR in view.reasons[0]
+        joined = " ".join(view.reasons)
+        assert OPTION_FINGERPRINT_VAR in joined
+        assert "will not trade options" in joined
 
     def test_no_file_for_the_pin_is_unavailable(self, tmp_path: Path) -> None:
         view = resolve_pinned_option_book(books_dir=tmp_path, fingerprint=FINGERPRINT)
         assert not view.available
-        assert FINGERPRINT in view.reasons[0]
+        joined = " ".join(view.reasons)
+        assert FINGERPRINT in joined
+        # Naming the fingerprint is not enough on its own -- the reader also
+        # needs to know what to run about it.
+        assert "pipeline.py option-book" in joined
 
     def test_a_valid_book_loads(self, tmp_path: Path) -> None:
         write_book(tmp_path, f"rule-{FINGERPRINT}-2024-08-30.json", payload())

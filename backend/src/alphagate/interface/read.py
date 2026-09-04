@@ -59,39 +59,91 @@ CATEGORY_LABELS: dict[str, str] = {
     "approved_not_sent": "approved, not sent",
     "gate_veto": "stopped by the Risk Gate",
     "broker_rejected": "rejected by the broker",
-    "model_declined": "model declined the menu",
-    "undecidable": "entry undecidable — iv_rank unmeasured",
+    "model_declined": "the model passed",
+    "undecidable": "needs volatility history",
     "no_setup": "no qualifying setup",
-    "no_candidates": "no priceable structure",
+    "no_candidates": "nothing tradeable",
     "other": "unclassified",
 }
 """One label per bucket a judge can tell apart — see `CycleView.category`."""
 
+STAGE_LABEL: dict[str, str] = {
+    "no_setup": "no opportunity",
+    "no_candidates": "nothing tradeable",
+    "declined": "model passed",
+    "dry_run": "rehearsal only",
+    "submitted": "order sent",
+    "filled": "order filled",
+    "rejected": "broker refused",
+    "vetoed": "blocked by risk checks",
+    "breached": "risk limit breached",
+    "closed": "position closed",
+    "error": "something went wrong",
+    "planned": "planned, not sent",
+    "no_trades": "nothing to do",
+    "no_marks": "no live prices",
+    "skipped": "skipped",
+}
+"""What each outcome name means, for a reader who has not seen the code.
+
+The journal stores short machine tokens because they are stable to match on;
+a badge reading `no_candidates` tells a person nothing about whether the system
+is healthy. The dashboard carries the same map, and both surfaces show the same
+words for the same fact."""
+
+
+def stage_label(stage: str) -> str:
+    """A stage name anyone can read. Unknown values pass through, tidied."""
+    return STAGE_LABEL.get(stage, stage.replace("_", " "))
+
+
 CATEGORY_DETAIL: dict[str, str] = {
-    "traded": "the proposal passed every check and reached the broker",
+    "traded": "Everything checked out and the order went to the broker.",
     "approved_not_sent": (
-        "the Gate approved this, but the run intentionally did not submit it — "
-        "the pre-open dry run works this way"
+        "The order was approved but deliberately not sent — this run was a rehearsal. "
+        "Drop --dry-run, or use `run` instead of `once`, to trade for real."
     ),
-    "gate_veto": "a proposal was built and the Risk Gate refused it — see the checks below",
-    "broker_rejected": "the Gate approved this and the broker refused it",
-    "model_declined": "the model was shown a menu of candidates and chose not to trade",
+    "gate_veto": (
+        "An order was built and the risk checks refused it. The failing check is "
+        "listed below with the number it saw and the limit it breached. "
+        "Working as intended — this is the safety layer doing its job."
+    ),
+    "broker_rejected": (
+        "The risk checks passed but the broker turned the order down. "
+        "The broker's own reason is below; account permissions and buying power "
+        "are the usual causes."
+    ),
+    "model_declined": (
+        "Tradeable structures were available and the model chose none of them. "
+        "Not an error — declining is a permitted answer."
+    ),
     "undecidable": (
-        "iv_rank could not be measured yet, so the entry rule `iv_rank() < 15` cannot "
-        "be decided — the agent stands aside rather than guessing at the number the "
-        "rule was researched on (specs/07 D1)"
+        "The entry rule compares today's volatility against the past year, and that "
+        "history is missing, so the rule cannot be answered either way. The agent "
+        "stands aside rather than guess. Fix it once with: "
+        "python scripts/pipeline.py iv-seed"
     ),
-    "no_setup": "the market was read and did not meet the entry rule — quiet, not undecided",
+    "no_setup": (
+        "The market was read and did not meet the entry rule. Nothing is wrong — "
+        "this is the normal answer on most days."
+    ),
     "no_candidates": (
-        "the entry rule fired, but nothing survived pricing, freshness, spread, DTE "
-        "and sizing — a menu problem, not an entry problem, and a different fact from "
-        "either `no_setup` bucket above"
+        "The entry rule fired, but no actual spread was tradeable: prices were stale, "
+        "the bid/ask was too wide, no expiry fell in range, or the size rounded to "
+        "zero. The opportunity was real; the contracts to express it were not."
     ),
     "other": "",
 }
-"""A static, note-independent sentence per bucket — shown even when the journal's
-own `note` is empty, so the distinction specs/06 D2 asks for holds regardless of
-how much the writer said that cycle."""
+"""A static, note-independent sentence per bucket.
+
+Shown even when the journal's own `note` is empty, so a reader always gets the
+distinction rather than a blank line.
+
+**Written for someone who has never read this repository.** Each one says what
+happened, whether it is a problem, and where relevant what to type to fix it. No
+spec numbers, no module names, no internal vocabulary: a reader looking at a
+dashboard wants to know whether the system is working, and a citation to a
+document they do not have cannot tell them."""
 
 
 @dataclass(frozen=True, slots=True)

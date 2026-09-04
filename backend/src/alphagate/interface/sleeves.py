@@ -125,7 +125,7 @@ def options_sleeve_view(
         killswitch_tripped=bool(status.get("killswitch_tripped", False)),
         open_positions=len(positions) if isinstance(positions, Sequence) else None,
         activity_today=_int(status.get("fills_today")),
-        activity_label="fills today",
+        activity_label="trades today",
     )
 
 
@@ -192,7 +192,7 @@ def equity_sleeve_view(
         killswitch_tripped=bool(status.get("killswitch_tripped", False)),
         open_positions=_int(status.get("positions_held")),
         activity_today=_int(status.get("orders_today")),
-        activity_label="orders today",
+        activity_label="orders placed today",
         note=note,
     )
 

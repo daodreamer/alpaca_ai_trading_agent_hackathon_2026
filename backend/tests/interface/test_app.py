@@ -55,8 +55,16 @@ class TestRoutes:
             assert f"2026-08-26-SPY-{sequence}" in body
 
     def test_the_quiet_cycles_are_on_the_page(self, client: TestClient) -> None:
-        """specs/06 D2. They are the majority and they are the point."""
-        assert "no_setup" in client.get(f"/day/{DAY}").text
+        """specs/06 D2. They are the majority and they are the point.
+
+        Asserted on the rendered label rather than the stored token: the page
+        exists to be read, and `no_setup` on a badge tells a reader nothing
+        about whether the system is healthy. The token stays in the journal,
+        where it is matched on; the page says what it means.
+        """
+        body = client.get(f"/day/{DAY}").text
+        assert "no opportunity" in body
+        assert "no_setup" not in body
 
     def test_a_cycle_page_carries_the_menu_and_the_checks(self, client: TestClient) -> None:
         body = client.get(f"/cycle/{DAY}/2026-08-26-SPY-002").text

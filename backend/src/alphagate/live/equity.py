@@ -905,18 +905,28 @@ def _place(
         )
         live = _advance(live, intent)
 
+    # These notes are the headline on the dashboard and in `show`, so they are
+    # worded for someone who has not read this file. "intents refused by the
+    # Gate" names two internal concepts and answers neither "what happened" nor
+    # "is that a problem".
+    planned = len(plan.intents)
     if approved == 0:
         return (
             tuple(records),
             EquityStage.VETOED,
-            f"all {len(plan.intents)} intents refused by the Gate",
+            f"all {planned} planned order{'' if planned == 1 else 's'} were "
+            "stopped by the safety checks; nothing was sent",
         )
     stage = EquityStage.SUBMITTED if submit and context.mcp else EquityStage.PLANNED
-    verb = "submitted" if stage is EquityStage.SUBMITTED else "gated, not sent"
+    verb = (
+        "sent to the broker"
+        if stage is EquityStage.SUBMITTED
+        else "passed the safety checks; nothing was sent, this was a rehearsal"
+    )
     return (
         tuple(records),
         stage,
-        f"{approved} of {len(plan.intents)} intents {verb}",
+        f"{approved} of {planned} planned order{'' if planned == 1 else 's'} {verb}",
     )
 
 
@@ -1007,13 +1017,31 @@ def _empty(
     )
 
 
+SKIP_REASON_WORDS: dict[str, str] = {
+    "inside_band": "already close enough to target",
+    "no_mark": "no price available",
+    "stale_mark": "price too old to trade on",
+    "not_tradeable": "not tradeable at the broker",
+    "rounds_to_zero": "target smaller than one share",
+    "already_flat": "already sold out",
+}
+"""Why a symbol was left alone, in words rather than tokens.
+
+This note is the sentence the dashboard and the CLI print when a pass ends
+without trading, so it is often the only explanation anyone reads. `105
+stale_mark` does not tell a reader whether the system is broken; "105 whose
+price was too old to trade on" does, and points at the market being closed
+rather than at a fault."""
+
+
 def _no_trade_note(plan: RebalancePlan) -> str:
     counts = plan.counts()
     inside = counts.get("inside_band", 0)
-    parts = [f"{inside} symbols inside the {plan.band_pct:.0%} band"]
+    parts = [f"{inside} already close enough to target"]
     for reason in sorted(counts):
         if reason != "inside_band":
-            parts.append(f"{counts[reason]} {reason}")
+            words = SKIP_REASON_WORDS.get(reason, reason.replace("_", " "))
+            parts.append(f"{counts[reason]} {words}")
     return "; ".join(parts)
 
 

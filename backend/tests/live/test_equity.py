@@ -342,7 +342,9 @@ def test_a_book_already_held_produces_no_orders(context: EquityContext) -> None:
     record = run_equity_cycle(context, as_of=NOW, submit=True)
     assert record.stage is EquityStage.NO_TRADES
     assert record.orders == ()
-    assert "inside the 20% band" in record.note
+    # The note is often the only explanation anyone reads for a quiet pass, so
+    # it says why in words rather than in the plan's own token names.
+    assert "already close enough to target" in record.note
     assert context.mcp.calls_to(PLACE_STOCK_ORDER_TOOL) == []
 
 
@@ -370,7 +372,10 @@ def test_a_pass_that_priced_nothing_is_not_a_no_trade_day(
     record = run_equity_cycle(context, as_of=NOW, submit=True)
     assert record.stage is EquityStage.NO_MARKS
     assert record.orders == ()
-    assert "3 stale_mark" in record.note
+    # "3 stale_mark" cannot tell a reader whether this is a fault or a closed
+    # market; the sentence it prints now can.
+    assert "3 price too old to trade on" in record.note
+    assert "stale_mark" not in record.note
     assert context.mcp is not None
     assert context.mcp.calls_to(PLACE_STOCK_ORDER_TOOL) == []  # type: ignore[union-attr]
 

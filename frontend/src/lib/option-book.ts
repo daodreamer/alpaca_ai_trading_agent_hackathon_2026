@@ -108,11 +108,14 @@ export type OptionBookResponse = OptionBookAvailable | OptionBookUnavailable
  * confirmed, and this string is not allowed to blur that.
  */
 export function optionSealedVerdict(sealed: OptionSealedRun): string {
-  if (sealed.refuted) return "refuted by the sealed window"
-  const t = `${sealed.t_alpha >= 0 ? "+" : ""}${sealed.t_alpha.toFixed(2)}`
+  if (sealed.refuted) {
+    return "Disproved on the held-back years — this rule is not allowed to trade."
+  }
+  const t = sealed.t_alpha.toFixed(2)
+  const bar = sealed.significance_bar.toFixed(2)
   return sealed.is_significant
-    ? `not refuted · t=${t} clears the bar at ${sealed.looks} look${sealed.looks === 1 ? "" : "s"}`
-    : `not refuted · t=${t} does not clear the bar`
+    ? `Survived a test on two years of market data it had never seen, by a comfortable margin (score ${t}, needed ${bar}). That is the strongest verdict available: this test can disprove a rule, never prove one.`
+    : `Was not disproved on two years of market data it had never seen, but the margin is far too small to read anything into (score ${t}, needed ${bar}). It runs because it survived, not because it was proven.`
 }
 
 export function dteRange(rule: OptionRule): string {
@@ -138,7 +141,7 @@ export function cadenceLabel(rule: OptionRule): string {
  */
 export function researchedSizingLabel(rule: OptionRule): string {
   const pct = (Number(rule.risk_per_trade) * 100).toFixed(1)
-  return `researched at ${pct}% of equity per trade (specs/10 D8a)`
+  return `${pct}% of the account per trade, during research`
 }
 
 /**
@@ -156,5 +159,5 @@ export function liveSizingLabel(rule: OptionRule): string {
   const budget = Number(rule.live_trade_budget).toLocaleString(undefined, {
     maximumFractionDigits: 0,
   })
-  return `$${budget} per trade live — ${pct}% of the $${allocation} sleeve, ${rule.max_concurrent} concurrent max`
+  return `$${budget} at risk per trade — ${pct}% of the $${allocation} set aside for options, and at most ${rule.max_concurrent} open at once`
 }

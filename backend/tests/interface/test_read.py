@@ -456,9 +456,18 @@ class TestCategory:
         assert to_cycle({"stage": "declined"}).category == "model_declined"
 
     def test_no_setup_with_unmeasured_iv_rank_is_undecidable(self) -> None:
+        """The label and detail both render on the dashboard.
+
+        This bucket is the one a reader is most likely to misread as "the
+        market was quiet", because from the outside the two look identical. So
+        the label has to name the missing input rather than the internal field,
+        and the detail has to say what to run — a reader who has never opened
+        this repository cannot act on the word `iv_rank`.
+        """
         view = to_cycle({"stage": "no_setup", "read": {"iv_rank": None}})
         assert view.category == "undecidable"
-        assert "iv_rank" in view.category_label
+        assert "volatility history" in view.category_label
+        assert "pipeline.py iv-seed" in view.category_detail
 
     def test_no_candidates_is_its_own_category_whether_or_not_iv_rank_is_measured(
         self,

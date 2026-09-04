@@ -205,12 +205,12 @@ export function clock(iso: string | null | undefined): string {
  * this is the difference.
  */
 export function untilNext(iso: string | null): string {
-  if (!iso) return "session over"
+  if (!iso) return "not until the market opens again"
   const seconds = (new Date(iso).getTime() - Date.now()) / 1000
   if (Number.isNaN(seconds)) return "—"
-  if (seconds <= 0) return "due now"
+  if (seconds <= 0) return "any moment now"
   const minutes = Math.floor(seconds / 60)
-  return minutes >= 1 ? `in ${minutes}m` : `in ${Math.floor(seconds)}s`
+  return minutes >= 1 ? `in ${minutes} min` : `in ${Math.floor(seconds)}s`
 }
 
 /**
@@ -238,6 +238,63 @@ export type DeclineCategory =
   | "other"
 
 /**
+ * What each outcome name means, for someone who has not read the code.
+ *
+ * The backend writes these as short machine tokens (`no_setup`, `dry_run`), and
+ * a badge reading `no_candidates` tells a reader nothing about whether the
+ * system is healthy. `stageLabel` is what goes on the badge; `stageHint` is the
+ * one-line explanation beside it, and every one of them answers the same
+ * question: is this normal, or is something wrong?
+ */
+const STAGE_LABEL: Record<string, string> = {
+  no_setup: "no opportunity",
+  no_candidates: "nothing tradeable",
+  declined: "model passed",
+  dry_run: "rehearsal only",
+  submitted: "order sent",
+  filled: "order filled",
+  rejected: "broker refused",
+  vetoed: "blocked by risk checks",
+  breached: "risk limit breached",
+  closed: "position closed",
+  error: "something went wrong",
+  planned: "planned, not sent",
+  no_trades: "nothing to do",
+  no_marks: "no live prices",
+  skipped: "skipped",
+}
+
+const STAGE_HINT: Record<string, string> = {
+  no_setup: "The market did not meet the entry rule. Normal on most days.",
+  no_candidates:
+    "The entry rule fired but no actual contract was tradeable — stale prices, too wide a spread, or nothing in the right expiry.",
+  declined: "Tradeable options existed and the model chose not to take them. Not an error.",
+  dry_run: "A rehearsal — everything was worked out and deliberately not sent.",
+  submitted: "An order went to the broker.",
+  filled: "An order went to the broker and was executed.",
+  rejected: "The broker turned an order down. Usually account permissions or buying power.",
+  vetoed: "The risk checks stopped an order before it was sent. The safety layer working.",
+  breached: "A safety limit was crossed. The agent stops rather than trading through it.",
+  closed: "An existing position was closed.",
+  error: "The cycle failed. Check the detail below and the terminal running the agent.",
+  planned: "Orders were worked out and deliberately not sent — this was a rehearsal.",
+  no_trades: "Everything already matches the target closely enough. Normal on most days.",
+  no_marks:
+    "The broker returned no usable prices, so nothing was traded. Almost always means the market is closed.",
+  skipped: "Left alone on purpose.",
+}
+
+/** A badge label anyone can read. Unknown values pass through, tidied. */
+export function stageLabel(stage: string): string {
+  return STAGE_LABEL[stage] ?? stage.replace(/_/g, " ")
+}
+
+/** One line saying whether that outcome is a problem. `""` when there is nothing to add. */
+export function stageHint(stage: string): string {
+  return STAGE_HINT[stage] ?? ""
+}
+
+/**
  * What the whole system is doing, in one word, for the header.
  *
  * The order is a priority order, not a checklist: a latched kill switch matters
@@ -254,24 +311,27 @@ export function health(status: StatusResponse): Health {
   const snapshot = status.snapshot
   if (!snapshot) {
     return {
-      label: "never run",
+      label: "not started",
       tone: "idle",
-      detail: "no status.json yet — run the agent once to produce one",
+      detail: "The options agent has never run, so there is nothing to show yet.",
     }
   }
   if (!status.running) {
-    const age = status.age_seconds ?? 0
+    const minutes = Math.round((status.age_seconds ?? 0) / 60)
+    const ago =
+      minutes < 1 ? "under a minute ago" : minutes === 1 ? "a minute ago" : `${minutes} minutes ago`
     return {
-      label: "not running",
+      label: "stopped",
       tone: "bad",
-      detail: `last heartbeat ${Math.round(age / 60)} minutes ago`,
+      detail: `The agent last checked in ${ago} and has gone quiet. Nothing is being watched or traded until it is restarted.`,
     }
   }
   if (snapshot.killswitch_tripped) {
     return {
-      label: "kill switch latched",
+      label: "halted — kill switch",
       tone: "bad",
-      detail: "opens are blocked until a human clears it",
+      detail:
+        "Losses hit the safety limit, so the agent has stopped opening new positions. It will not resume on its own; a person has to clear it.",
     }
   }
   if (snapshot.is_blocked || !snapshot.can_trade_spreads) {
@@ -279,20 +339,26 @@ export function health(status: StatusResponse): Health {
       label: "cannot trade",
       tone: "bad",
       detail: snapshot.is_blocked
-        ? "the broker has blocked this account"
-        : `options level ${snapshot.options_level}; spreads need 3`,
+        ? "The broker has frozen this account, so every order will be rejected."
+        : `This account is approved for options level ${snapshot.options_level}, and the spreads this agent trades need level 3. Every order will be rejected until that is raised.`,
     }
   }
   if (snapshot.unexplained.length > 0) {
     return {
-      label: "unexplained legs",
+      label: "running — check positions",
       tone: "warn",
-      detail: `${snapshot.unexplained.length} broker legs the journal cannot account for`,
+      detail: `Trading normally, but ${snapshot.unexplained.length} position${
+        snapshot.unexplained.length === 1 ? " is" : "s are"
+      } open at the broker that this agent did not place, so ${
+        snapshot.unexplained.length === 1 ? "it is" : "they are"
+      } not covered by its risk limits.`,
     }
   }
   return {
     label: "running",
     tone: "ok",
-    detail: snapshot.note || `slot ${snapshot.slot_sequence}`,
+    detail:
+      snapshot.note ||
+      `Watching ${snapshot.universe.join(", ") || "the market"} and re-checking every 15 minutes.`,
   }
 }

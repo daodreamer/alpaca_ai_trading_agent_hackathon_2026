@@ -48,6 +48,7 @@ from alphagate.interface.read import (
     available_days,
     day_records_with_category,
     day_view,
+    stage_label,
 )
 from alphagate.interface.sleeves import build_sleeve_overview
 from alphagate.interface.status import (
@@ -348,17 +349,23 @@ def _header(subtitle: str, days: Sequence[date] = (), current: date | None = Non
 def _empty_page(directory: Path) -> str:
     return _page(
         "AlphaGate",
-        _header("no journal yet")
-        + "<main><div class='panel'><h2>nothing journalled</h2>"
-        f"<p>No <code>*.jsonl</code> files in <code>{html.escape(str(directory))}</code>.</p>"
-        "<p class='note'>Run <code>python -m alphagate run --dry-run</code> to produce a day."
+        _header("the agent has not run yet")
+        + "<main><div class='panel'><h2>Nothing to show yet</h2>"
+        "<p>The agent records what it decided every time it looks at the market, "
+        "and it has not written anything yet — so it has not run, rather than "
+        "run and found nothing.</p>"
+        "<p class='note'>Start it from the project folder. This rehearses a whole "
+        "day and places no orders:<br>"
+        "<code>uv run --directory backend python -m alphagate run --dry-run</code>"
+        "</p>"
+        f"<p class='note'>Records are read from <code>{html.escape(str(directory))}</code>."
         "</p></div></main>",
     )
 
 
 def _stage_tag(stage: str) -> str:
     colour = STAGE_COLOURS.get(stage, "#8b949e")
-    return f"<span class='tag' style='color:{colour}'>{html.escape(stage)}</span>"
+    return f"<span class='tag' style='color:{colour}'>{html.escape(stage_label(stage))}</span>"
 
 
 def _day_page(view: DayView, days: Sequence[date]) -> str:
