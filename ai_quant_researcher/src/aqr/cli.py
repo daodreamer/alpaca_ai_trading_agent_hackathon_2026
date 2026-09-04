@@ -2001,7 +2001,7 @@ def option_features() -> None:
     """The option research vocabulary: structures, then features.
 
     Separate from ``aqr features`` because the two vocabularies are separate
-    (CLAUDE.md §2b). This one is the union an option entry expression parses
+    (CLAUDE.md §2). This one is the union an option entry expression parses
     against -- specs/10 D6's table *and* the unchanged bar registry -- so a rule
     may say ``iv_rank() > 50 and close > sma(200)`` in one expression.
     """

@@ -478,7 +478,7 @@ def test_alphagate_never_imports_the_researcher() -> None:
     `ai_quant_researcher` holds no money and places no orders, so it has no
     `Decimal` rule and no Risk Gate; AlphaGate has both. An import in either
     direction would make one project's invariants the other's problem, which
-    CLAUDE.md §2b already says not to do.
+    CLAUDE.md §2 already says not to do.
 
     Checked as an import rather than as a dependency declaration because the
     dependency is what would be *noticed*. A stray `sys.path` append and a
@@ -530,7 +530,7 @@ def test_no_script_holds_both_projects() -> None:
     This is the half of guard 9 that applies outside `pipeline.py`. A script
     importing `aqr` is a researcher tool and one importing `alphagate` is a
     trading tool; a script importing both has merged the two projects into a
-    single process, and every invariant CLAUDE.md §2b keeps apart — `Decimal`,
+    single process, and every invariant CLAUDE.md §2 keeps apart — `Decimal`,
     the Risk Gate, the LLM boundary — is then shared by accident rather than by
     design.
     """

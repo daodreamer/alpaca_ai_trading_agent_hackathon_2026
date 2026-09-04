@@ -129,7 +129,7 @@ DEFAULT_VOLATILITY_HISTORY = str(
 )
 """The vendor volatility table `iv-seed` reads by default.
 
-Also a path, not an import (CLAUDE.md §2b, specs/09 D0): `iv-seed` opens this
+Also a path, not an import (CLAUDE.md §2, specs/09 D0): `iv-seed` opens this
 file with the stdlib `csv` module and hands parsed rows to
 `IvHistoryStore.seed_from_vendor_history`, so this process never imports
 anything under `ai_quant_researcher/src/aqr` — `tests/test_boundaries.py`
@@ -886,7 +886,7 @@ def cmd_iv_seed(args: argparse.Namespace) -> int:
     `IvHistoryStore.seed_from_vendor_history` — the only contact this process
     has with anything `ai_quant_researcher` produced. No `aqr` import, no
     `sys.path` reach into its source; the seam stays a file, both directions
-    (CLAUDE.md §2b, `tests/test_boundaries.py` guard 9).
+    (CLAUDE.md §2, `tests/test_boundaries.py` guard 9).
 
     **The trailing window is load-bearing, not a convenience default.**
     `options/volatility.py` ranks the current reading against *every*

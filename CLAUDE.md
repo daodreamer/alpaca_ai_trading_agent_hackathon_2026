@@ -1,173 +1,195 @@
-# CLAUDE.md — AlphaGate（Alpaca AI Trading Agents Hackathon, 2026-08-28 → 09-04）
+# CLAUDE.md — AlphaGate (Alpaca AI Trading Agents Hackathon, 2026-08-28 → 09-04)
 
 ## 1. Role
 
-你是本项目的 AI 软件工程协作者。这是一个 7 天单人 hackathon 项目，采用 SDD + TDD。
-先读 `specs/`，再写代码。
+You are the AI software-engineering collaborator on this project. It is a 7-day
+solo hackathon project built with SDD + TDD. Read `specs/` first, then write code.
 
-## 2. 与上游项目的关系
+## 2. What this file governs
 
-`alphagate.core` 和 `alphagate.infra` 是从 Personal Market Monitor 抽取的既有代码
-（见 [adr/0001-core-reuse.md](adr/0001-core-reuse.md)）。**不要重写、不要"顺手改进"、
-不要重构它们。** 它们已经 green，改动只会消耗比赛时间。
+**Sections 3 to 7 apply to `backend/` only.**
 
-上游 CLAUDE.md 的第 14 条"不实现自动交易或下单"**在本仓库不适用**——本项目的核心
-就是在 Alpaca paper 账户上下期权单。这是有意的、有范围限定的例外：仅限 paper
-trading，永不接真实资金。其余架构纪律全部继承。
+`ai_quant_researcher/` is a different project living in the same repository — the
+equity strategy research system that implements
+[specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md).
+It has its own `pyproject.toml`, its own venv, its own tests and its own boundary
+tests, and it **imports nothing from `alphagate`**.
 
-## 2b. 本文件的适用范围
+It holds no money (so there is no `Decimal` requirement), places no orders (so
+there is no Risk Gate) and never touches Alpaca. Its LLM boundary is enforced by
+its own
+[tests/test_boundaries.py](ai_quant_researcher/tests/test_boundaries.py).
 
-**第 3 到第 7 条只管 `backend/`。**
+The two projects answer different questions and are kept apart deliberately.
+**Do not try to "unify" them**, and do not carry AlphaGate's invariants across —
+in either direction. When changing `ai_quant_researcher/`, use its own commands
+(see the README in that directory), not the ones in section 6.
 
-`ai_quant_researcher/` 是同仓库里的另一个项目——实现
-[specs/trading_strategy_architecture.md](specs/trading_strategy_architecture.md)
-的股票策略研究系统。它有自己的 `pyproject.toml`、自己的 venv、自己的测试和自己的
-边界测试，**不 import `alphagate` 的任何东西**。
+**The interface between them is files, and nothing else.** There are three of
+them today, all one-way (the research side writes, `backend/` reads):
 
-它不持有钱（所以没有 `Decimal` 要求）、不下单（所以没有 Risk Gate）、不碰 Alpaca。
-它的 LLM 边界由它自己的
-[tests/test_boundaries.py](ai_quant_researcher/tests/test_boundaries.py) 强制。
-
-两个项目回答的是不同的问题，刻意保持隔离。**不要去"统一"它们**，也不要把
-AlphaGate 的 invariant 搬过去或反过来。改动 `ai_quant_researcher/` 时用它自己的
-命令（见该目录的 README），不要用第 6 节的命令。
-
-**两者之间的接口只有文件，没有别的**。现在有三个，都是单向的（研究端写，
-`backend/` 读）：
-
-| 文件 | 谁写 | 承载什么 |
+| File | Written by | Carries |
 | --- | --- | --- |
-| `runs/target_books/*.json` | `aqr target-book` | 股票的权重向量（specs/09 D0） |
-| `runs/option_books/*.json` | `aqr option-book` | 期权的**规则**，故意不含行权价（specs/07 D1） |
-| `data-options-sealed/volatility_history/SPY.csv` | `aqr options-pull` | `alphagate iv-seed` 读的隐含波动率历史 |
+| `runs/target_books/*.json` | `aqr target-book` | the equity weight vector (specs/09 D0) |
+| `runs/option_books/*.json` | `aqr option-book` | the option **rule**, deliberately without strikes (specs/07 D1) |
+| `data-options-sealed/volatility_history/SPY.csv` | `aqr options-pull` | the implied-volatility history that `alphagate iv-seed` reads |
 
-期权 book 里没有行权价是有意的：周二收盘写下的 5480 到周三开盘就是错的，所以走的
-是规则，由执行端对着实时链自己解析——这也是为什么 `backend/` 必须有自己的 delta
-选腿代码而不能 import `aqr.options.chain`。
+The absence of strikes in the option book is deliberate: a 5480 written down at
+Tuesday's close is already wrong at Wednesday's open, so what travels is the
+rule, and the execution side resolves it against the live chain itself — which is
+also why `backend/` must have its own delta leg-selection code and cannot import
+`aqr.options.chain`.
 
-第三行是文件而不是函数调用，理由同上：`iv-seed` 用标准库 `csv` 读，把解析好的
-mapping 交给 `IvHistoryStore.seed_from_vendor_history`，不 import 任何 `aqr` 的
-东西。
+The third row is a file rather than a function call for the same reason:
+`iv-seed` reads it with the standard-library `csv` module and hands the parsed
+mapping to `IvHistoryStore.seed_from_vendor_history`, importing nothing from
+`aqr`.
 
-两边都不 import 对方，`backend/tests/test_boundaries.py` 的 guard 9 双向强制这一点，
-`scripts/pipeline.py` 也只用 subprocess 调两边的 CLI。
+Neither side imports the other. Guard 9 in `backend/tests/test_boundaries.py`
+enforces that in both directions, and `scripts/pipeline.py` only ever invokes the
+two CLIs as subprocesses.
 
-想加"共享一个常量"或"直接调对方一个函数"的时候：那正是这条线存在的原因。
+When you feel the urge to "just share one constant" or "just call one function on
+the other side": that urge is exactly why this line exists.
 
 ## 3. Non-negotiable rules
 
-1. `core` / `options` / `risk` 三层是 pure：只依赖标准库和彼此。由
-   `backend/tests/test_boundaries.py` 强制，不靠自觉。
-2. **只有 `agent/` 可以调用 LLM。** Risk Gate 里出现模型调用，Gate 就不再是 Gate。
-3. **所有到达 Alpaca 的订单都经过 Risk Gate。** 没有 bypass、没有 `force=True`、
-   没有 debug 开关。`execution/` 只接受 `GatedOrder`，而 `GatedOrder` 只有
-   `risk.gate` 能构造。
-4. 钱是 `Decimal`，端到端。Greeks 和 IV 是 `float`（它们是估计值，不是钱）。
-5. 所有时间 tz-aware UTC。Gate 和 domain 不读时钟，时间永远是参数传入。
-6. **不做裸卖期权。** 结构在类型层面就不可表达（specs/02 D3）。
-7. Domain 运算 deterministic：同输入同配置必须同结果，包括 checks 的顺序。
-8. 不允许 look-ahead bias。回测和实盘走同一条代码路径，唯一差别是时钟。
-9. 不接真实资金、不做投资建议。产出是 agent 状态和理由，不是买卖建议。
-10. 不泄露 API key / account id 到日志、journal、dashboard 或 demo 视频。
+1. The `core` / `options` / `risk` layers are pure: they depend only on the
+   standard library and on each other. Enforced by
+   `backend/tests/test_boundaries.py`, not by good intentions.
+2. **Only `agent/` may call an LLM.** A model call inside the Risk Gate means the
+   Gate is no longer a Gate.
+3. **Every order that reaches Alpaca goes through the Risk Gate.** No bypass, no
+   `force=True`, no debug switch. `execution/` accepts only a `GatedOrder`, and
+   only `risk.gate` can construct a `GatedOrder`.
+4. Money is `Decimal`, end to end. Greeks and IV are `float` (they are estimates,
+   not money).
+5. All times are tz-aware UTC. The Gate and the domain never read the clock; time
+   is always passed in as an argument.
+6. **No naked short options.** The structure is unrepresentable at the type level
+   (specs/02 D3).
+7. Domain computations are deterministic: the same inputs and the same
+   configuration must give the same result, including the order of the checks.
+8. No look-ahead bias. Backtest and live trading run the same code path; the only
+   difference is the clock.
+9. No real money, no investment advice. The output is agent state and reasoning,
+   not buy/sell recommendations.
+10. Never leak an API key or account id into logs, the journal, the dashboard or
+    the demo video.
 
 ## 4. TDD
 
-RED → GREEN → REFACTOR。`options/` 和 `risk/` 是正确性面，必须先写测试。
-`agent/`、`interface/`、dashboard 可以务实推进——别为 dashboard 的 type stub
-花比赛时间。
+RED → GREEN → REFACTOR. `options/` and `risk/` are the correctness surface, so
+tests come first there. `agent/`, `interface/` and the dashboard can be moved
+pragmatically — do not spend hackathon time on type stubs for the dashboard.
 
-不得为了让测试通过而削弱 invariant。不得用 mock 掩盖真实行为。
+Never weaken an invariant to make a test pass. Never use a mock to paper over
+real behaviour.
 
-## 5. 时间纪律（这是 hackathon，不是产品）
+## 5. Time discipline (this is a hackathon, not a product)
 
-- 每天结束前 commit，保持 main 可运行。
-- 任何超过 2 小时没有产出的方向，停下来重新评估。
-- 9/3 之后只做演示、文档和 bug 修复，不加功能。
-- 交易要尽早跑起来：目标 ≥ 30 笔成交，最晚 D3 上线。
+- Commit before the end of each day, and keep `main` runnable.
+- Any direction that goes more than 2 hours without an outcome: stop and
+  re-evaluate.
+- After Sep 3, only demo work, documentation and bug fixes — no new features.
+- Get trading running early: target ≥ 30 fills, live by D3 at the latest.
 
-## 6. 常用命令
+## 6. Common commands
 
-在仓库根目录执行。CLI 的默认路径锚定在仓库根，所以不用加参数。
+Run these from the repository root. The CLI's default paths are anchored to the
+repository root, so no arguments are needed.
 
-| 目的 | 命令 |
+| Purpose | Command |
 | --- | --- |
-| 测试 | `uv run --directory backend --extra dev pytest` |
+| tests | `uv run --directory backend --extra dev pytest` |
 | lint | `uv run --directory backend --extra dev ruff check .` |
-| 类型检查 | `uv run --directory backend --extra dev mypy` |
-| 开盘前体检 | `uv run --directory backend python -m alphagate preflight` |
-| 跑一个周期（默认不下单） | `uv run --directory backend python -m alphagate once` |
-| 跑一整天 | `uv run --directory backend python -m alphagate run [--dry-run]` |
-| 看当前状态 | `uv run --directory backend python -m alphagate status` |
-| 看某天的日志 | `uv run --directory backend python -m alphagate show [-v] [--day YYYY-MM-DD]` |
+| type check | `uv run --directory backend --extra dev mypy` |
+| pre-open health check | `uv run --directory backend python -m alphagate preflight` |
+| one cycle (does not trade by default) | `uv run --directory backend python -m alphagate once` |
+| run a whole day | `uv run --directory backend python -m alphagate run [--dry-run]` |
+| current state | `uv run --directory backend python -m alphagate status` |
+| one day's log | `uv run --directory backend python -m alphagate show [-v] [--day YYYY-MM-DD]` |
 | dashboard | `uv run --directory backend python -m alphagate serve` |
 
-股票侧（执行 `ai_quant_researcher` 验证过的那一个策略，见 specs/09）：
+Equity side (executing the one strategy `ai_quant_researcher` validated, see
+specs/09):
 
-| 目的 | 命令 |
+| Purpose | Command |
 | --- | --- |
-| 只跑股票这条链 | `python scripts/pipeline.py --only equity` |
-| 只演练，不下单 | `python scripts/pipeline.py --only equity --dry-run` |
-| 开盘前体检（book + 账户） | `uv run --directory backend python -m alphagate equity-preflight` |
-| 一次再平衡，只过 Gate 不下单 | `uv run --directory backend python -m alphagate equity-plan` |
-| 一次再平衡，真下单 | `uv run --directory backend python -m alphagate equity-rebalance` |
-| 跑一整天（心跳 + 一次再平衡） | `uv run --directory backend python -m alphagate equity-run [--dry-run]` |
-| 看当前持仓与偏离 | `uv run --directory backend python -m alphagate equity-status` |
+| run only the equity chain | `python scripts/pipeline.py --only equity` |
+| rehearse only, no orders | `python scripts/pipeline.py --only equity --dry-run` |
+| pre-open health check (book + account) | `uv run --directory backend python -m alphagate equity-preflight` |
+| one rebalance, through the Gate but no orders | `uv run --directory backend python -m alphagate equity-plan` |
+| one rebalance, orders for real | `uv run --directory backend python -m alphagate equity-rebalance` |
+| run a whole day (heartbeat + one rebalance) | `uv run --directory backend python -m alphagate equity-run [--dry-run]` |
+| current holdings and drift | `uv run --directory backend python -m alphagate equity-status` |
 
-期权侧（执行 `ai_quant_researcher` 验证过的那一条期权规则，见 specs/07 D1、
-specs/10）：
+Options side (executing the one option rule `ai_quant_researcher` validated, see
+specs/07 D1 and specs/10):
 
-| 目的 | 命令 |
+| Purpose | Command |
 | --- | --- |
-| 只跑期权这条链 | `python scripts/pipeline.py --only options` |
-| 只演练，不下单 | `python scripts/pipeline.py --only options --dry-run` |
-| 两条链都跑（股票先） | `python scripts/pipeline.py` |
-| 补 IV 历史（`iv_rank` 的输入） | `uv run --directory backend python -m alphagate iv-seed` |
+| run only the options chain | `python scripts/pipeline.py --only options` |
+| rehearse only, no orders | `python scripts/pipeline.py --only options --dry-run` |
+| run both chains (equity first) | `python scripts/pipeline.py` |
+| top up the IV history (the input to `iv_rank`) | `uv run --directory backend python -m alphagate iv-seed` |
 
-`ALPHAGATE_STRATEGY_FINGERPRINT` 和 `ALPHAGATE_OPTION_FINGERPRINT` 都必须在
-`.env.local` 里钉死。这是"只执行研究端验证过的那个策略"这句话唯一可校验的地方
-——fingerprint 不匹配的 book 会被 `load_target_book` / `load_option_book` 按名字
-拒掉，**没有默认值是故意的**。两个 pin 是分开的：两条 sleeve 执行的是两条不同的
-规则，各自对着不同的封存窗口验证过，一个 pin 管两边会让"当时跑的是哪条规则"在它们
-分叉的那一刻起就无法回答——而它们已经分叉了。
+Both `ALPHAGATE_STRATEGY_FINGERPRINT` and `ALPHAGATE_OPTION_FINGERPRINT` must be
+pinned in `.env.local`. This is the only checkable place where "we execute only
+the strategy the research side validated" means anything — a book whose
+fingerprint does not match is rejected by name by `load_target_book` /
+`load_option_book`, and **the absence of a default is deliberate**. The two pins
+are separate: the two sleeves execute two different rules, each validated against
+a different sealed window, and a single pin covering both would make "which rule
+was running at the time" unanswerable from the moment they diverged — and they
+have already diverged.
 
-`iv-seed` 没有股票侧的对应物，也不是优化。研究出来的规则入口是 `iv_rank() < 15`，
-而 `iv_rank` 需要一年的隐含波动率历史，Alpaca 不签 OPRA 就不给
-（见 `agent/iv_store.py`）。没播种的话规则不是"假"，是**无法判定**，agent 每个
-cycle 都会站在一边——从外面看和市场安静一模一样。所以它每个交易日跑一次。
+`iv-seed` has no equity-side counterpart, and it is not an optimisation. The
+entry condition of the researched rule is `iv_rank() < 15`, and `iv_rank` needs a
+year of implied-volatility history, which Alpaca will not give you without an
+OPRA subscription (see `agent/iv_store.py`). Without seeding, the rule is not
+"false" but **undecidable**, and the agent stands aside every cycle — which from
+the outside looks exactly like a quiet market. So it runs once every trading day.
 
-## 6b. 两条 sleeve 的资金分割
+## 6b. How the two sleeves split the money
 
-$100,000 的账户，一次性分成两份，之后不再随市值浮动：
+A $100,000 account, split once and then held fixed rather than drifting with
+market value:
 
-| Sleeve | 分配 | 常量 |
+| Sleeve | Allocation | Constant |
 | --- | --- | --- |
-| 股票 | $90,000 | `equity/policy.py` 的 `EQUITY_SLEEVE_ALLOCATION` |
-| 期权 | $10,000 | `risk/limits.py` 的 `OPTIONS_SLEEVE_ALLOCATION` |
+| Equity | $90,000 | `EQUITY_SLEEVE_ALLOCATION` in `equity/policy.py` |
+| Options | $10,000 | `OPTIONS_SLEEVE_ALLOCATION` in `risk/limits.py` |
 
-两者之和必须等于账户总额，有测试强制——Alpaca 只有一个 buying power 池子，不知道
-什么叫 sleeve，这个分割只在加得起来的时候才有意义。
+The two must sum to the account total, and a test enforces it — Alpaca has one
+buying-power pool and knows nothing about sleeves, so this split only means
+anything while it adds up.
 
-期权侧是 $10,000 而不是更小，理由是算出来的而不是凑的：规则卖 0.16 delta 的 SPY
-put、买 0.08 delta 的翼，实测一张的最大亏损是 $1,389；$5,000 的 sleeve 每笔预算
-只有 $1,000，`agent/sizing.py` 会把张数向下取整到 **0**，规则永远开不出仓——而且
-在日志里看起来和"市场没机会"一模一样。$10,000 下每笔预算正好 $2,000，等于研究端
-跑的 sizing（$100,000 的 2%，specs/10 D8a）。
+The options side is $10,000 rather than something smaller for a computed reason,
+not a chosen one: the rule sells the 0.16-delta SPY put and buys the 0.08-delta
+wing, and the measured max loss of one contract is $1,389. A $5,000 sleeve gives
+a per-trade budget of only $1,000, `agent/sizing.py` floors the contract count to
+**0**, and the rule can never open a position — and in the logs that looks
+exactly like "no opportunity in the market". At $10,000 the per-trade budget is
+exactly $2,000, matching the sizing the research side ran (2% of $100,000,
+specs/10 D8a).
 
-前端（dashboard 的 Live 页，Vite + React + shadcn/ui）：
+Frontend (the dashboard's Live page, Vite + React + shadcn/ui):
 
-| 目的 | 命令 |
+| Purpose | Command |
 | --- | --- |
-| 构建进 Python 包 | `cd frontend && npm run build` |
-| 开发模式 | `cd frontend && npm run dev` |
-| 检查 | `cd frontend && npx eslint . && npm run typecheck` |
+| build into the Python package | `cd frontend && npm run build` |
+| dev mode | `cd frontend && npm run dev` |
+| checks | `cd frontend && npx eslint . && npm run typecheck` |
 
-**`run` 不加 `--dry-run` 就是真下单。** `once` 默认不下单，`run` 默认下单——
-调试用的命令不该会顺手下单，而跑一整天本来就是要交易。
+**`run` without `--dry-run` places real orders.** `once` does not trade by
+default, `run` does — a command you use for debugging should not casually place
+orders, and running a whole day is meant to trade in the first place.
 
 ## 7. Definition of Done
 
-- spec 已存在且明确
-- 正向 + 边界 + 确定性测试覆盖
-- 无 look-ahead
-- 错误路径有处理，且可观测
-- pytest / ruff / mypy 全绿（改了 `frontend/` 还要 eslint / tsc 全绿）
+- the spec exists and is unambiguous
+- covered by positive, boundary and determinism tests
+- no look-ahead
+- error paths are handled and observable
+- pytest / ruff / mypy all green (plus eslint / tsc green if `frontend/` changed)

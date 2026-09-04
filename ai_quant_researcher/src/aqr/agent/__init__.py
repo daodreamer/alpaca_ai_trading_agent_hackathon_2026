@@ -7,7 +7,7 @@ no longer an independent judge of the model's own proposals.
 Two searches live here and they share nothing but the plumbing. ``prompts.py`` /
 ``proposer.py`` / ``research.py`` are the equity side; ``option_prompt.py`` /
 ``option_proposer.py`` / ``option_research.py`` are the option side. The two
-vocabularies are unmixed on purpose (CLAUDE.md §2b, specs/10 D5): an equity
+vocabularies are unmixed on purpose (CLAUDE.md §2, specs/10 D5): an equity
 prompt talks about stops, targets and holding periods, and every one of those
 words is a lie about a structure held to expiry.
 """

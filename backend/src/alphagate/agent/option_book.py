@@ -13,7 +13,7 @@ which half was populated. The consumer here is a risk gate.
 
 `ai_quant_researcher` writes this artefact and stops. It does not import
 `alphagate` and `alphagate` does not import it — the file is the whole interface
-(CLAUDE.md §2b, specs/09 D0). Which means this module is where an unvalidated
+(CLAUDE.md §2, specs/09 D0). Which means this module is where an unvalidated
 rule would get in, and so it is the module with the least freedom.
 
 **The fingerprint is pinned by the operator, not read from the book.** Same

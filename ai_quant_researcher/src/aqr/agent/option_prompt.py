@@ -1,7 +1,7 @@
 """Prompt construction for the *option* research agent — specs/10 D4, D5, D6.
 
 A sibling of [`prompts.py`](prompts.py), deliberately not an extension of it.
-The two vocabularies are unmixed on purpose (CLAUDE.md §2b): an equity prompt
+The two vocabularies are unmixed on purpose (CLAUDE.md §2): an equity prompt
 enumerates ``REGISTRY`` and talks about stops, targets and holding periods, and
 every one of those words is a lie on a structure held to expiry. A model handed
 the equity prompt with three fields renamed would propose ``manage at 50%`` and

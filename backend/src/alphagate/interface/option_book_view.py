@@ -2,7 +2,7 @@
 
 `ai_quant_researcher` writes an option book; `agent/option_book.py` is the one
 module that may read one and turn it into something the executor can act on
-(CLAUDE.md §2b). This module does neither of those things — it never sizes a
+(CLAUDE.md §2). This module does neither of those things — it never sizes a
 position and it is not on the path that decides what the agent does. It exists
 so the dashboard can show *the same artefact the executor is pinned to*,
 without the interface package importing `alphagate.live` to get at it.

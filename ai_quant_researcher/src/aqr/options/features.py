@@ -30,7 +30,7 @@ care which vocabulary a given ``Call`` node belongs to.
 **Why a wrapper frame rather than registering option features into
 ``aqr.features.registry.REGISTRY`` directly:** that registry is also the
 vocabulary an equity ``StrategySpec`` is validated against and the list an
-equity proposer prompt enumerates (CLAUDE.md §2b: the two projects' vocabularies
+equity proposer prompt enumerates (CLAUDE.md §2: the two projects' vocabularies
 stay deliberately unmixed). Registering into it would make ``iv_rank()`` parse
 as a *valid but broken* equity feature -- syntactically legal, and an
 ``AssertionError`` three layers down the first time anything tried to evaluate

@@ -33,7 +33,7 @@ That is not fastidiousness. The two projects answer different questions and hold
 different invariants — the researcher holds no money and places no orders, so it
 has no `Decimal` rule and no Risk Gate; AlphaGate holds both. An import would
 make one project's invariants the other's problem, and
-[CLAUDE.md](../CLAUDE.md) §2b already says not to reconcile them.
+[CLAUDE.md](../CLAUDE.md) §2 already says not to reconcile them.
 
 The file is also what makes the claim auditable. A book carries its own
 fingerprint, seal state, sealed-run measurement and both multiplicity

@@ -1,16 +1,16 @@
 # AI Quant Researcher
 
-> AI 驱动的量化策略研究、回测、验证与自动进化平台
+> An AI-driven platform for quantitative strategy research, backtesting, validation and automated evolution.
 >
-> 目标：利用 LLM + Machine Learning + Quantitative Research 自动发现具有统计优势、能够跨市场 Regime 泛化的交易策略。
+> Goal: use LLM + Machine Learning + Quantitative Research to automatically discover trading strategies that hold a statistical edge and generalise across market regimes.
 >
-> 非 HFT 系统，主要面向分钟级、小时级、日级以及数日持仓策略。
+> Not an HFT system. It targets minute-, hour- and day-level strategies, plus positions held for several days.
 
-## 1. 项目目标
+## 1. Project goals
 
-### 1.1 核心目标
+### 1.1 Core goal
 
-构建一个自动化 Quant Research Lab：
+Build an automated Quant Research Lab:
 
 ```
 Market Data / News
@@ -36,22 +36,22 @@ Performance Feedback
 Strategy Research
 ```
 
-系统的核心不是让 LLM 直接预测股票价格，而是：
+The core of the system is not to have the LLM predict stock prices directly. It is to:
 
-1. 发现市场中的潜在规律
-2. 生成交易假设
-3. 将假设转化为可执行策略
-4. 自动进行历史回测
-5. 自动检测过拟合
-6. 进行 Out-of-Sample 验证
-7. 在 Paper Trading 中验证
-8. 根据真实交易结果继续优化
+1. Find latent regularities in the market
+2. Generate trading hypotheses
+3. Turn hypotheses into executable strategies
+4. Run historical backtests automatically
+5. Detect overfitting automatically
+6. Run out-of-sample validation
+7. Confirm in paper trading
+8. Keep improving from real trading results
 
-## 2. 核心设计原则
+## 2. Core design principles
 
-### 2.1 LLM 不直接负责交易
+### 2.1 The LLM is not responsible for trading
 
-LLM 不直接执行：
+The LLM does not directly perform:
 
 - BUY
 - SELL
@@ -59,7 +59,7 @@ LLM 不直接执行：
 - Stop loss execution
 - Order execution
 
-LLM 主要负责：
+The LLM is responsible for:
 
 - Strategy research
 - Hypothesis generation
@@ -70,9 +70,9 @@ LLM 主要负责：
 - Backtest analysis
 - Research iteration
 
-最终交易决策必须由确定性的 Strategy Engine / ML Model / Risk Engine 执行。
+The final trading decision must be made by a deterministic Strategy Engine / ML Model / Risk Engine.
 
-## 3. 系统总体架构
+## 3. Overall system architecture
 
 ```
                          ┌──────────────────────┐
@@ -185,11 +185,11 @@ LLM 主要负责：
                                   LLM Research Agent
 ```
 
-## 4. 系统模块
+## 4. System modules
 
 ### 4.1 Data Layer
 
-负责获取和存储所有研究数据。
+Responsible for fetching and storing all research data.
 
 #### Market Data
 
@@ -203,7 +203,7 @@ LLM 主要负责：
 - Short Interest
 - Options
 
-主要时间周期：
+Main timeframes:
 
 - 1m
 - 5m
@@ -214,7 +214,7 @@ LLM 主要负责：
 - 1D
 - 1W
 
-MVP：
+MVP:
 
 - 5m
 - 15m
@@ -232,12 +232,12 @@ MVP：
 - Author
 - URL
 
-必须保存：
+Must be stored:
 
 - `event_time`
 - `ingestion_time`
 
-防止 Look-Ahead Bias。
+To prevent look-ahead bias.
 
 #### Fundamental Data
 
@@ -267,7 +267,7 @@ MVP：
 
 ### 4.2 Data Storage
 
-推荐：
+Recommended:
 
 ```
 Raw Data
@@ -277,11 +277,11 @@ Parquet
 DuckDB
 ```
 
-用于研究。
+For research.
 
-Production：`PostgreSQL`
+Production: `PostgreSQL`
 
-用于：
+For:
 
 - Strategy metadata
 - Signals
@@ -290,7 +290,7 @@ Production：`PostgreSQL`
 - Performance
 - Research experiments
 
-Redis 用于：
+Redis for:
 
 - Cache
 - Real-time state
@@ -299,9 +299,9 @@ Redis 用于：
 
 ## 5. Feature Engine
 
-Feature Engine 不使用 LLM 计算基础指标。
+The Feature Engine does not use an LLM to compute base indicators.
 
-这些应该使用确定性代码计算。
+Those must be computed with deterministic code.
 
 ### 5.1 Technical Features
 
@@ -367,22 +367,22 @@ Volume percentile
 
 ## 6. News / Event Engine
 
-这是本项目非常重要的模块。
+This is a very important module in this project.
 
-目标：
+Goal:
 
-> 将非结构化新闻转换成结构化 Market Event。
+> Turn unstructured news into structured Market Events.
 
 ### 6.1 LLM News Extraction
 
-输入：
+Input:
 
 - Headline
 - Article
 - Company
 - Time
 
-输出：
+Output:
 
 ```json
 {
@@ -421,7 +421,7 @@ Volume percentile
 
 ### 6.3 Event Score
 
-定义：
+Definition:
 
 ```
 Event Score =
@@ -431,7 +431,7 @@ Materiality
 × Market Relevance
 ```
 
-例如：
+For example:
 
 ```
 FDA Approval
@@ -445,9 +445,9 @@ Event Score = 0.795
 
 ## 7. Market Regime Engine
 
-目标：
+Goal:
 
-> 判断当前市场环境，而不是预测具体价格。
+> Judge the current market environment, rather than predict a specific price.
 
 ### Regime
 
@@ -480,52 +480,53 @@ Momentum dispersion
 
 ## 8. LLM Research Agent
 
-这是整个系统的“大脑”。
+This is the "brain" of the whole system.
 
-但是 LLM 不直接交易。
+But the LLM does not trade directly.
 
-### 8.1 Research Agent 的任务
+### 8.1 What the Research Agent does
 
-1. 分析历史实验
-2. 发现潜在规律
-3. 提出 Hypothesis
-4. 设计 Factor
-5. 生成 Strategy
-6. 分析失败原因
-7. 修改 Strategy
-8. 生成新的 Experiment
+1. Analyse past experiments
+2. Find latent regularities
+3. Propose a hypothesis
+4. Design factors
+5. Generate a strategy
+6. Analyse why something failed
+7. Revise the strategy
+8. Generate a new experiment
 
 ### 8.2 Strategy Hypothesis
 
-例如：
+For example:
 
 ```
 Hypothesis:
 
-当市场处于 Bull Trend 时：
+When the market is in a bull trend:
 
 SPY > EMA200
 ADX > 20
 
-同时：
+and at the same time:
 
-Price pullback 到 EMA20
+price pulls back to EMA20
 RSI > 40
 RVOL > 1.2
 
-那么：
+then:
 
-未来 3 个交易日上涨概率
-可能显著高于 baseline。
+the probability of a rise over the next
+3 trading days may be significantly
+higher than baseline.
 ```
 
 ### 8.3 Strategy DSL
 
-不要让 LLM 随便生成 Python。
+Do not let the LLM emit arbitrary Python.
 
-推荐设计自己的 DSL。
+Design your own DSL instead.
 
-例如：
+For example:
 
 ```yaml
 strategy:
@@ -559,7 +560,7 @@ strategy:
       bars: 20
 ```
 
-这样可以：
+That gives you:
 
 ```
 LLM
@@ -571,13 +572,13 @@ Validator
 Backtester
 ```
 
-避免 LLM 生成恶意或错误代码。
+and avoids the LLM generating malicious or incorrect code.
 
 ## 9. Strategy Generator
 
-Strategy Generator 将 LLM 的 Hypothesis 转换成标准 Strategy。
+The Strategy Generator turns the LLM's hypothesis into a standard strategy.
 
-### Strategy 必须包含
+### A strategy must contain
 
 - Universe
 - Entry
@@ -592,11 +593,11 @@ Strategy Generator 将 LLM 的 Hypothesis 转换成标准 Strategy。
 
 ## 10. Backtest Engine
 
-Backtester 是系统核心。
+The backtester is the core of the system.
 
-必须模拟真实交易。
+It must simulate real trading.
 
-### 必须考虑
+### Must account for
 
 - Commission
 - Spread
@@ -627,17 +628,17 @@ Backtester 是系统核心。
 - Exposure
 - Turnover
 
-## 11. 防止 Look-Ahead Bias
+## 11. Preventing look-ahead bias
 
-这是系统最高优先级之一。
+This is one of the highest priorities in the system.
 
-错误的做法：
+The wrong way:
 
 ```
-在 2026-01-01 使用 2026-01-02 的数据
+using data from 2026-01-02 on 2026-01-01
 ```
 
-必须保证：
+It must hold that:
 
 ```
 signal_time
@@ -645,14 +646,14 @@ signal_time
 available_time
 ```
 
-所有数据必须记录：
+Every piece of data must record:
 
 - `event_time`
 - `available_time`
 
 ## 12. Train / Validation / Test
 
-推荐：
+Recommended:
 
 ```
 Historical Data
@@ -662,15 +663,15 @@ Historical Data
 └── Test        20%
 ```
 
-关键规则：
+The key rule:
 
-> LLM 不允许看到 Test 数据。
+> The LLM is not allowed to see the test data.
 
 ## 13. Walk Forward Validation
 
-固定 Train/Test 不够。
+A fixed train/test split is not enough.
 
-使用：
+Use:
 
 ```
 Train
@@ -696,21 +697,21 @@ Test
 2025
 ```
 
-最终：`Average OOS Performance`
+Final metric: `Average OOS Performance`
 
 ## 14. Robustness Testing
 
-策略必须通过多个测试。
+A strategy must pass several tests.
 
 ### 14.1 Parameter Perturbation
 
-例如：
+For example:
 
 ```
 EMA = 20
 ```
 
-测试：
+Test:
 
 - 15
 - 18
@@ -718,7 +719,7 @@ EMA = 20
 - 22
 - 25
 
-如果：
+If:
 
 ```
 20 → Sharpe 2.1
@@ -726,11 +727,11 @@ EMA = 20
 21 → Sharpe 0.3
 ```
 
-说明严重过拟合。
+that is severe overfitting.
 
 ### 14.2 Market Test
 
-测试：
+Test:
 
 - Bull Market
 - Bear Market
@@ -740,9 +741,9 @@ EMA = 20
 
 ### 14.3 Asset Test
 
-不能只测试：`SPY`
+Do not test only `SPY`.
 
-应该：
+Test:
 
 - SPY
 - QQQ
@@ -756,13 +757,13 @@ EMA = 20
 
 ### 14.4 Monte Carlo
 
-对交易序列进行：
+Apply to the trade sequence:
 
 - Random shuffle
 - Bootstrap
 - Trade resampling
 
-估计：
+To estimate:
 
 - Expected Drawdown
 - Worst Case Drawdown
@@ -770,9 +771,9 @@ EMA = 20
 
 ## 15. Strategy Evaluator
 
-Evaluator 给每个策略一个综合评分。
+The evaluator gives every strategy a composite score.
 
-例如：
+For example:
 
 ```
 Strategy Score
@@ -804,7 +805,7 @@ STATUS: ACCEPT
 
 ## 16. Overfitting Detector
 
-必须检测：
+Must detect:
 
 - Parameter count
 - Number of experiments
@@ -817,7 +818,7 @@ STATUS: ACCEPT
 
 ### 16.1 Experiment Database
 
-每一次实验都必须保存。
+Every experiment must be stored.
 
 - `experiment_id`
 - `strategy_id`
@@ -834,13 +835,13 @@ STATUS: ACCEPT
 - `code_hash`
 - `dataset_version`
 
-这样才能知道：
+That is the only way to know:
 
-> LLM 到底尝试过什么。
+> what the LLM actually tried.
 
 ## 17. Strategy Registry
 
-只有通过验证的策略才能进入 Registry。
+Only a validated strategy may enter the registry.
 
 ```
 Strategy Registry
@@ -855,7 +856,7 @@ Strategy Registry
 
 ## 18. Paper Trading
 
-通过：
+Through:
 
 ```
 Real Market Data
@@ -869,13 +870,13 @@ Virtual Order
 Virtual Position
 ```
 
-持续至少：`30 - 90 days`
+Run for at least `30 - 90 days`.
 
-根据策略频率决定。
+The exact length depends on the strategy's frequency.
 
 ## 19. Live Trading
 
-Live Trading 必须和 Research Environment 隔离。
+Live trading must be isolated from the research environment.
 
 ```
 Research
@@ -885,9 +886,9 @@ Research
 Live Trading
 ```
 
-LLM 不应该拥有：`Direct Broker API`
+The LLM must not hold a `Direct Broker API`.
 
-推荐：
+Recommended:
 
 ```
 Strategy
@@ -903,7 +904,7 @@ Broker
 
 ## 20. Risk Engine
 
-Risk Engine 必须是 deterministic code。
+The Risk Engine must be deterministic code.
 
 ### Risk Rules
 
@@ -916,7 +917,7 @@ Risk Engine 必须是 deterministic code。
 - Max leverage
 - Max number of positions
 
-例如：
+For example:
 
 ```
 Risk per trade = 0.5%
@@ -930,7 +931,7 @@ Maximum sector exposure = 30%
 
 ## 21. Position Sizing
 
-推荐支持：
+Recommended to support:
 
 - Fixed Fractional
 - ATR Position Sizing
@@ -938,7 +939,7 @@ Maximum sector exposure = 30%
 - Kelly Fraction
 - Risk Parity
 
-例如：
+For example:
 
 ```
 Risk = 0.5% portfolio
@@ -956,7 +957,7 @@ Shares = 500 / 5
 
 ## 22. News-driven Strategy
 
-本项目的重要特色。
+A distinctive part of this project.
 
 ### Pipeline
 
@@ -987,7 +988,7 @@ Company X Phase III trial
 successfully meets primary endpoint.
 ```
 
-LLM：
+LLM:
 
 ```
 Event Type:
@@ -1003,7 +1004,7 @@ Confidence:
 0.98
 ```
 
-Market：
+Market:
 
 ```
 Premarket:
@@ -1022,7 +1023,7 @@ Gap:
 +35%
 ```
 
-系统：
+System:
 
 ```
 Event Score = 0.84
@@ -1034,13 +1035,13 @@ Technical Score = 0.87
 Final Score = 0.89
 ```
 
-进入策略模型。
+This then feeds the strategy model.
 
 ## 23. ML Prediction Layer
 
-LLM 不负责最终数值预测。
+The LLM is not responsible for the final numeric prediction.
 
-使用：
+Use:
 
 - LightGBM
 - XGBoost
@@ -1061,7 +1062,7 @@ LLM 不负责最终数值预测。
 
 ### Output
 
-例如：
+For example:
 
 ```
 P(return > 3% within 1 day)
@@ -1071,7 +1072,7 @@ P(return < -3% within 1 day)
 
 ## 24. Signal Engine
 
-最终信号：
+The final signal:
 
 ```
 LLM Event Score
@@ -1087,7 +1088,7 @@ Risk Constraints
 Signal Engine
 ```
 
-输出：
+Output:
 
 ```json
 {
@@ -1103,9 +1104,9 @@ Signal Engine
 
 ## 25. Strategy Evolution
 
-这是系统的核心创新之一。
+One of the core innovations of the system.
 
-每次实验：
+Each experiment:
 
 ```
 Strategy
@@ -1121,7 +1122,7 @@ Improvement
 New Strategy
 ```
 
-例如：
+For example:
 
 ```
 Momentum_v1
@@ -1132,7 +1133,7 @@ Sharpe = 0.82
 
 Momentum_v2
 
-加入 Market Regime
+add Market Regime
 
 Sharpe = 1.21
 
@@ -1140,7 +1141,7 @@ Sharpe = 1.21
 
 Momentum_v3
 
-加入 RVOL
+add RVOL
 
 Sharpe = 1.48
 
@@ -1148,18 +1149,18 @@ Sharpe = 1.48
 
 Momentum_v4
 
-增加 volatility filter
+add a volatility filter
 
 Sharpe = 1.52
 ```
 
-但是：
+But:
 
-> 只有 OOS performance 提升才允许晋级。
+> Only an improvement in OOS performance may be promoted.
 
 ## 26. Multi-Agent Architecture
 
-推荐最终使用：
+Recommended as the eventual shape:
 
 ```
                     ┌───────────────┐
@@ -1190,37 +1191,37 @@ Sharpe = 1.52
 
 ### Research Lead
 
-负责：
+Responsible for:
 
-- 研究方向
-- 实验规划
-- 策略选择
+- research direction
+- experiment planning
+- strategy selection
 
 ### Strategy Agent
 
-负责：`Trading Strategy`
+Responsible for: `Trading Strategy`
 
 ### Factor Agent
 
-负责：
+Responsible for:
 
 - Factor discovery
 - Feature engineering
 
 ### News Agent
 
-负责：
+Responsible for:
 
 - Event extraction
 - Event classification
 
 ### Backtest Agent
 
-负责：`Backtest analysis`
+Responsible for: `Backtest analysis`
 
 ### Critic Agent
 
-负责：
+Responsible for:
 
 - Overfitting
 - Bias
@@ -1228,11 +1229,11 @@ Sharpe = 1.52
 
 ### Risk Agent
 
-负责：`Risk assessment`
+Responsible for: `Risk assessment`
 
 ## 28. LLM Memory
 
-系统必须保存：
+The system must store:
 
 - Research History
 - Hypothesis
@@ -1242,13 +1243,13 @@ Sharpe = 1.52
 - Successful Strategy
 - Rejected Strategy
 
-LLM 下一次研究时读取：`Previous experiments`
+The LLM reads `Previous experiments` at the start of the next research round,
 
-避免重复探索。
+so it does not explore the same ground twice.
 
 ## 29. Research Knowledge Graph
 
-可以建立：
+You can build:
 
 ```
 Strategy
@@ -1264,7 +1265,7 @@ Strategy
    └── failed_in → Regime
 ```
 
-例如：
+For example:
 
 ```
 Momentum Strategy
@@ -1284,9 +1285,9 @@ best_assets:
 
 ## 30. API Architecture
 
-推荐：`FastAPI`
+Recommended: `FastAPI`
 
-API：
+API:
 
 - `GET /market/{ticker}`
 - `GET /features/{ticker}`
@@ -1301,9 +1302,9 @@ API：
 
 ## 31. Task Queue
 
-研究任务不应该同步执行。
+Research tasks should not run synchronously.
 
-使用：
+Use:
 
 ```
 Redis
@@ -1311,7 +1312,7 @@ Redis
 Celery / Dramatiq
 ```
 
-例如：
+For example:
 
 ```
 POST /research/experiment
@@ -1339,13 +1340,13 @@ Result
 
 ## 32. Scheduler
 
-使用：
+Use:
 
 - Cron
 - Airflow
 - Prefect
 
-任务：
+Jobs:
 
 - Daily Data Update
 - Daily Feature Calculation
@@ -1354,7 +1355,7 @@ Result
 - Weekly Strategy Evaluation
 - Monthly Strategy Retirement
 
-## 33. 推荐技术栈
+## 33. Recommended tech stack
 
 ### Backend
 
@@ -1380,20 +1381,20 @@ Result
 
 ### LLM
 
-支持：
+Supported:
 
 - OpenAI
 - Anthropic
 - Google
 - Local LLM
 
-LLM 应通过统一接口调用。
+The LLM should be called through a single unified interface.
 
 ### Backtesting
 
-MVP：`VectorBT`
+MVP: `VectorBT`
 
-或者：`Custom Event-driven Backtester`
+Or: `Custom Event-driven Backtester`
 
 ### Frontend
 
@@ -1402,7 +1403,7 @@ MVP：`VectorBT`
 - Next.js
 - TradingView Lightweight Charts
 
-Dashboard：
+Dashboard:
 
 - Market Monitor
 - Strategy Monitor
@@ -1487,7 +1488,7 @@ Dashboard：
 
 ## 35. Observability
 
-必须记录：
+Must be recorded:
 
 - LLM calls
 - Token usage
@@ -1499,7 +1500,7 @@ Dashboard：
 - Dataset version
 - Trading decisions
 
-使用：
+Use:
 
 - OpenTelemetry
 - Prometheus
@@ -1507,13 +1508,13 @@ Dashboard：
 
 ## 36. Security
 
-LLM：
+The LLM:
 
 - NO direct broker access
 - NO direct database write
 - NO arbitrary shell access
 
-LLM 只能：
+The LLM may only:
 
 - Read Research Data
 - Generate DSL
@@ -1521,19 +1522,19 @@ LLM 只能：
 - Request Backtest
 - Read Results
 
-所有执行：`Sandbox`
+All execution happens in a `Sandbox`.
 
 ## 37. MVP
 
-第一阶段不要做全部功能。
+Do not build every feature in the first phase.
 
 ### MVP v0.1
 
-目标：
+Goal:
 
-> 自动发现技术分析策略。
+> Automatically discover technical-analysis strategies.
 
-只支持：
+Supports only:
 
 - US Stocks
 - Daily OHLCV
@@ -1543,7 +1544,7 @@ LLM 只能：
 - Walk Forward
 - Strategy Ranking
 
-Pipeline：
+Pipeline:
 
 ```
 OHLCV
@@ -1563,7 +1564,7 @@ Ranking
 
 ## 38. MVP v0.2
 
-增加：
+Adds:
 
 - 5m / 15m data
 - Volume
@@ -1574,7 +1575,7 @@ Ranking
 
 ## 39. MVP v0.3
 
-增加：
+Adds:
 
 - News
 - LLM Event Extraction
@@ -1584,7 +1585,7 @@ Ranking
 
 ## 40. MVP v0.4
 
-增加：
+Adds:
 
 - Multi-Agent
 - Strategy Evolution
@@ -1592,9 +1593,9 @@ Ranking
 - Automated Research
 - Strategy Retirement
 
-## 41. 最终版本
+## 41. Final version
 
-最终系统：
+The final system:
 
 ```
              MARKET DATA
@@ -1647,19 +1648,19 @@ Ranking
           └───────────────→ Research LLM
 ```
 
-## 42. 最重要的设计思想
+## 42. The most important design idea
 
-这个系统最终不是：
+In the end this system is not:
 
 ```
 LLM
  ↓
-预测股票
+predict the stock
  ↓
 BUY
 ```
 
-而是：
+but:
 
 ```
                     ┌─────────────┐
@@ -1702,15 +1703,15 @@ BUY
                             Research
 ```
 
-## 43. 核心成功标准
+## 43. Core success criteria
 
-系统成功不应该定义为：
+Success must not be defined as:
 
 ```
 Backtest Sharpe > 2
 ```
 
-而应该定义为：
+It must be defined as:
 
 ```
 OOS positive expectancy
@@ -1728,11 +1729,11 @@ Paper trading confirmation
 Live performance consistency
 ```
 
-最终目标：
+The ultimate goal:
 
-> **发现具有真实、稳定、可重复统计优势的交易策略，而不是发现历史数据中表现最好的策略。**
+> **Discover trading strategies with a real, stable, repeatable statistical edge — not the strategy that performed best on historical data.**
 
-## 44. 推荐开发顺序
+## 44. Recommended development order
 
 ```
 Phase 1
@@ -1772,44 +1773,44 @@ Phase 12
 Live Trading
 ```
 
-## 45. 最终目标
+## 45. Ultimate goal
 
-建立一个能够持续运行的：
+Build something that can keep running on its own:
 
 ### AI Quant Research Lab
 
-它每天自动：
+Every day it automatically:
 
 ```
-获取数据
+fetch data
    ↓
-分析市场
+analyse the market
    ↓
-分析新闻
+analyse the news
    ↓
-识别 Regime
+identify the regime
    ↓
-寻找异常
+look for anomalies
    ↓
-生成 Hypothesis
+generate a hypothesis
    ↓
-生成策略
+generate a strategy
    ↓
-回测
+backtest
    ↓
-验证
+validate
    ↓
-淘汰过拟合策略
+discard overfitted strategies
    ↓
-保存优秀策略
+keep the good ones
    ↓
-Paper Trading
+paper trade
    ↓
-评估真实表现
+evaluate real performance
    ↓
-继续研究
+keep researching
 ```
 
-最终形成：
+What this adds up to:
 
-> **一个能够持续进行 Quantitative Research，而不是单纯进行股票预测的 AI 系统。**
+> **An AI system that keeps doing quantitative research, rather than one that merely predicts stock prices.**

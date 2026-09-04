@@ -126,7 +126,7 @@ the hand-written structures whose results are in the table above.
 
 New `src/aqr/agent/option_proposer.py` and `option_prompt.py`, alongside the
 equity `proposer.py` — **not inside it**. The two vocabularies are deliberately
-unmixed (CLAUDE.md §2b), and the option prompt must enumerate specs/10 D6's
+unmixed (CLAUDE.md §2), and the option prompt must enumerate specs/10 D6's
 feature table and D4's structure whitelist, not the equity registry.
 
 The model emits `OptionSpec` **fields**, never code, never a price, never a

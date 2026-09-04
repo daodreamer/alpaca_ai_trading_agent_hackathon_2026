@@ -1,7 +1,7 @@
 """Where option hypotheses come from — specs/10-options-research.md D4, D5.
 
 The same three-part shape as [`proposer.py`](proposer.py), and deliberately not
-the same module: the two vocabularies stay unmixed (CLAUDE.md §2b), so an equity
+the same module: the two vocabularies stay unmixed (CLAUDE.md §2), so an equity
 proposal cannot acquire a ``structure_type`` and an option proposal cannot
 acquire a ``stop_loss_atr_multiple``. What *is* shared is the part worth
 sharing — the :class:`~aqr.agent.proposer.Proposal` container, the repair loop's

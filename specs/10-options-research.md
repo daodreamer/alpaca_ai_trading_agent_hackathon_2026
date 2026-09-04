@@ -1,7 +1,7 @@
 # 10 — Options research: exploring option strategies the way equities are explored
 
 Where this lives: **`ai_quant_researcher/`**, alongside the equity search, under
-[CLAUDE.md](../CLAUDE.md) §2b. It holds no money, places no orders and imports
+[CLAUDE.md](../CLAUDE.md) §2. It holds no money, places no orders and imports
 no `alphagate`. The same three sentences that make the equity side safe make
 this side safe, and for the same reasons.
 

@@ -813,7 +813,7 @@ placement — and it never will, here. This project finds strategies; execution 
 a different system with different invariants" — true as written, rather than
 requiring it to be argued away.
 
-It also keeps `CLAUDE.md` §2b intact in the direction that matters. §2b says the
+It also keeps `CLAUDE.md` §2 intact in the direction that matters. §2 says the
 two projects are isolated and `ai_quant_researcher` must not import `alphagate`.
 A handoff respects that: this project writes a file, and whatever executes reads
 it. Neither imports the other, and the file is the whole interface.

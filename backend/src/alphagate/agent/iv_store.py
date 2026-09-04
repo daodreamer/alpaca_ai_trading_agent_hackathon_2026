@@ -163,7 +163,7 @@ class IvHistoryStore:
         back to 2019, which is exactly what this store wants and needs no
         entitlement at all.
 
-        **Why this does not breach CLAUDE.md §2b.** It takes parsed rows, not a
+        **Why this does not breach CLAUDE.md §2.** It takes parsed rows, not a
         path and not a researcher object: the caller reads a CSV and hands over
         mappings, so the seam between the two projects stays a file in this
         direction too. Nothing here imports `aqr`, and `tests/test_boundaries.py`
