@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AlphaGate &mdash; frozen dashboard</title>
+    <meta name="description" content="A read-only snapshot of the AlphaGate trading dashboard, taken while both sleeves were live on an Alpaca paper account." />
+    <style>
+      #snapshot-banner {
+        font: 13px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+        background: #1A5673; color: #EAF2F6;
+        padding: 9px 16px; display: flex; flex-wrap: wrap;
+        gap: 6px 18px; align-items: baseline;
+      }
+      #snapshot-banner b { letter-spacing: .12em; text-transform: uppercase; font-weight: 600; }
+      #snapshot-banner span { opacity: .85; }
+      #snapshot-banner a { color: #EAF2F6; text-underline-offset: 3px; }
+      @media (max-width: 620px) { #snapshot-banner { font-size: 12px; } }
+    </style>
+    <script>
+      // This page is a frozen copy of the real dashboard: the same React build,
+      // served with the JSON its API returned at the moment of the snapshot.
+      // There is no backend here and no credentials -- the live agent runs
+      // locally against an Alpaca paper account and is never exposed.
+      (function () {
+        var BASE = new URL(".", document.baseURI).href;
+        var real = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+          var url = typeof input === "string" ? input : (input && input.url) || "";
+          var m = url.match(/\/api\/(.+?)\/?$/);
+          if (m) {
+            var name = m[1].replace(/\?.*$/, "");
+            return real(BASE + "api/" + name + ".json", init).then(function (r) {
+              if (r.ok) return r;
+              return new Response("null", { status: 200,
+                headers: { "Content-Type": "application/json" } });
+            });
+          }
+          return real(input, init);
+        };
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-BKVs2RQA.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-hLHE48Y-.css">
+  </head>
+  <body>
+    <div id="snapshot-banner">
+      <b>Frozen snapshot</b>
+      <span>captured 2026-09-04 14:20 UTC, with both sleeves live on an Alpaca paper account</span>
+      <span>Nothing here is live and nothing can be traded from this page &mdash; the agent runs locally and is never exposed.</span>
+      <a href="https://github.com/daodreamer/alpaca_ai_trading_agent_hackathon_2026">source</a>
+    </div>
+    <div id="root"></div>
+  </body>
+</html>
