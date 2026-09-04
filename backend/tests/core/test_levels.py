@@ -1,4 +1,4 @@
-"""Level, Zone and UserLevel — specs/04-domain-model.md and specs/07-levels.md."""
+"""Level and Zone — specs/04-domain-model.md and specs/07-levels.md."""
 
 from __future__ import annotations
 
@@ -9,14 +9,12 @@ from decimal import Decimal
 import pytest
 
 from alphagate.core.errors import InvariantViolation
-from alphagate.core.identifiers import LevelId, UserId, UserLevelId, ticker
+from alphagate.core.identifiers import LevelId, ticker
 from alphagate.core.levels import (
     Level,
     LevelKind,
     LevelSource,
     LevelStatus,
-    Priority,
-    UserLevel,
     Zone,
 )
 from alphagate.core.time_model import Timeframe
@@ -127,45 +125,3 @@ class TestLevel:
         level = make_level(zone=Zone(low="104", high="106"))
         assert level.distance_to("110") == Decimal("4.00000000")
         assert level.distance_to("100") == Decimal("4.00000000")
-
-
-class TestUserLevel:
-    def make(self, **overrides: object) -> UserLevel:
-        defaults: dict[str, object] = {
-            "id": UserLevelId("ul-1"),
-            "user_id": UserId("u-1"),
-            "symbol": AAPL,
-            "timeframe": None,
-            "kind": LevelKind.SUPPORT,
-            "price": "95",
-            "zone": None,
-            "note": "weekly demand",
-            "priority": Priority.NORMAL,
-            "alert_policy": None,
-            "active": True,
-        }
-        return UserLevel(**{**defaults, **overrides})  # type: ignore[arg-type]
-
-    def test_builds_a_valid_user_level(self) -> None:
-        assert self.make().price == Decimal("95.00000000")
-
-    def test_timeframe_scope_is_optional(self) -> None:
-        assert self.make().timeframe is None
-        assert self.make(timeframe=Timeframe.H1).timeframe is Timeframe.H1
-
-    def test_price_must_lie_within_the_zone(self) -> None:
-        with pytest.raises(InvariantViolation, match="within its zone"):
-            self.make(price="90", zone=Zone(low="94", high="96"))
-
-    def test_identity_is_independent_of_any_rendered_chart_object(self) -> None:
-        # specs/04-domain-model.md invariant: user-level identity is its own id.
-        first = self.make(note="a")
-        second = self.make(note="b")
-        assert first.id == second.id
-
-    def test_note_is_optional(self) -> None:
-        assert self.make(note=None).note is None
-
-    def test_is_frozen(self) -> None:
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            self.make().active = False  # type: ignore[misc]

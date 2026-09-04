@@ -15,7 +15,6 @@ alphagate/
   marketdata/    Read-only Alpaca REST adapter, plus a recorded-payload seam
                  the tests and the backtest replay. Writes nothing.
   journal/       Decision records. Append-only, one per cycle.                → 06
-  infra/         Clocks and exchange calendars. The impure edges core needs.
   live/          The composition root. Assembles the tested parts into a
                  running agent, and the `python -m alphagate` CLI.
   interface/     FastAPI + the dashboard. Read-only over the journal and the
@@ -64,22 +63,32 @@ difference.
 
 `alphagate.core` is a verbatim extraction of `pmm.domain` from Personal Market
 Monitor, with the package renamed. It is pure (its only internal imports are
-`pmm.domain.*`, verified before extraction) and arrives with its full test
-suite (~11k lines) and its boundary guard test.
+`pmm.domain.*`, verified before extraction) and arrived with its full test suite
+and its boundary guard test.
 
-**In scope for reuse (the agent's perception layer):**
+**What is reused (the agent's perception layer):**
 
 | Module | Role in the agent |
 | --- | --- |
-| `numeric`, `bar`, `symbol`, `time_model`, `identifiers`, `clock` | Decimal/UTC primitives the options model builds on |
-| `normalization`, `aggregation`, `streaming` | Underlying bar cleaning, dedupe, timeframe folding |
+| `numeric`, `bar`, `time_model`, `identifiers` | Decimal/UTC primitives the options model builds on |
+| `streaming` | The shared bar-stream discipline the engines consume |
 | `indicators` | ATR, EMA, RSI, MACD, VWAP — inputs to the market read |
 | `structure`, `level_engine`, `levels` | Swings, BOS, support/resistance zones |
 | `trend_engine`, `trend`, `confluence` | Multi-timeframe trend state — the headline perception signal |
 
-**Carried but unused for now:** `alerts`, `alert_engine`, `news`, `stores`,
-`operations`, `accounts`. Extracted with the package because splitting a passing
-test suite costs more than it saves. Pruned after the competition, not during.
+**Pruned on 4 September**, once the competition build was done: `alerts`,
+`alert_engine`, `news`, `stores`, `operations`, `accounts`, `level_store`,
+`market_data`, `normalization`, `aggregation`, `symbol`, `clock`, and the whole
+of `infra/` — about 4k lines that arrived with the extraction and that no
+AlphaGate module ever imported. adr/0001 D5 deferred this on purpose: splitting
+a passing test suite mid-event costs more than it saves. The reachability
+argument is mechanical — nothing in `agent/`, `options/`, `risk/`, `equity/`,
+`execution/`, `journal/`, `live/` or `interface/` named any of them, and the
+suite, `ruff` and `mypy --strict` are green without them.
+
+Two dependencies went with that code: `pandas-market-calendars` (only
+`infra.calendars` imported it) and `anthropic` (nothing imported it — the one
+model client is `agent/deepseek.py`, over HTTP).
 
 **Explicitly not reused:** the upstream `application/`, `interface/`,
 `persistence/` and provider layers. They are shaped for a monitoring product,

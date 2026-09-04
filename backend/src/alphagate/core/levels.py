@@ -3,9 +3,11 @@
 A `Level` is technical evidence at a price, not advice. `strength` ranks how
 much evidence supports it; it is never a signal to buy or sell.
 
-System levels and user levels coexist as separate types on purpose. They have
-different lifecycles: the engine may invalidate and regenerate its own levels
-freely, but a user's line belongs to the user and only the user removes it.
+Upstream this module also carried `UserLevel` — a line a human drew on a chart,
+with a priority and an alert policy. AlphaGate has no human in the loop and no
+chart to draw on, so it was pruned with the rest of the monitoring product
+(adr/0001 D5). Every level here is evidence the engine derived and may
+invalidate on its own.
 """
 
 from __future__ import annotations
@@ -13,25 +15,19 @@ from __future__ import annotations
 import dataclasses
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum, IntEnum
-from typing import TYPE_CHECKING
+from enum import Enum
 
 from alphagate.core.errors import InvariantViolation
-from alphagate.core.identifiers import LevelId, Ticker, UserId, UserLevelId
+from alphagate.core.identifiers import LevelId, Ticker
 from alphagate.core.numeric import DOMAIN_CONTEXT, ExactInput
 from alphagate.core.numeric import price as exact_price
 from alphagate.core.time_model import Timeframe, ensure_utc
-
-if TYPE_CHECKING:
-    from alphagate.core.alerts import AlertPolicy
 
 __all__ = [
     "Level",
     "LevelKind",
     "LevelSource",
     "LevelStatus",
-    "Priority",
-    "UserLevel",
     "Zone",
 ]
 
@@ -80,12 +76,6 @@ class LevelStatus(Enum):
 
     ACTIVE = "ACTIVE"
     INVALIDATED = "INVALIDATED"
-
-
-class Priority(IntEnum):
-    LOW = 10
-    NORMAL = 20
-    HIGH = 30
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -213,38 +203,4 @@ class Level:
 
     def distance_to(self, value: ExactInput) -> Decimal:
         """Distance from `value` to the nearest edge of the effective zone."""
-        return self.effective_zone.distance_to(value)
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class UserLevel:
-    """A level the user drew. A first-class domain entity, not a chart artifact.
-
-    Its identity is `id` and nothing else — specs/04-domain-model.md requires
-    that it survive independently of whatever the chart happens to be rendering.
-    """
-
-    id: UserLevelId
-    user_id: UserId
-    symbol: Ticker
-    kind: LevelKind
-    price: Decimal
-    timeframe: Timeframe | None = None
-    zone: Zone | None = None
-    note: str | None = None
-    priority: Priority = Priority.NORMAL
-    alert_policy: AlertPolicy | None = None
-    active: bool = True
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "price", exact_price(self.price, field="price"))
-        if self.price <= 0:
-            raise InvariantViolation(f"price: must be positive, got {self.price}")
-        _check_price_within_zone(self.price, self.zone)
-
-    @property
-    def effective_zone(self) -> Zone:
-        return self.zone if self.zone is not None else Zone(low=self.price, high=self.price)
-
-    def distance_to(self, value: ExactInput) -> Decimal:
         return self.effective_zone.distance_to(value)

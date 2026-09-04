@@ -67,8 +67,12 @@ def test_pure_layers_import_only_stdlib_and_each_other() -> None:
 
 
 def test_pure_layers_never_import_alphagate_infrastructure() -> None:
-    """Guard 1, second half. `alphagate.core` may not reach sideways into
-    `alphagate.infra` or upward into agent/execution/interface."""
+    """Guard 1, second half. A pure layer may not reach upward into
+    `agent`, `execution`, `journal`, `live`, `marketdata` or `interface`.
+
+    It used to name `alphagate.infra` too. That package was pruned on
+    2026-09-04 (adr/0001 D5), so this half of the guard now holds against
+    the layers that are still here."""
     offenders: list[str] = []
     for path in _pure_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

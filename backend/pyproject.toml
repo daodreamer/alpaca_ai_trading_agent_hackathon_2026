@@ -4,10 +4,6 @@ version = "0.1.0"
 description = "AlphaGate — an options trading agent that can be overruled"
 requires-python = ">=3.13"
 dependencies = [
-    # Exchange calendars. Pinned exactly, not floated: holiday data changes between
-    # releases, and expiry/DTE arithmetic that shifts underneath a fixture is worthless.
-    # Inherited with alphagate.infra.calendars.
-    "pandas-market-calendars==5.4.0",
     # Alpaca transport. The Alpaca SDK is deliberately not used: its models carry
     # float prices, and money is Decimal end to end (specs/01-architecture.md D3).
     # Confined to alphagate.execution and alphagate.marketdata.
@@ -16,10 +12,14 @@ dependencies = [
     # cannot import execution, marketdata or live — tests/test_boundaries.py.
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    # The one layer allowed to call a model — alphagate.agent.
-    "anthropic>=0.40",
+    # The MCP transport to the broker — adr/0002. Confined to alphagate.execution.
     "fastmcp>=3.4.7",
 ]
+# Two dependencies left with the pruning of 2026-09-04 (adr/0001 D5):
+# `pandas-market-calendars`, which only `alphagate.infra.calendars` imported, and
+# `anthropic`, which nothing ever imported — the one model client this agent has
+# is `agent/deepseek.py`, and it speaks HTTP. An unused SDK in the dependency
+# list is not inert: it is a claim about what the agent can reach.
 
 [project.optional-dependencies]
 dev = [
@@ -75,7 +75,6 @@ allowed-confusables = ["–", "…", "×", "σ"]
 # S101: assert is the point. S105/S106: a test credential is a literal by definition.
 "tests/**" = ["S101", "S105", "S106", "TID251"]
 # The layers where SDKs and the web framework are allowed — specs/01-architecture.md.
-"src/alphagate/infra/**" = ["TID251"]
 "src/alphagate/execution/**" = ["TID251"]
 # adr/0002 D2: market data comes in over a direct REST adapter, not over MCP,
 # because the backtest replays recorded payloads and an MCP session does not.
@@ -112,9 +111,3 @@ enable_error_code = ["redundant-expr", "possibly-undefined", "truthy-bool", "ign
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = true
-
-# Ships no py.typed marker. Confined to alphagate.infra.calendars, which converts
-# every value it returns into a plain datetime at the boundary.
-[[tool.mypy.overrides]]
-module = "pandas_market_calendars.*"
-ignore_missing_imports = true

@@ -778,3 +778,10 @@ own [boundary tests](ai_quant_researcher/tests/test_boundaries.py). Do not
 hackathon and is reused as a library. Everything else in this repository —
 the options domain, the Risk Gate, execution, the agent, and the dashboard —
 is built during the competition window. See [adr/0001-core-reuse.md](adr/0001-core-reuse.md).
+
+The extraction arrived with more than the agent needs — an alert engine, a news
+screener, watchlists, notification stores — carried whole rather than split
+mid-event. Those were pruned on the last day, once nothing depended on the
+outcome: about 4k lines and two dependencies, none of it reachable from
+`python -m alphagate`. What is left is the perception layer the agent actually
+perceives with, and it still has its upstream tests.

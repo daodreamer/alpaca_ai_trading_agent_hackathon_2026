@@ -9,6 +9,13 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .hypothesis/
+.coverage
+.coverage.*
+
+# `foo 2>$null` typed into a POSIX shell instead of PowerShell creates a file
+# literally named `$null`. One of them reached a commit; this keeps the next
+# one out.
+$null
 
 # Credentials. `.env.example` documents the shape and is committed; nothing
 # holding a real key ever is.

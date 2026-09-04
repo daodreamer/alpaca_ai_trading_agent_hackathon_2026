@@ -28,6 +28,12 @@ that arrives without its tests is a reused liability.
 `clock`, `calendars`, the in-memory stores — into `alphagate.infra`. The pure
 layers may not import from it; `tests/test_boundaries.py` enforces that.
 
+> Superseded 2026-09-04 by the pruning in D5: the only tests that needed
+> `alphagate.infra` were the ones testing the modules D5 pruned, so the package
+> went with them and the dependency on `pandas-market-calendars` went with it.
+> Guard 1 still holds, now vacuously — there is no `infra` to reach sideways
+> into.
+
 **D4.** Do **not** reuse PMM's `application/`, `interface/`, `persistence/` or
 provider layers. They are shaped for a monitoring product with a human in the
 loop. PMM's Alpaca adapter in particular is market-data only — it targets
@@ -38,6 +44,30 @@ work regardless.
 `news`, `stores`, `operations`, `accounts`) rather than pruning them. Splitting a
 green test suite costs competition hours and buys nothing; pruning happens after
 4 September.
+
+> **Done, 2026-09-04.** Pruned on the last day, with the build finished. Gone:
+> `alerts`, `alert_engine`, `news`, `stores`, `operations`, `accounts`,
+> `level_store`, `market_data`, `normalization`, `aggregation`, `symbol`,
+> `clock`, the `UserLevel`/`Priority` types in `levels`, the five account and
+> alert id types in `identifiers`, the re-export barrel in `core/__init__.py`,
+> and all of `alphagate.infra` — with their tests. About 4k lines of source and
+> 356 tests.
+>
+> The criterion was reachability, not judgement: a module was pruned only if no
+> module reachable from `python -m alphagate` imported it by name. The barrel in
+> `core/__init__.py` was excluded from that count deliberately — it re-exported
+> everything and was itself imported by nothing, so counting it would have kept
+> the whole package alive on the strength of a file no consumer used. It is now
+> a docstring.
+>
+> What this buys, on a submission where the reuse is declared: `alphagate.core`
+> is now the perception layer the agent actually perceives with, and a reader
+> can no longer find a notification-delivery store or a news screener inside a
+> trading agent and wonder what it is for. `pandas-market-calendars` and
+> `anthropic` left with it — 17 packages including pandas and numpy.
+>
+> D2's principle survives: every module still here still has its upstream tests.
+> 2299 pass, `ruff` and `mypy --strict` are clean over 109 source files.
 
 **D6.** Declare the reuse prominently — in the README, in this ADR, and in the
 submission. The reused code predates the competition and is the author's own
