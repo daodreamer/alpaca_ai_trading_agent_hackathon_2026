@@ -26,12 +26,12 @@
   },
   "dataset_version": "csv:1D:2023-05-22:2026-09-03",
   "fill_convention": "Weights in force on as_of: decided at the close of the session before it and filled at the open of as_of. An executor placing them at the next open is one session behind the backtest, which is the cost of not re-implementing the selection outside the engine.",
-  "generated_at": "2026-09-03T20:58:27.132817+00:00",
+  "generated_at": "2026-09-04T08:01:24.142797+00:00",
   "gross": 0.64,
   "positions": 75,
   "provenance": {
     "database": "runs\\research.sqlite",
-    "distinct_hypotheses": 586,
+    "distinct_hypotheses": 414,
     "hypothesis": "The existing low-vol carry strategy ranks on a simple weighted sum of low volatility and relative strength. I improve it by requiring that the relative strength is not just positive but also recently improving, capturing the early stage of institutional accumulation before the move becomes crowded. This refinement targets the same mechanism\u2014underfollowed stable performers\u2014but adds a timing filter that reduces exposure to names whose strength is already fully reflected, improving the carry's sustainability.",
     "preregistration": {
       "declared_at": "2026-08-30T19:15:04.877259+00:00",
@@ -40,7 +40,7 @@
     },
     "score": 91.71021317441094,
     "sealed_look": 4,
-    "sealed_looks_total": 6,
+    "sealed_looks_total": 5,
     "sealed_measurement": {
       "alpha_clears_bar": true,
       "backtest_sessions": 1324,
@@ -95,7 +95,7 @@
     "loads": 0,
     "max_event_time": 1788321600,
     "phase": "research",
-    "run_id": "b0335f88456d45d4a3351dfb3b9eafb1",
+    "run_id": "05b048dadade4aadba9325622a0db52c",
     "tainted": true
   },
   "sleeve_weights": {

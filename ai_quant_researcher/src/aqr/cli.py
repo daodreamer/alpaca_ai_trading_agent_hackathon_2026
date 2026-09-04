@@ -1614,9 +1614,21 @@ def target_book_cmd(
             # counts the hypotheses the *search* compared; the second counts the
             # candidates the *sealed window* has screened. A book that carried
             # only the first would understate what its claim rests on.
-            "distinct_hypotheses": reg.distinct_hypotheses(),
+            #
+            # Both are per-family, as specs/10 D8 requires and as the option
+            # book beside this one already did. Without `family` they returned
+            # the combined figures -- an equity book claiming 586 hypotheses and
+            # 6 looks when its own search compared 414 and its own window had
+            # been opened 5 times, the extra look being an option candidate
+            # screened against SPY chains this strategy never touched. The
+            # error was conservative, which is exactly why it could sit here
+            # unnoticed: it overstated the bar rather than the edge. It also
+            # grows with every option campaign, so an equity book would get
+            # progressively harder to justify for reasons having nothing to do
+            # with equities.
+            "distinct_hypotheses": reg.distinct_hypotheses(family=EQUITY),
             "sealed_look": reg.sealed_look(fingerprint),
-            "sealed_looks_total": reg.sealed_looks(),
+            "sealed_looks_total": reg.sealed_looks(family=EQUITY),
             "sealed_run_at": sealed["sealed_run_at"],
             "sealed_measurement": measurement,
             "sealed_seal": sealed["result"].get("seal", {}),

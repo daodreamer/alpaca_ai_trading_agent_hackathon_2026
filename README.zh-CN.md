@@ -133,18 +133,28 @@ copy .env.example .env.local
 cp .env.example .env.local
 ```
 
-然后用任意文本编辑器（记事本就行）打开 `.env.local`，填三行：
+然后用任意文本编辑器（记事本就行）打开 `.env.local`，填四行：
 
 ```
 ALPACA_API_KEY_ID=PK................
 ALPACA_API_SECRET_KEY=................
-ALPHAGATE_STRATEGY_FINGERPRINT=3f6e2c8a9309068b
+ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db
+ALPHAGATE_OPTION_FINGERPRINT=cc197008e0deb097
 ```
 
-前两个是第 3 步拿到的 key。第三个指明了**这个账户被允许交易哪一个策略**——
-那串长字符是唯一一个通过了全部检验的策略的标识。程序拒绝执行其他任何东西，
-而这个拒绝正是关键：没有它，往某个文件夹里丢一个不同的文件就会悄悄改变
-你账户里持有的东西。
+前两个是第 3 步拿到的 key。
+
+后两个指明了**这个账户被允许交易哪一个股票策略、哪一条期权规则**——那两串长
+字符分别是唯一通过了全部检验的那个股票策略和那条期权规则的标识。程序拒绝执行
+其他任何东西，而这个拒绝正是关键：没有它，往某个文件夹里丢一个不同的文件就会
+悄悄改变你账户里持有的东西。
+
+**这是两个分开的设置，是故意的。** 账户的两半跑的是两条不同的规则，各自对着
+自己那一段封存历史验证过；一个设置管两边，会让"那天跑的到底是哪条规则"从它们
+分叉的那一刻起就无法回答。两个都没有默认值——没填是错误，不是猜测。
+
+下面第 5 到第 8 步走的是股票那一半，只需要 `ALPHAGATE_STRATEGY_FINGERPRINT`。
+期权那一半是[第 9 步](#第-9-步--打开期权-agent)。
 
 `.env.local` 不会被上传到任何地方，也被版本控制排除在外，所以你的 key
 只留在你自己的电脑上。
@@ -160,17 +170,17 @@ uv run --directory backend python -m alphagate equity-preflight
 你应该看到这样一份清单：
 
 ```
-AlphaGate equity pre-flight — 2026-08-29T12:37:28+00:00
+AlphaGate equity pre-flight — 2026-09-04T08:01:41+00:00
 
-[  ok  ] strategy pinned — 3f6e2c8a9309068b
-[  ok  ] a target book exists — .../rs_volatility_consistency_neutral_v1-3f6e2c8a9309068b-2026-08-27.json
-[  ok  ] the book may be executed — rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b] as of 2026-08-27
+[  ok  ] strategy pinned — 9b4ac85c149ec6db
+[  ok  ] a target book exists — .../low_vol_relative_strength_carry_v1_improved-9b4ac85c149ec6db-2026-09-02.json
+[  ok  ] the book may be executed — low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db] as of 2026-09-02
 [  ok  ] the book is fresh — 2d old, limit 7d
-[  ok  ] the sealed window did not refute it — alpha +16.72%/yr  beta 0.43  t +2.22  looks 1
-[  ok  ] account readable — equity 100000.00
+[  ok  ] the sealed window did not refute it — alpha +20.40%/yr  beta 0.35  t +3.73  looks 5
+[  ok  ] account readable — equity 101272.93
 [  ok  ] account not blocked
-[  ok  ] 0 equity positions held, 104 wanted
-[  ok  ] market closed — next open 2026-08-31 13:30 UTC
+[  ok  ] 86 equity positions held, 75 wanted
+[  ok  ] market closed — next open 2026-09-04 13:30 UTC
 
 Ready.
 ```
@@ -250,6 +260,113 @@ uv run --directory backend python -m alphagate equity-run
 
 如果你想看它跑完一整天但一单也不下，加 `--dry-run`。
 
+### 第 9 步 — 打开期权 agent
+
+到目前为止都是账户的**股票**那一半，它持有 $90,000。另一半的 $10,000 在 SPY
+上卖期权价差，而这个项目实际上是以那一半的名义参赛的。它独立运行，有自己的
+规则、自己的预算和自己的 Risk Gate。
+
+**有一件事必须先做，跳过它会静默失败。** 这条规则只在 SPY 的隐含波动率相对
+它自己的历史异常低时才入场——`iv_rank() < 15`。算这个需要**一年**的历史波动率
+读数，而 Alpaca 不签 OPRA 就不卖给你。所以这段历史来自一个免费的公开数据集，
+而且必须先加载一次：
+
+```bash
+cd ai_quant_researcher
+uv run aqr options-pull --table volatility_history   # 大约一分钟
+uv run aqr options-embargo
+cd ..
+python scripts/pipeline.py iv-seed
+```
+
+没有它，这条规则不是"假"，而是**无法判定**——agent 每一个周期都会站在一边，
+而从外面看，这和市场很安静一模一样。你会看到一整天的 `NO_SETUP` 然后以为市场
+没给机会，实际上你从来没问过。`iv-seed` 每个交易日跑一次；它是幂等的，重复跑
+不花任何代价。
+
+现在用和股票那一半同样的方式检查期权这一半：
+
+```bash
+uv run --directory backend python -m alphagate preflight
+```
+
+这和第 5 步的体检不是同一个。它会连上券商，检查那些不主动报告的东西——你的
+账户确实是模拟盘、它被批准了**期权三级**（价差）、下单工具存在、模型 key 在。
+它会把即将执行的规则完整打印出来：
+
+```
+[  ok  ] option rule — iv_rank_low_sticky_put_credit_spread_v1 [cc197008e0deb097]
+        structure        put_credit_spread
+        entry            iv_rank() < 15
+        dte              target 14 +/-10 -> window 4-24d
+        anchor delta     0.16 +/-0.06
+        width delta      0.08
+        sizing           2.00% per trade, 3 concurrent
+        sealed run       alpha +2.52%/yr  t +1.11  looks 1  refuted False
+        this window can refute this rule and cannot confirm it (specs/10 D8)
+```
+
+**其中有一行是故意写得不好看的。** *"can refute and cannot confirm"* 的意思是：
+最后那次留出来的检验有能力证明这条规则是错的，而它没有——但它从来没有能力证明
+它是对的，因为两年的窗口里只装得下 32 个独立交易。这条规则被执行，是因为它
+**扛住了**，不是因为它被确认了。整段论证见
+[封存运行的记录](ai_quant_researcher/runs/README.md#the-option-window)。
+
+**有一道闸第一次会故意亮红。** `dedicated new paper account` 会一直失败，直到
+你亲手确认这是一个你愿意让它交易的全新账户：
+
+```bash
+uv run --directory backend python -m alphagate preflight --confirm-dedicated
+```
+
+然后，和股票那边完全一样——先跑安全的那个：
+
+```bash
+uv run --directory backend python -m alphagate once   # 一个周期，一单也不下
+uv run --directory backend python -m alphagate run    # 一整天，会真的下单
+```
+
+`once` 是安全的那个，`run` 不是。`run --dry-run` 会走完一整天但什么都不提交。
+
+安静的答案就是正常的答案。`NO_SETUP` 表示入场条件不满足，`NO_CANDIDATES` 表示
+没有价差扛过定价和流动性检查。两者都会连同理由写进 journal，所以
+*"它 14:30 为什么没交易？"* 在磁盘上有答案，而不是一个耸肩。
+
+### 一条命令跑完全部
+
+第 4 步和第 9 步做完之后，两半都可以在仓库根目录用一条命令跑起来：
+
+```bash
+python scripts/pipeline.py --dry-run   # 两半都演练一遍，一单不下
+python scripts/pipeline.py             # 刷新、重建、并交易两半
+```
+
+它先跑股票那一半，再跑期权那一半；如果前一半失败就停下，而不是让后一半对着
+一张只建了一半的图去交易。它用子进程调两个项目的命令行工具，两个都不 import
+——这两个系统是刻意分开的，而这个脚本是唯一知道它们在同一个文件夹里的东西。
+
+只跑其中一半：
+
+```bash
+python scripts/pipeline.py --only equity
+python scripts/pipeline.py --only options
+```
+
+或者按顺序点名要跑的阶段，从中间接上：
+
+```bash
+python scripts/pipeline.py book trade          # 跳过下载；缓存已经是最新的
+python scripts/pipeline.py iv-seed options-trade
+```
+
+股票那边的阶段是 `refresh`、`book`、`trade`，期权那边是 `option-book`、
+`iv-seed`、`options-trade`。
+
+**一个全新的 clone 能跑除 `option-book` 以外的每一个阶段。** 那一个要从原始
+期权链数据重建规则，那份数据以 GB 计、不在仓库里——但它会产出的那条规则已经
+提交在仓库里了，所以 `iv-seed options-trade` 就是全新 clone 的期权链路，而且
+它是完整的。
+
 ### 出问题了怎么办
 
 | 你看到的 | 意思是 | 怎么办 |
@@ -262,6 +379,12 @@ uv run --directory backend python -m alphagate equity-run
 | `108 stale_mark` | 所有价格都过期了 | 市场关着。这是正确的行为 |
 | `the market is closed` | 今天是周末或假日 | 等一个工作日 |
 | 很久没反应 | 第一次运行在下载 Python | 让它跑完，只有第一次会这样 |
+| `no option rule pinned` | 没设 `ALPHAGATE_OPTION_FINGERPRINT` | 重做第 4 步；这里刻意没有默认值 |
+| `FAIL dedicated new paper account` | 你还没亲手确认过这个账户 | 确认无误后跑 `preflight --confirm-dedicated` |
+| `FAIL options level 3` | 账户不能交易价差 | 去 Alpaca 给这个模拟账户申请三级权限 |
+| 期权每个周期都是 `NO_SETUP` | 通常是 IV 历史没播种 | 跑[第 9 步](#第-9-步--打开期权-agent)的播种那一段，然后确认 `iv-seed` 打印出了 `iv_rank` |
+| `does not exist — nothing to seed` | 波动率 CSV 从来没拉过 | `aqr options-pull --table volatility_history` 然后 `aqr options-embargo` |
+| `no option_chain cache for SPY` | 你让它重建期权规则了 | 规则已经提交在仓库里；跑 `iv-seed options-trade`，跳过 `option-book` |
 
 ### 一本小词典
 
@@ -317,24 +440,59 @@ Gate 说了什么、为什么。你可以在 dashboard 里打开任何一笔成�
 
 这个仓库里有**两条**交易路径，它们是对同一道题的两种回答。
 
-**期权 agent** 就是上面描述的那个：LLM 提议结构，Risk Gate 处置。
-它的策略层还不完整——specs/07 D4 和 D5 没有实现，所以无论趋势怎么说，
-实盘路径都只会造固定宽度的看跌信用价差——而且它还没有回测，
-所以关于它的任何说法都还不是关于 edge 的主张。
-
-**股票 agent** 执行的是一个**已经**被验证过的策略，而且只执行那一个。
-`ai_quant_researcher/` 搜索了 324 个假设，把活下来的那个过了 walk-forward、
-做了预注册，然后在它身上花掉了唯一一次 sealed 窗口的机会：
+**期权 agent** 就是上面描述的那个：LLM 提议结构，Risk Gate 处置。它现在执行的
+是一条**研究出来的**规则，而不是手写的那条。`ai_quant_researcher/` 用 LLM 搜了
+一遍期权假设，活下来的那条做了预注册，然后对着一段封存的两年窗口测了一次：
 
 ```
-rs_volatility_consistency_neutral_v1 [3f6e2c8a9309068b]
+iv_rank_low_sticky_put_credit_spread_v1 [cc197008e0deb097]
+sealed 窗口 2024-09-03 → 2026-08-31   （500 个交易日，搜索期间从未被读过）
+
+  入场     iv_rank() < 15        在波动率**便宜**的时候卖看跌信用价差
+  结构     0.16Δ 卖腿、0.08Δ 翼，14 DTE ± 10，每个交易日最多开一次
+
+  策略     收益 +8.14%   Sharpe 1.15   最大回撤 −2.05%
+  基准     收益 +36.08%  Sharpe 1.02
+  残差     alpha +2.52%/年   beta 0.09   t = +1.11   门槛 = 1.96
+```
+
+**在相信关于它的任何别的说法之前，先读最后那一行。** t = +1.11 对着 1.96 的
+显著性门槛，意思是 alpha 是正的、而且**测不出来**——那不是证据。那个窗口里只装
+得下约 25 个独立周期，specs/10 D8 说得很清楚：这个尺寸的窗口有资格说一条规则
+**不再有效**，永远没有资格说它**有效**。所以唯一能成立的说法是：**这条规则在
+它从未见过的数据上，扛住了一次预先声明的证伪尝试。** 它没有被确认。
+`SealedOptionRun` 把 `refuted` 和 `can_confirm` 做成两个独立的布尔值，正是为了
+让任何 dashboard、README 或演示脚本都没法把这个区别抹平，而 specs/07 D8 禁止
+用别的措辞来写它。
+
+这条规则还把它取代的那条手写规则**反了过来**。specs/07 D3 原本只在
+`iv_rank >= 30` 时卖权利金，理由是标准的：波动率高的时候方差风险溢价最大。搜索
+把那个形状试了大约一百次；样本外活下来的是相反的条件。我们不主张它提出的机制
+为真——只主张它是在封存窗口被打开**之前**声明的。
+
+**股票 agent** 执行的是一个**已经**被验证过的策略，而且只执行那一个。
+`ai_quant_researcher/` 搜索了 414 个假设，把活下来的那个过了 walk-forward、
+做了预注册，然后在它身上花掉了一次 sealed 窗口的机会：
+
+```
+low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db]
 sealed 窗口 2024-09-03 → 2026-08-27   （498 个交易日，搜索期间从未被读过）
-  策略     收益 +56.39%  sharpe +1.86  最大回撤 -10.4%  交易 561 笔
-  残差     alpha +16.72%/年  beta 0.43  t +2.22  IR +1.58
+  策略     收益 +63.50%  sharpe +2.70  最大回撤 -4.3%  交易 789 笔
+  残差     alpha +20.40%/年  beta 0.35  t +3.73  IR +2.66
 ```
 
 那个窗口**没有推翻它**，而这已经是 498 个交易日能给出的最强结论了——
 `can_confirm` 在构造上就是 `False`，因为那里年化 Sharpe 的标准误约为 ±0.71。
+这个封存窗口至今被打开过五次，所以它要清过的显著性门槛相应抬到了 2.576；
+`t +3.73` 清得过，而且再打开 261 次也依然清得过。
+
+**这一条是在它的封存结果已经可见之后才被选中的，这是一个真实的弱点。** 它的
+声明理由写的是"backfill test 3"——那次 sealed run 是拿来跑缓存回填代码路径的，
+不是拿来挑策略的——而它是在数字能被看到之后才被提拔的。按结果来选，正是预注册
+要防的那件事。所以诚实的读法是：它的 `t` 应该比五次 look 的门槛所收取的折扣打
+得更狠。能扛过这个折扣的是：+3.73 在任何不超过 261 次 look 的计数下都清得过门槛，
+而那比这个项目实际做过的 look 数多两个数量级。
+
 研究端把它此刻持有的权重写进一个文件，然后就停下。AlphaGate 读那个文件、
 给它定价、让每一笔由此产生的订单过闸，然后把活下来的下出去。
 
@@ -356,12 +514,13 @@ python scripts/pipeline.py --dry-run  # 重建 book、按它做计划、一单�
 
 | | |
 | --- | --- |
-| **股票链条** —— 研究 → sealed 验证 → target book → 定价、过闸、记账、渲染到 dashboard。对着实时模拟账户端到端验证过。 | 已跑通 |
-| **第一笔真实股票单** —— 计划、Gate、门都在离线和收市状态下测过；还没有任何一笔股票单见过券商。 | 下一个交易日 |
-| **期权策略** —— specs/07 D4 和 D5 未实现。 | 等研究 |
-| **期权回测** —— spec 08 还没写。[specs/00](specs/00-brief.md) 说这才是把"四天涨了 2%"变成一个关于 edge 的主张的东西。 | 等上一条 |
+| **股票链条** —— 研究 → sealed 验证 → target book → 定价、过闸、记账、渲染到 dashboard。 | 在交易 |
+| **期权链条** —— 期权搜索 → sealed 验证 → option book → 对着实时期权链解析行权价、过闸、记账。 | 在交易 |
+| **两半都已经对着券商实盘（模拟盘）跑起来了。** 8 月 31 日提交了 84 笔股票单，9 月 2 日又 2 笔；9 月 2 日提交了 2 笔期权价差。当前持有 86 个股票仓位和 2 个期权结构。 | 已完成 |
+| **期权回测** —— spec 08 从来没写；期权规则改为走 [specs/10](specs/10-options-research.md) 的研究链验证，那条链在厂商 EOD 期权链上回测，并花掉了一次封存窗口。它回答的是 spec 08 想回答的同一个问题，只是用的是另一份数据。 | 已被取代 |
+| **那条期权规则是"扛住了证伪"，不是"被确认了"** —— 封存窗口里只有 32 个独立周期，`t +1.11` 对着 1.96 的门槛。 | 一个真实的限制 |
 
-2,344 个后端测试全绿，研究实验室另有 1,021 个（pytest / ruff / mypy；前端 eslint / tsc），全部离线运行。
+2,299 个后端测试全绿，研究实验室另有 1,443 个（pytest / ruff / mypy；前端 eslint / tsc），全部离线运行。
 
 开发用的是一个已有的模拟账户。比赛账户是一个**全新的、专用的**账户，
 8 月 28 日切过去——这是 [specs/00-brief.md](specs/00-brief.md) 里的硬门槛 4，
@@ -382,13 +541,20 @@ python scripts/pipeline.py --dry-run  # 重建 book、按它做计划、一单�
 
 ### 每个交易日开盘前
 
+有**两个**开盘前体检，一半一个，谁也不覆盖谁：
+
 ```bash
-uv run --directory backend python -m alphagate preflight
+uv run --directory backend python -m alphagate preflight          # 期权那一半
+uv run --directory backend python -m alphagate equity-preflight   # 股票那一半
 ```
 
-对着实时账户检查四个硬门槛，而不是靠记忆：一个真钱 key、一个不是专用的账户、
-一个低于 3 的期权等级。这些东西平时都不会主动出声——你会在 14:30 从一次拒单里
-发现，而那时交易日已经过了一半。
+`preflight` 对着实时账户检查，而不是靠记忆，因为这些东西平时都不会主动出声——
+你会在 14:30 从一次拒单里发现，而那时交易日已经过了一半。依次是：凭据在；key
+前缀**和**交易 URL 都说这是模拟盘（硬门槛 4，两个独立信号，因为任何一个单独都
+可能被误改）；watchlist 能解析；REST 行情有响应；期权 book 能解析且可以执行；
+钉死的规则，连同它的封存测量一起完整打印；MCP server 和它的
+`place_option_order` 工具（硬门槛 1–3）；账户可读且未被冻结；**期权三级**权限，
+没有它价差会在提交时被拒；模型 key；以及这一半的五项预算。
 
 "专用的新模拟账户"那一行按设计一定会失败，直到你亲手确认：
 
@@ -398,7 +564,21 @@ uv run --directory backend python -m alphagate preflight --confirm-dedicated
 
 只有当它确实是比赛账户时才传这个参数。
 
+`equity-preflight` 是另外那一半，写在
+[交易那个验证过的股票策略](#交易那个验证过的股票策略)：先是 book 的六项拒绝，
+然后是账户，然后是市场到底开不开。
+
 ### 跑期权 agent
+
+从研究出来的规则到订单，完整的一条链：
+
+```bash
+python scripts/pipeline.py --only options            # 重建规则 → 播种 IV → 交易它
+python scripts/pipeline.py --only options --dry-run  # 同上，全部过闸但什么都不提交
+python scripts/pipeline.py iv-seed options-trade     # 全新 clone 的路径；跳过重建
+```
+
+或者一个阶段一个阶段来：
 
 ```bash
 # 现在跑一个周期 —— 读市场、造菜单、过闸、记账
@@ -410,6 +590,47 @@ uv run --directory backend python -m alphagate run --dry-run     # 全部过闸�
 uv run --directory backend python -m alphagate run               # 下模拟盘的单
 uv run --directory backend python -m alphagate run --no-supervise  # 只跑一场，不自动重启
 ```
+
+**在这些之前必须先钉死期权规则。** `.env.local` 里需要
+
+```
+ALPHAGATE_OPTION_FINGERPRINT=cc197008e0deb097
+```
+
+任何指向其他 fingerprint 的 option book 都会被按名字拒掉，和股票那个钉子拒掉
+target book 的方式完全一样。**两个钉子是分开的，这是故意的。** 两半执行的是两条
+不同的规则、对着两个不同的封存窗口、各自有独立的 look 计数器；一个钉子管两边，
+会让"当时跑的是哪条规则"从它们分叉那一刻起就无法回答——而它们在 9 月 1 日分叉了。
+两个都没有默认值。
+
+**`iv-seed` 在股票那边没有对应物，而且它不是优化。** 研究出来的规则入口是
+`iv_rank() < 15`，而 `iv_rank` 需要一年的隐含波动率历史，Alpaca 不签 OPRA 就不
+提供——所以它来自研究端那份免费的厂商缓存，走的是一个文件：
+
+```bash
+uv run --directory backend python -m alphagate iv-seed \
+    --from ../ai_quant_researcher/data-options-sealed/volatility_history/SPY.csv \
+    --symbol SPY --days 365
+```
+
+（路径是相对 `backend/` 的，因为 `--directory backend` 是这条命令的运行目录。
+`python scripts/pipeline.py iv-seed` 传的是绝对路径，是同一件事的更短写法。）
+
+那个文件不在仓库里（`aqr options-pull` 从公开源重建它），所以全新 clone 要先拉
+一次：
+
+```bash
+cd ai_quant_researcher && uv run aqr options-pull --table volatility_history && uv run aqr options-embargo && cd ..
+```
+
+**没播种的话，规则不是"假"，而是无法判定**，agent 每个周期都会站在一边。从外面
+看这和市场安静完全无法区分，这正是它被写成一个有据可查的每日步骤、而不是一个脚注
+的原因。`--days 365` 是承重的而不是一个随手的默认值：`iv_rank` 会对着交给它的
+整个窗口做排名，而研究出来的规则指的是厂商自己那个一年的区间。播七年，你就是在
+对着一个包含 2020 年 3 月的窗口排名——同一个名字下的另一个数。
+
+pipeline 即使在 `--dry-run` 下也会跑 `iv-seed`，因为对着一条无法判定的规则做演练，
+不是任何人想要的那次演练。
 
 **`once` 默认不下单，`run` 默认下单。** 一个会下单的调试命令，就是一个会
 顺手下单的调试命令。而 `run` 本身就是"一个交易日"的意思，所以让它交易并不意外——
@@ -454,7 +675,7 @@ uv run --directory backend python -m alphagate equity-status
 **在这些之前必须先钉死策略。** `.env.local` 里需要
 
 ```
-ALPHAGATE_STRATEGY_FINGERPRINT=3f6e2c8a9309068b
+ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db
 ```
 
 任何指向其他 fingerprint 的 target book 都会被按名字拒掉。这里刻意没有默认值：
@@ -525,6 +746,47 @@ uv run aqr target-book FINGERPRINT          # 写出 handoff 文件
 
 每条命令做什么、以及 seal 为什么要这样安排，见
 [ai_quant_researcher/README.md](ai_quant_researcher/README.md)。
+
+### 刷新期权规则
+
+期权那一半的 book 是一条**规则，不是一串腿**，所以它不像 target book 那样会以
+同样的方式过期——周二收盘写下的行权价到周三开盘就是错的，所以根本不写行权价。
+执行端每个周期对着实时期权链自己解析。每天真正要做的是 IV 历史，也就是上面那个
+`iv-seed` 步骤。
+
+规则本身只有在做过新的期权研究之后才需要重建，而重建需要那份不在仓库里的原始
+期权链缓存：
+
+```bash
+cd ai_quant_researcher
+uv run aqr options-pull                     # 两张表；链那张以 GB 计
+uv run aqr options-embargo                  # 在 embargo 处切开，武装绊线
+uv run aqr option-book cc197008e0deb097     # 从 registry 重写 book
+```
+
+搜索一条**新的**期权规则，和股票那边一样是一个需要人来做的决定，而且它有自己
+独立的分母：
+
+```bash
+cd ai_quant_researcher
+uv run aqr option-features                        # 一条规则可以引用的词汇表
+uv run aqr option-research --iterations 40 --provider deepseek
+uv run aqr campaigns                              # 每一次搜索，各自计数
+uv run aqr preregister --rule "..." FINGERPRINT   # 在读 sealed 数据之前先申报
+uv run python -m aqr.cli_sealed run FINGERPRINT   # 花掉唯一那一次机会
+uv run aqr option-book FINGERPRINT                # 写出 handoff 文件
+```
+
+**期权窗口被打开过一次，股票窗口五次，而且两者分开计数。** specs/10 D8：两次
+搜索探索的是不同的空间、对着不同的样本量，所以一个分母管两边，对期权那边太严、
+对股票那边太松。`aqr preregistered` 会分别打印两条门槛，每本 book 也各自带着
+自己的那条。
+
+当前这条期权规则的封存运行**没有推翻它，也无法确认它**——两年里 32 个独立周期
+不足以确立一个 edge。这一点由 `preflight` 打印、在 book 里以
+`can_confirm: false` 承载、并在 dashboard 上写在规则旁边。它是以"扛住了证伪"
+的名义被执行的，研究端的 README
+[把这件事说得很详细](ai_quant_researcher/runs/README.md#the-option-window)。
 
 ### 观察它
 

@@ -144,20 +144,32 @@ copy .env.example .env.local
 cp .env.example .env.local
 ```
 
-Now open `.env.local` in any text editor (Notepad is fine) and fill in three
+Now open `.env.local` in any text editor (Notepad is fine) and fill in four
 lines:
 
 ```
 ALPACA_API_KEY_ID=PK................
 ALPACA_API_SECRET_KEY=................
 ALPHAGATE_STRATEGY_FINGERPRINT=9b4ac85c149ec6db
+ALPHAGATE_OPTION_FINGERPRINT=cc197008e0deb097
 ```
 
-The first two are your keys from Step 3. The third one names **which strategy
-this account is allowed to trade** — that long string is the identifier of the
-one strategy that passed all the tests. The program refuses to trade anything
-else, and that refusal is the whole point: without it, dropping a different file
-into a folder would silently change what your account holds.
+The first two are your keys from Step 3.
+
+The last two name **which strategy and which option rule this account is allowed
+to trade**. Those long strings are the identifiers of the one stock strategy and
+the one option rule that passed all the tests. The program refuses to trade
+anything else, and that refusal is the whole point: without it, dropping a
+different file into a folder would silently change what your account holds.
+
+They are two separate settings on purpose. The two halves of this account run
+two different rules, each tested against its own reserved slice of history, and
+one setting covering both would make "which rule was running that day"
+unanswerable. There is no default for either — a missing pin is an error, not a
+guess.
+
+Steps 5 to 8 below use the stock half, which needs only
+`ALPHAGATE_STRATEGY_FINGERPRINT`. The option half is [Step 9](#step-9--turn-on-the-options-agent).
 
 `.env.local` is never uploaded anywhere and is excluded from version control, so
 your keys stay on your computer.
@@ -174,17 +186,17 @@ That is the slow part. Afterwards it takes a few seconds.
 You should see a list like this:
 
 ```
-AlphaGate equity pre-flight — 2026-08-29T12:37:28+00:00
+AlphaGate equity pre-flight — 2026-09-04T08:01:41+00:00
 
 [  ok  ] strategy pinned — 9b4ac85c149ec6db
-[  ok  ] a target book exists — .../low_vol_relative_strength_carry_v1_improved-9b4ac85c149ec6db-2026-08-27.json
-[  ok  ] the book may be executed — low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db] as of 2026-08-27
-[  ok  ] the book is fresh — 4d old, limit 7d
+[  ok  ] a target book exists — .../low_vol_relative_strength_carry_v1_improved-9b4ac85c149ec6db-2026-09-02.json
+[  ok  ] the book may be executed — low_vol_relative_strength_carry_v1_improved [9b4ac85c149ec6db] as of 2026-09-02
+[  ok  ] the book is fresh — 2d old, limit 7d
 [  ok  ] the sealed window did not refute it — alpha +20.40%/yr  beta 0.35  t +3.73  looks 5
-[  ok  ] account readable — equity 100000.00
+[  ok  ] account readable — equity 101272.93
 [  ok  ] account not blocked
-[  ok  ] 0 equity positions held, 87 wanted
-[  ok  ] market closed — next open 2026-08-31 13:30 UTC
+[  ok  ] 86 equity positions held, 75 wanted
+[  ok  ] market closed — next open 2026-09-04 13:30 UTC
 
 Ready.
 ```
@@ -273,6 +285,125 @@ everything it decided is already written to disk.
 If you want to watch it run through the whole day without it placing anything,
 add `--dry-run`.
 
+### Step 9 — turn on the options agent
+
+Everything so far was the **stock** half of the account, which holds $90,000.
+The other $10,000 sells option spreads on SPY, and it is the half this project
+was actually entered under. It runs separately, with its own rule, its own
+budgets and its own Risk Gate.
+
+**One thing has to be done first, and skipping it fails silently.** The rule
+only enters when SPY's implied volatility is unusually low for SPY —
+`iv_rank() < 15`. Working that out needs a *year* of past volatility readings,
+and Alpaca will not sell you those without an OPRA subscription. So the history
+comes from a free public dataset instead, and it has to be loaded once:
+
+```bash
+cd ai_quant_researcher
+uv run aqr options-pull --table volatility_history   # about a minute
+uv run aqr options-embargo
+cd ..
+python scripts/pipeline.py iv-seed
+```
+
+Without it the rule is not *false*, it is **undecidable** — the agent stands
+aside every single cycle, and from the outside that looks exactly like a quiet
+market. You would see a day of `NO_SETUP` and conclude the market gave you
+nothing, when in fact you never asked it. Run `iv-seed` once a day; it is
+idempotent, so running it again costs nothing.
+
+Now check the options half the same way you checked the stock half:
+
+```bash
+uv run --directory backend python -m alphagate preflight
+```
+
+This is a different pre-flight from Step 5's. It talks to the broker and checks
+things that do not announce themselves otherwise — that your account really is a
+practice one, that it is approved for **options level 3** (spreads), that the
+order tool exists, and that a model key is present. It prints the rule it is
+about to run, in full:
+
+```
+[  ok  ] option rule — iv_rank_low_sticky_put_credit_spread_v1 [cc197008e0deb097]
+        structure        put_credit_spread
+        entry            iv_rank() < 15
+        dte              target 14 +/-10 -> window 4-24d
+        anchor delta     0.16 +/-0.06
+        width delta      0.08
+        sizing           2.00% per trade, 3 concurrent
+        sealed run       alpha +2.52%/yr  t +1.11  looks 1  refuted False
+        this window can refute this rule and cannot confirm it (specs/10 D8)
+```
+
+**One line there is deliberately unflattering.** *"can refute and cannot
+confirm"* means the final held-back test was able to prove this rule wrong and
+did not — but it was never able to prove it right, because only 32 independent
+trades fit inside the two-year window. The rule is executed because it survived,
+not because it was confirmed. Read [the sealed runs](ai_quant_researcher/runs/README.md#the-option-window)
+for the whole of that argument.
+
+**One gate fails on purpose the first time.** `dedicated new paper account` stays
+red until you confirm by hand that this is a fresh account you are willing to
+have traded:
+
+```bash
+uv run --directory backend python -m alphagate preflight --confirm-dedicated
+```
+
+Then, exactly as with stocks — the safe one first:
+
+```bash
+uv run --directory backend python -m alphagate once   # one cycle, places nothing
+uv run --directory backend python -m alphagate run    # a whole day, places orders
+```
+
+`once` is the safe one; `run` is not. `run --dry-run` walks a whole day and
+submits nothing.
+
+A quiet answer is the normal answer. `NO_SETUP` means the entry condition was
+not met, `NO_CANDIDATES` means no spread survived pricing and liquidity checks.
+Both are written to the journal with their reasons, so *"why didn't it trade at
+14:30?"* has an answer on disk rather than a shrug.
+
+### The whole thing, in one command
+
+Once Steps 4 and 9 are done, both halves run from a single command at the
+repository root:
+
+```bash
+python scripts/pipeline.py --dry-run   # rehearse both halves, place nothing
+python scripts/pipeline.py             # refresh, rebuild, and trade both
+```
+
+It runs the stock half first and then the options half, stopping if the first
+one fails rather than letting the second trade against a half-built picture. It
+drives both projects' command-line tools as separate processes and imports
+neither — the two systems are kept apart deliberately, and this script is the
+only thing that knows they sit in the same folder.
+
+To do one half only:
+
+```bash
+python scripts/pipeline.py --only equity
+python scripts/pipeline.py --only options
+```
+
+Or to pick up mid-way, naming the stages you want, in order:
+
+```bash
+python scripts/pipeline.py book trade          # skip the download; the cache is current
+python scripts/pipeline.py iv-seed options-trade
+```
+
+The stages are `refresh`, `book`, `trade` for stocks and `option-book`,
+`iv-seed`, `options-trade` for options.
+
+**A fresh clone can run every stage except `option-book`.** That one rebuilds the
+option rule from the raw chain data, which is measured in gigabytes and is not in
+the repository — but the rule it would produce is already committed, so
+`iv-seed options-trade` is the fresh-clone options chain and it is complete.
+
 ### If something goes wrong
 
 | What you see | What it means | What to do |
@@ -285,6 +416,12 @@ add `--dry-run`.
 | `108 stale_mark` | every price is out of date | the market is closed. This is correct behaviour |
 | `the market is closed` | it is a weekend or a holiday | wait for a weekday |
 | nothing happens for a long time | the first run is downloading Python | let it finish; it is once only |
+| `no option rule pinned` | `ALPHAGATE_OPTION_FINGERPRINT` is not set | redo Step 4; there is deliberately no default |
+| `FAIL dedicated new paper account` | you have not confirmed this by hand yet | `preflight --confirm-dedicated`, once you are sure |
+| `FAIL options level 3` | the account cannot trade spreads | ask Alpaca for level 3 on the paper account |
+| every options cycle says `NO_SETUP` | usually the IV history was never seeded | run [Step 9](#step-9--turn-on-the-options-agent)'s seeding block, then check `iv-seed` prints an `iv_rank` |
+| `does not exist — nothing to seed` | the volatility CSV was never pulled | `aqr options-pull --table volatility_history` then `aqr options-embargo` |
+| `no option_chain cache for SPY` | you asked to rebuild the option rule | the rule is already committed; run `iv-seed options-trade` and skip `option-book` |
 
 ### A small dictionary
 
@@ -454,12 +591,14 @@ one project's invariants the other's problem.
 
 | | |
 | --- | --- |
-| **Equity chain** — research → sealed validation → target book → priced, gated, journalled, and rendered on the dashboard. Verified end to end against the live paper account. | working |
-| **First live equity submission** — the plan, the Gate and the door are tested offline and against a closed market; no share order has met the broker yet. | next session |
-| **Options strategy** — specs/07 D4 and D5 unimplemented. | blocked on research |
-| **Options backtest** — spec 08 not written. [specs/00](specs/00-brief.md) says this is what turns "up 2% in four days" into a claim about edge. | blocked on the above |
+| **Equity chain** — research → sealed validation → target book → priced, gated, journalled, and rendered on the dashboard. | trading |
+| **Options chain** — option search → sealed validation → option book → strikes resolved against a live chain, gated, journalled. | trading |
+| **Both sleeves live against the broker.** 84 share orders submitted on 31 Aug and 2 more on 2 Sep; 2 option spreads on 2 Sep. 86 equity positions and 2 option structures open. | done |
+| **Options backtest** — spec 08 was never written; the option rule was instead validated through [specs/10](specs/10-options-research.md)'s research chain, which backtests on vendor EOD chains and spends a sealed window. That answers the same question spec 08 was for, on different data. | superseded |
+| **The option rule survived refutation and was not confirmed** — 32 independent cycles in the sealed window, `t +1.11` against a bar of 1.96. | a real limit |
 
-2,344 backend tests green, plus 1,021 in the research lab (pytest / ruff / mypy; frontend eslint / tsc), all offline.
+2,299 backend tests green, plus 1,443 in the research lab (pytest / ruff / mypy;
+frontend eslint / tsc), all offline.
 
 Development runs against a pre-existing paper account. The competition account is
 a **new, dedicated** one, switched over on 28 Aug — hard gate 4 in
@@ -483,14 +622,23 @@ Pass `--no-model` to ask for the deterministic proposer on purpose.
 
 ### Before every trading day
 
+There are **two** pre-flights, one per sleeve, and neither covers the other:
+
 ```bash
-uv run --directory backend python -m alphagate preflight
+uv run --directory backend python -m alphagate preflight          # the options sleeve
+uv run --directory backend python -m alphagate equity-preflight   # the equity sleeve
 ```
 
-Checks the four hard gates against the live account instead of against memory: a
-live key, an account that is not the dedicated one, an options level below 3.
-None of those announce themselves otherwise — you find out from a rejection at
-14:30, by which point the trading day is half gone.
+`preflight` checks the live account rather than memory, because none of these
+announce themselves otherwise — you find out from a rejection at 14:30, by which
+point the trading day is half gone. In order: credentials present; the key
+prefix *and* the trading URL both say paper (hard gate 4, two independent
+signals because either alone can be edited by accident); the watchlist resolves;
+REST market data answers; the option book parses and may be executed; the pinned
+rule, printed in full with its sealed measurement; the MCP server and its
+`place_option_order` tool (hard gates 1–3); the account is readable and not
+blocked; **options level 3**, without which a spread is rejected at submission;
+a model key; and the sleeve's five budgets.
 
 The "dedicated new paper account" line fails by design until you confirm it:
 
@@ -500,7 +648,22 @@ uv run --directory backend python -m alphagate preflight --confirm-dedicated
 
 Only pass that once it is genuinely the competition account.
 
+`equity-preflight` is the other half and is described under
+[Trading the validated equity strategy](#trading-the-validated-equity-strategy):
+the book's six refusals first, then the account, then whether the market is open
+at all.
+
 ### Running the options agent
+
+The whole chain, from the researched rule to orders:
+
+```bash
+python scripts/pipeline.py --only options            # rebuild the rule → seed IV → trade it
+python scripts/pipeline.py --only options --dry-run  # same, gating everything and submitting nothing
+python scripts/pipeline.py iv-seed options-trade     # the fresh-clone path; skips the rebuild
+```
+
+Or one stage at a time:
 
 ```bash
 # one cycle, right now — reads the market, builds a menu, gates it, journals it
@@ -512,6 +675,53 @@ uv run --directory backend python -m alphagate run --dry-run     # gate everythi
 uv run --directory backend python -m alphagate run               # place paper orders
 uv run --directory backend python -m alphagate run --no-supervise  # one session, no restarts
 ```
+
+**Pin the option rule before any of this works.** `.env.local` needs
+
+```
+ALPHAGATE_OPTION_FINGERPRINT=cc197008e0deb097
+```
+
+and an option book naming any other fingerprint is refused by name, exactly as
+the equity pin refuses a target book. **The two pins are separate on purpose.**
+The sleeves execute two different rules, validated against two different sealed
+windows with two different look counters; one pin covering both would make
+"which rule was running" unanswerable from the moment they diverged, and they
+diverged on 1 September. Neither has a default.
+
+**`iv-seed` has no equity counterpart, and it is not an optimisation.** The
+researched rule's entry is `iv_rank() < 15`, and `iv_rank` needs a year of
+implied-volatility history that Alpaca will not serve without an OPRA
+subscription — so it comes from the researcher's free vendor cache instead, over
+a file:
+
+```bash
+uv run --directory backend python -m alphagate iv-seed \
+    --from ../ai_quant_researcher/data-options-sealed/volatility_history/SPY.csv \
+    --symbol SPY --days 365
+```
+
+(The path is relative to `backend/`, because `--directory backend` is where that
+command runs. `python scripts/pipeline.py iv-seed` passes an absolute one and is
+the shorter way to say the same thing.)
+
+That file is not in the repository (`aqr options-pull` rebuilds it from a public
+source), so a fresh clone pulls it once:
+
+```bash
+cd ai_quant_researcher && uv run aqr options-pull --table volatility_history && uv run aqr options-embargo && cd ..
+```
+
+**Unseeded, the rule is not false — it is undecidable**, and the agent stands
+aside every cycle. From the outside that is indistinguishable from a quiet
+market, which is exactly why it is a documented daily step rather than a
+footnote. `--days 365` is load-bearing rather than a default: `iv_rank` ranks
+against the whole window it is given, and the researched rule meant the vendor's
+own one-year range. Seed seven years and you rank against a window containing
+March 2020 — a different number under the same name.
+
+The pipeline runs `iv-seed` even under `--dry-run`, because a dry run against a
+rule that cannot be decided is not the rehearsal anyone wanted.
 
 **`once` is dry by default; `run` is not.** A debugging command that places
 orders is a debugging command that places orders by accident. `run` is what a
@@ -641,6 +851,50 @@ daily holding periods, so intraday scores read optimistic.
 
 See [ai_quant_researcher/README.md](ai_quant_researcher/README.md) for what each
 of those does and why the seal is arranged the way it is.
+
+### Refreshing the option rule
+
+The option sleeve's book is a **rule, not a list of legs**, so unlike the target
+book it does not go stale in the same way — a strike written down at Tuesday's
+close is already wrong at Wednesday's open, so no strike is written down. The
+execution side resolves the rule against a live chain every cycle. What does
+need doing daily is the IV history, which is the `iv-seed` step above.
+
+Rebuilding the rule itself is only necessary after new option research, and it
+needs the raw chain cache that is not in the repository:
+
+```bash
+cd ai_quant_researcher
+uv run aqr options-pull                     # both tables; the chain one is gigabytes
+uv run aqr options-embargo                  # split at the embargo, arm the tripwires
+uv run aqr option-book cc197008e0deb097     # rewrite the book from the registry
+```
+
+Searching for a *new* option rule is the same deliberate act as on the equity
+side, and it is charged against its own separate denominator:
+
+```bash
+cd ai_quant_researcher
+uv run aqr option-features                        # the vocabulary a rule may name
+uv run aqr option-research --iterations 40 --provider deepseek
+uv run aqr campaigns                              # every search, with its own count
+uv run aqr preregister --rule "..." FINGERPRINT   # declare before reading sealed data
+uv run python -m aqr.cli_sealed run FINGERPRINT   # spend the one shot
+uv run aqr option-book FINGERPRINT                # write the handoff file
+```
+
+**The option window has been opened once and the equity window five times, and
+they are counted apart.** specs/10 D8: the two searches explore different spaces
+against different sample sizes, so one denominator covering both would be far
+too strict for the option side and far too loose for the equity side. `aqr
+preregistered` prints the two bars separately, and every book carries its own.
+
+The current option rule's sealed run **did not refute it and could not confirm
+it** — 32 independent cycles inside two years is not enough to establish an
+edge. That is printed by `preflight`, carried in the book as
+`can_confirm: false`, and shown on the dashboard beside the rule. It is executed
+on a survived-refutation basis, and the README of the lab
+[says so at length](ai_quant_researcher/runs/README.md#the-option-window).
 
 ### Watching it
 

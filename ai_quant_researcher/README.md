@@ -1290,11 +1290,13 @@ prevents that and nothing here conceals it.
 
 ```bash
 uv run aqr campaigns                       # every search that has ever run
-# campaign        hypotheses  best score  started              finished
-# run-25180a08-1  5           96          2026-09-01T11:22:04  2026-09-01T11:22:07
-# run-7f5c6325-1  6           97          2026-09-01T11:21:58  2026-09-01T11:22:01
+# campaign            hypotheses  best score  started              finished
+# run-b8818e2a-1      41          100         2026-09-01T12:27:47  2026-09-01T12:30:35
+# run-fc3610ac-1      111         100         2026-09-01T11:44:57  2026-09-01T11:51:52
+# (before campaigns)  20          97          2026-09-01T07:57:06  2026-09-01T07:58:10
 #
-# 2 campaign(s), 11 distinct option hypotheses all time.
+# 3 campaign(s), 172 distinct option hypotheses all time. A verdict is deflated
+# against its own campaign's count, not this one — both travel inside every book.
 ```
 
 Every option book carries all three numbers — `campaign_hypotheses`,

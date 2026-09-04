@@ -15,9 +15,15 @@ and a read of `runs/research.sqlite`.
 
 | File | What it is |
 | --- | --- |
-| `research.sqlite.gz` | The registry, gzipped. 413 strategies, 441 experiments, 8 pre-registrations, 5 sealed runs. `python scripts/pack_registry.py --unpack` restores it. |
+| `research.sqlite.gz` | The registry, gzipped. 585 strategies, 613 experiments, 9 pre-registrations, 6 sealed runs (5 equity, 1 option). `python scripts/pack_registry.py --unpack` restores it. |
 | `target_books/` | Every target book handed to the execution side, one file per generation. This is the seam: `backend/` reads these and imports nothing else from here. |
+| `option_books/` | The same seam for the option sleeve: the rule, deliberately without strikes. |
 | `README.md` | This file. |
+
+The counts above are the packed database as committed. `python
+scripts/pack_registry.py` re-packs it from the live `runs/research.sqlite`, and
+should be re-run whenever the live one has moved — the two drifted once already,
+which is why this note exists.
 
 Ignored, local-only: `research.sqlite` (the live 51 MB database),
 `research.sqlite.pre-phase3.bak`, `control-campaign*.sqlite`, `control2/`,
@@ -71,6 +77,15 @@ Retrying does not weaken the embargo. `aqr pull` clamps every request at
 ---
 
 ## The sealed runs
+
+Six in total, against **two separate windows with two separate counters**. The
+equity window has been opened five times; the option window once. They are
+counted apart because specs/10 D8 requires it — charging the option side for the
+equity side's five looks would be Bonferroni applied across two different
+searches — and `aqr preregistered` prints the two bars separately for the same
+reason.
+
+### The equity window
 
 Five, all on 1D bars, all against the same 498-session window
 2024-09-03 → 2026-08-27. **Each look raises the significance bar for the next**,
@@ -133,7 +148,31 @@ Its one genuinely reassuring line is `train_oos_gap`: train Sharpe 1.84 against
 OOS 2.00, a gap of **-0.15**. The rule did better out of sample than in it,
 which is not what an overfit rule does.
 
----
+### The option window
+
+One, spent 2026-09-01 on `iv_rank_low_sticky_put_credit_spread_v1`
+[`cc197008e0deb097`] — the pinned option rule,
+`ALPHAGATE_OPTION_FINGERPRINT=cc197008e0deb097`.
+
+| Window | 2024-09-03 → 2026-08-31, 500 observations |
+| --- | --- |
+| Declared as | the only ACCEPT among 40 hypotheses in campaign `run-b8818e2a-1`; 172 option hypotheses across 3 campaigns all time |
+| Residual alpha | **+2.52%/yr**, `t` +1.11, beta 0.09, IR 0.79 |
+| Max drawdown | -2.05% |
+| Verdict | **not refuted**, and `alpha_clears_bar` is `false` |
+
+**This window can refute and cannot confirm, and unlike the equity side that is
+not a caveat — it is the design.** Only 32 independent cycles settled inside
+500 sessions, because a 14-DTE structure entered at most once a session still
+overlaps itself, and `t +1.11` on 32 cycles is not evidence of an edge. What the
+run establishes is the negative: the rule was given its one shot at two years it
+had never seen, and those two years did not produce the significantly negative
+alpha that would have killed it.
+
+The rule is therefore executed on a **survived-refutation** basis, not a
+confirmed one. specs/10 D8 says so, the option book carries `can_confirm: false`
+in its own `sealed_measurement`, and the dashboard's Options tab prints it
+beside the rule rather than under it.
 
 ## Campaign 07
 
@@ -142,7 +181,14 @@ proposals over 680 symbols on 1D bars: **1 ACCEPT, 3 REVIEW, 27 REJECT, 9
 ERROR**. The ACCEPT was `rs_volatility_consistency_neutral_v1`
 [`3f6e2c8a9309068b`] at 84/100 — run 1 in the table above, now retired.
 
-The registry across all campaigns reads 12 ACCEPT, 14 PAPER, 39 REVIEW, 348
-REJECT, 28 ERROR over 441 experiments. Failures are recorded on purpose:
+The registry across all campaigns reads 13 ACCEPT, 14 PAPER, 48 REVIEW, 510
+REJECT, 28 ERROR over 613 experiments. Failures are recorded on purpose:
 forgetting the attempts that went nowhere is the mechanism by which a search
 looks luckier than it was.
+
+Those 613 experiments are **586 distinct hypotheses**, and that figure splits
+before it is used: 414 on the equity side, 172 on the option side. specs/10 D8
+requires the split — the two searches explore different spaces against different
+sample sizes, and one denominator covering both would be far too strict for the
+option side and far too loose for the equity side. The combined number is for
+display only; every counting caller passes a family.

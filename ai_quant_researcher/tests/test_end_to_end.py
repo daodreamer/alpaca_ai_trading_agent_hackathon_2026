@@ -329,6 +329,7 @@ def test_5_the_target_book_is_written_and_traceable(
     assert provenance["distinct_hypotheses"] > 0
     assert provenance["sealed_look"] == 1
     assert provenance["sealed_looks_total"] == 1
+    equity_hypotheses = provenance["distinct_hypotheses"]
     # Reading the present is what a handoff is, and the seal records it.
     assert book["seal"]["tainted"] is True
 
@@ -336,6 +337,85 @@ def test_5_the_target_book_is_written_and_traceable(
         rows = reg.target_books(fingerprint)
         assert len(rows) == 1
         assert Path(rows[0]["path"]) == written[0]
+
+    _assert_option_looks_do_not_leak_into_an_equity_book(
+        cache, db, books, fingerprint, equity_hypotheses
+    )
+
+
+def _assert_option_looks_do_not_leak_into_an_equity_book(
+    cache: Path, db: Path, books: Path, fingerprint: str, equity_hypotheses: int
+) -> None:
+    """An option candidate must not change an equity book's denominators.
+
+    specs/10 D8: the two sealed windows are different data — S&P 500 bars past
+    the embargo, and SPY chains past the same boundary — so a candidate screened
+    against one has consumed no look at the other. Both denominators in a target
+    book were once family-blind, and the fixture that covered them had only
+    equity records in it, so the combined and per-family readings coincided and
+    nothing failed. This adds the record that tells them apart.
+
+    The direction of the old error is why it went unseen: counting an option
+    look against an equity book *raised* the bar it had to clear, which reads as
+    conservative right up until the point where it grows with every option
+    campaign for reasons having nothing to do with equities.
+    """
+    from aqr.options.spec import Cadence, OptionSpec, StructureSpec
+    from aqr.registry.db import OPTION, ExperimentRecord
+
+    spec = OptionSpec(
+        name="an_option_rule_this_book_never_touched",
+        underlying="SPY",
+        entry="close > 0",
+        structure=StructureSpec(type="put_credit_spread", width_delta=0.06),
+        cadence=Cadence(min_sessions_between_entries=100),
+        hypothesis="screened against SPY chains, not against S&P 500 bars",
+    )
+    option_fingerprint = spec.fingerprint()
+
+    with Registry(db) as reg:
+        reg.upsert_option_strategy(spec)
+        reg.record_experiment(
+            ExperimentRecord(
+                fingerprint=option_fingerprint,
+                strategy_name=spec.name,
+                symbols=("SPY",),
+                timeframe="option_chain",
+                data_start="",
+                data_end="",
+                dataset_version="options-cache",
+                family=OPTION,
+                verdict="ACCEPT",
+            )
+        )
+        reg.preregister(option_fingerprint, selection_rule="the only one", seal_digest="d")
+        reg.record_sealed_run(option_fingerprint, result={"measurement": {}})
+        # The combined readings have moved; the equity ones have not.
+        assert reg.sealed_looks() == 2
+        assert reg.sealed_looks(family="equity") == 1
+        assert reg.distinct_hypotheses() > equity_hypotheses
+
+    for path in books.glob("*.json"):
+        path.unlink()
+    with scope(Seal()):
+        result = runner.invoke(
+            app,
+            [
+                "target-book", fingerprint,
+                "--db", str(db),
+                "--source", "csv",
+                "--csv-root", str(cache),
+                "--universe", "",
+                "--out", str(books),
+                "--start", "2022-01-01",
+                "--end", "2026-08-27",
+            ],
+        )
+    assert result.exit_code == 0, _text(result)
+
+    rebuilt = load_book(next(iter(books.glob("*.json"))))["provenance"]
+    assert rebuilt["sealed_looks_total"] == 1, "an option look was charged to an equity book"
+    assert rebuilt["distinct_hypotheses"] == equity_hypotheses
 
 
 def test_6_the_suite_seal_survived_the_chain() -> None:
